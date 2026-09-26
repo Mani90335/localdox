@@ -6,6 +6,7 @@ import tsConfigPaths from "vite-tsconfig-paths";
 import { nitro } from "nitro/vite";
 import path from "path";
 import { mathjaxAsset } from "./build/vite-mathjax-asset";
+import { pdfjsAssets } from "./build/vite-pdfjs-assets";
 
 export default defineConfig({
   plugins: [
@@ -26,6 +27,7 @@ export default defineConfig({
     // the plugin's own header for why, and `src/services/math/adapters/mathjax.ts`
     // for the consumer.
     mathjaxAsset(),
+    pdfjsAssets(),
     nitro({ preset: "node-server" }),
   ],
   resolve: {
@@ -47,6 +49,7 @@ export default defineConfig({
       "cytoscape",
       "cytoscape-cose-bilkent",
       "cytoscape-fcose",
+      "pdfjs-dist",
     ],
   },
   build: {

@@ -21,6 +21,7 @@ import { createReadStream, existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import type { Plugin } from "vite";
+import { walk, contentType } from "./vite-asset-utils";
 
 const require = createRequire(import.meta.url);
 
@@ -45,17 +46,6 @@ function packageRoot(name: string): string | null {
   } catch {
     return null;
   }
-}
-
-/** Every file under a directory, as paths relative to it. */
-async function walk(dir: string, base = dir): Promise<string[]> {
-  const out: string[] = [];
-  for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...(await walk(full, base)));
-    else out.push(path.relative(base, full));
-  }
-  return out;
 }
 
 /**
@@ -152,13 +142,4 @@ export function mathjaxAsset(): Plugin {
       }
     },
   };
-}
-
-function contentType(file: string): string {
-  if (file.endsWith(".js") || file.endsWith(".mjs")) return "text/javascript; charset=utf-8";
-  if (file.endsWith(".json")) return "application/json; charset=utf-8";
-  if (file.endsWith(".woff2")) return "font/woff2";
-  if (file.endsWith(".woff")) return "font/woff";
-  if (file.endsWith(".css")) return "text/css; charset=utf-8";
-  return "application/octet-stream";
 }
