@@ -12,23 +12,23 @@ import {
   instantiateEngine,
   instantiateLayout,
   type LayoutEngine,
-} from "../src/lib/diagram-engine/layout.ts";
-import { emitMarker, trimPolyline } from "../src/lib/diagram-engine/markers.ts";
-import { checkModel, DiagramTooLargeError } from "../src/lib/diagram-engine/limits.ts";
+} from "../src/services/diagrams/engine/layout.ts";
+import { emitMarker, trimPolyline } from "../src/services/diagrams/engine/markers.ts";
+import { checkModel, DiagramTooLargeError } from "../src/services/diagrams/engine/limits.ts";
 import {
   labelLines,
   modelFromDb,
   shapeOf,
   type FlowDbLike,
-} from "../src/lib/diagram-engine/flowchart.ts";
+} from "../src/services/diagrams/engine/flowchart.ts";
 import {
   mermaidMemberText,
   modelFromClassParsed,
   modelFromErParsed,
   modelFromLayoutData,
   type LayoutData,
-} from "../src/lib/diagram-engine/flowchart.ts";
-import { basisCurve, buildScene } from "../src/lib/diagram-engine/scene.ts";
+} from "../src/services/diagrams/engine/flowchart.ts";
+import { basisCurve, buildScene } from "../src/services/diagrams/engine/scene.ts";
 import {
   buildSchedule,
   cameraAt,
@@ -36,18 +36,18 @@ import {
   STEP_DRAW,
   STEP_REVEAL,
   STEP_REVISIT,
-} from "../src/lib/diagram-engine/schedule.ts";
+} from "../src/services/diagrams/engine/schedule.ts";
 import {
   diagramKind,
   flowchartDirection,
   shouldUseGpuEngine,
-} from "../src/lib/diagram-engine/gate.ts";
-import { planExplainer, stepNumber } from "../src/lib/explainer/plan.ts";
-import type { GraphShape } from "../src/lib/explainer/graph.ts";
+} from "../src/services/diagrams/engine/gate.ts";
+import { planExplainer, stepNumber } from "../src/services/diagrams/explainer/plan.ts";
+import type { GraphShape } from "../src/services/diagrams/explainer/graph.ts";
 import { syntheticFlowchart, syntheticGraph } from "../bench/generate.ts";
 
 const wasm = readFileSync(
-  new URL("../src/lib/diagram-engine/diagram_layout.wasm", import.meta.url),
+  new URL("../src/services/diagrams/engine/diagram_layout.wasm", import.meta.url),
 );
 let engine: LayoutEngine | null = null;
 async function layout(): Promise<LayoutEngine> {
@@ -537,7 +537,7 @@ test("model: state layout data maps start, end and bars", () => {
 
 test("ER fast path: matches the layout-data model Mermaid would give", async () => {
   const wasm = await instantiateEngine(
-    readFileSync(new URL("../src/lib/diagram-engine/diagram_layout.wasm", import.meta.url)),
+    readFileSync(new URL("../src/services/diagrams/engine/diagram_layout.wasm", import.meta.url)),
   );
   const source = `erDiagram
   direction LR
@@ -686,7 +686,7 @@ test("class members: Mermaid's own text rules", () => {
 
 test("class fast path: tables, annotations and relation markers", async () => {
   const wasm = await instantiateEngine(
-    readFileSync(new URL("../src/lib/diagram-engine/diagram_layout.wasm", import.meta.url)),
+    readFileSync(new URL("../src/services/diagrams/engine/diagram_layout.wasm", import.meta.url)),
   );
   const source = `classDiagram
   class Animal {

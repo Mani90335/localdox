@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { indexedDB, IDBKeyRange, IDBObjectStore } from "fake-indexeddb";
-import { persistence, newWorkspaceRecord } from "../src/lib/persistence.ts";
+import { persistence, newWorkspaceRecord } from "../src/lib/workspace/persistence.ts";
 
 Object.assign(globalThis, { indexedDB, IDBKeyRange });
 

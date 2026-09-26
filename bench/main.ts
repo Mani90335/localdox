@@ -18,12 +18,12 @@
 import mermaid from "mermaid";
 import { graphlib } from "dagre-d3-es";
 import { layout as dagreLayout } from "dagre-d3-es/src/dagre/index.js";
-import { largeDiagramMermaidConfig } from "@/components/docs/mermaid-config";
-import { readGraph } from "@/lib/explainer/graph";
-import { planExplainer } from "@/lib/explainer/plan";
-import { ExplainerPlayer } from "@/lib/explainer/player";
-import { homeFrame } from "@/lib/explainer/camera";
-import "@/components/docs/explainer.css";
+import { largeDiagramMermaidConfig } from "@/services/diagrams/mermaid-config";
+import { readGraph } from "@/services/diagrams/explainer/graph";
+import { planExplainer } from "@/services/diagrams/explainer/plan";
+import { ExplainerPlayer } from "@/services/diagrams/explainer/player";
+import { homeFrame } from "@/services/diagrams/explainer/camera";
+import "@/services/diagrams/explainer.css";
 import { syntheticEr, syntheticFlowchart } from "./generate";
 
 type Timings = Record<string, number | string>;
@@ -194,9 +194,9 @@ async function runGpuBench(
   const out: Timings = { nodes, engine: "gpu", kind: options.kind ?? "flowchart" };
   const code = options.kind === "er" ? syntheticEr(nodes) : syntheticFlowchart(nodes);
   stage.innerHTML = "";
-  const { loadLayoutEngine, loadScene, diagramTheme } = await import("@/lib/diagram-engine/engine");
-  const { DiagramRenderer } = await import("@/lib/diagram-engine/renderer");
-  const { GpuPlayer } = await import("@/lib/diagram-engine/gpu-player");
+  const { loadLayoutEngine, loadScene, diagramTheme } = await import("@/services/diagrams/engine/engine");
+  const { DiagramRenderer } = await import("@/services/diagrams/engine/renderer");
+  const { GpuPlayer } = await import("@/services/diagrams/engine/gpu-player");
   const { SvgViewport } = await import("@/lib/viewport");
 
   await time("wasmLoad", out, () => loadLayoutEngine());
@@ -285,11 +285,11 @@ async function runGpuBench(
  */
 async function checkParser() {
   const { accepted, declined } = await import("./parser-corpus");
-  const { loadEngine } = await import("@/lib/diagram-engine/engine");
-  const { parseFlowchart } = await import("@/lib/diagram-engine/mermaid-parse");
-  const { largeDiagramMermaidConfig: config } = await import("@/components/docs/mermaid-config");
+  const { loadEngine } = await import("@/services/diagrams/engine/engine");
+  const { parseFlowchart } = await import("@/services/diagrams/engine/mermaid-parse");
+  const { largeDiagramMermaidConfig: config } = await import("@/services/diagrams/mermaid-config");
   const wasm = await loadEngine();
-  const { fastModel } = await import("@/lib/diagram-engine/fast-parse");
+  const { fastModel } = await import("@/services/diagrams/engine/fast-parse");
   const fast = (code: string) => fastModel(code, wasm);
   const report: Record<string, unknown> = {};
   for (const [name, code] of Object.entries(accepted)) {

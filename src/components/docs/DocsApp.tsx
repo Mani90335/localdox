@@ -20,9 +20,9 @@ import {
   useNavHistoryState,
   type NavEntry,
 } from "@/hooks/use-nav-history";
-import { Sidebar, AddMenu, DEFAULT_VIEW, type SidebarView } from "./Sidebar";
-import { MarkdownViewer } from "./MarkdownViewer";
-import { PaneDocument } from "./PaneDocument";
+import { Sidebar, AddMenu, DEFAULT_VIEW, type SidebarView } from "./workspace/Sidebar";
+import { MarkdownViewer } from "./viewer/MarkdownViewer";
+import { PaneDocument } from "./viewer/PaneDocument";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import {
@@ -36,16 +36,16 @@ import {
   splitPane,
   toPersisted,
   type PaneLayout,
-} from "@/lib/panes";
+} from "@/lib/workspace/panes";
 import {
   applyToDestination,
   planTransfer,
   transferCounts,
-} from "@/lib/workspace-transfer";
-import { WorkspaceMenu } from "./WorkspaceMenu";
-import { WorkspaceSheet } from "./WorkspaceSheet";
-import { MoveToWorkspaceDialog } from "./MoveToWorkspaceDialog";
-import type { AskAiPrefill } from "./ai/AskAiPanel";
+} from "@/lib/workspace/workspace-transfer";
+import { WorkspaceMenu } from "./workspace/WorkspaceMenu";
+import { WorkspaceSheet } from "./workspace/WorkspaceSheet";
+import { MoveToWorkspaceDialog } from "./workspace/MoveToWorkspaceDialog";
+import type { AskAiPrefill } from "@/services/ai";
 
 // Code-split surfaces. None of these is on the path to reading a document — the
 // settings page, the search palette, the AI panel and the binary-document
@@ -54,10 +54,10 @@ import type { AskAiPrefill } from "./ai/AskAiPanel";
 // mounted only once it is actually asked for, so the fetch overlaps the
 // interaction that triggered it.
 const DocumentViewer = lazy(() =>
-  import("./DocumentViewer").then((m) => ({ default: m.DocumentViewer })),
+  import("./viewer/DocumentViewer").then((m) => ({ default: m.DocumentViewer })),
 );
 const CommandPalette = lazy(() =>
-  import("./CommandPalette").then((m) => ({ default: m.CommandPalette })),
+  import("./navigation/CommandPalette").then((m) => ({ default: m.CommandPalette })),
 );
 /**
  * How many columns the split view will go to.
@@ -68,37 +68,37 @@ const CommandPalette = lazy(() =>
  */
 const MAX_PANES = 4;
 
-const SavedPage = lazy(() => import("./SavedPage").then((m) => ({ default: m.SavedPage })));
+const SavedPage = lazy(() => import("./pages/SavedPage").then((m) => ({ default: m.SavedPage })));
 
 const SettingsPage = lazy(() =>
-  import("./SettingsPage").then((m) => ({ default: m.SettingsPage })),
+  import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
 
 /** The settings section a caller asked for, handed over the route change that
  *  opens the dialog. DocsApp is the route component, so it remounts on the way
  *  to /settings and nothing held inside it survives to be read at mount. */
 let pendingSettingsTab: "workspace" | undefined;
-const AskAiPanel = lazy(() => import("./ai/AskAiPanel").then((m) => ({ default: m.AskAiPanel })));
+const AskAiPanel = lazy(() => import("@/services/ai/AskAiPanel").then((m) => ({ default: m.AskAiPanel })));
 const SharedFilesDialog = lazy(() =>
-  import("./SharedFilesDialog").then((m) => ({ default: m.SharedFilesDialog })),
+  import("./workspace/SharedFilesDialog").then((m) => ({ default: m.SharedFilesDialog })),
 );
-import type { MdFile, MdChunk } from "@/lib/markdown-utils";
+import type { MdFile, MdChunk } from "@/lib/markdown/markdown-utils";
 // Type only: the writers behind it are a dynamic import at the call site, so
 // the OOXML builder is never on the path to the first paint.
-import type { ExportFormat } from "@/lib/export";
-import type { Highlight } from "@/lib/dom-highlighter";
-import { isBinExpired } from "@/lib/persistence";
-import { fileSubtopics, readingMinutes } from "@/lib/markdown-utils";
+import type { ExportFormat } from "@/services/markdown-export";
+import type { Highlight } from "@/lib/markdown/dom-highlighter";
+import { isBinExpired } from "@/lib/workspace/persistence";
+import { fileSubtopics, readingMinutes } from "@/lib/markdown/markdown-utils";
 import {
   DISCARD_PROMPT,
   getDocumentKind,
   importDocumentFile,
   SUPPORTED_ACCEPT,
-} from "@/lib/document-utils";
-import { clearArtifactResolutionCache } from "@/lib/workspace-artifacts";
-import { loadReadingFont, warmAppFonts } from "@/lib/fonts";
-import { restoreCustomFont } from "@/lib/custom-font";
-import { loadGoogleFont } from "@/lib/google-font";
+} from "@/lib/markdown/document-utils";
+import { clearArtifactResolutionCache } from "@/lib/workspace/workspace-artifacts";
+import { loadReadingFont, warmAppFonts } from "@/lib/fonts/fonts";
+import { restoreCustomFont } from "@/lib/fonts/custom-font";
+import { loadGoogleFont } from "@/lib/fonts/google-font";
 import { toast } from "sonner";
 import { useHistory } from "@/hooks/use-history";
 import {
@@ -106,7 +106,7 @@ import {
   hasModKey,
   requestIdleCallbackSafe,
   cancelIdleCallbackSafe,
-} from "@/lib/keyboard";
+} from "@/lib/platform/keyboard";
 import {
   persistence,
   loadPrefs,
@@ -125,9 +125,9 @@ import {
   type ThemePref,
   type ReadingMode,
   type ReadingFont,
-} from "@/lib/persistence";
-import { clearMathCache } from "@/lib/math/renderer";
-import type { MathPreferences, MathRendererType } from "@/lib/math/types";
+} from "@/lib/workspace/persistence";
+import { clearMathCache } from "@/services/math";
+import type { MathPreferences, MathRendererType } from "@/services/math";
 import {
   findSaved,
   migrateBookmarks,
@@ -137,7 +137,7 @@ import {
   type SavedDraft,
   type SavedEntry,
   type SavedItem,
-} from "@/lib/saved-items";
+} from "@/lib/workspace/saved-items";
 import {
   copyLink,
   fetchShare,
@@ -147,8 +147,8 @@ import {
   SHARE_HASH,
   SHARE_FILES_HASH,
   type SharedFilesPayload,
-} from "@/lib/share";
-import { MAX_UPLOAD_BYTES, getMaxStorageBytes, formatBytes } from "@/lib/storage-limits";
+} from "@/lib/workspace/share";
+import { MAX_UPLOAD_BYTES, getMaxStorageBytes, formatBytes } from "@/lib/workspace/storage-limits";
 
 type Theme = ThemePref;
 
@@ -759,7 +759,7 @@ export function DocsApp() {
     // Imported here rather than at module scope: a static import would pull
     // MathJax's adapter — and with it the loader for a 1 MB engine — into the
     // initial bundle of every reader, math or no math.
-    void import("@/lib/math/adapters/mathjax")
+    void import("@/services/math/adapters/mathjax")
       .then((module) => module.enableExplorer())
       .catch(() => {
         // Nothing to recover: expressions stay readable, they just aren't
@@ -1419,7 +1419,7 @@ export function DocsApp() {
     const file = filesRef.current.find((f) => f.id === id);
     if (!file) return;
 
-    const { exportDocument, FORMAT_LABEL } = await import("@/lib/export");
+    const { exportDocument, FORMAT_LABEL } = await import("@/services/markdown-export");
     // Only the converting formats are slow enough to be worth a spinner;
     // handing back bytes the app already holds is instant and a toast for it
     // would be noise.
@@ -1466,7 +1466,7 @@ export function DocsApp() {
       .filter((file): file is MdFile => Boolean(file));
     if (!selected.length) return;
 
-    const { exportDocuments, FORMAT_LABEL, isBatchable } = await import("@/lib/export");
+    const { exportDocuments, FORMAT_LABEL, isBatchable } = await import("@/services/markdown-export");
 
     // PDF goes through the browser's modal print dialog, so a batch would queue
     // one per file and make the reader name each by hand. Saying so is better
@@ -2726,7 +2726,7 @@ flowchart LR
   // other warm-ups do, and is cancelled on unmount rather than firing into a
   // torn-down tree.
   useEffect(() => {
-    const handle = requestIdleCallbackSafe(() => void import("./CommandPalette"), 4000);
+    const handle = requestIdleCallbackSafe(() => void import("./navigation/CommandPalette"), 4000);
     return () => cancelIdleCallbackSafe(handle);
   }, []);
 

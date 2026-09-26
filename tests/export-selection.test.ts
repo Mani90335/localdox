@@ -18,7 +18,7 @@ import {
   isBatchable,
   sharedFormats,
   type ExportFormat,
-} from "../src/lib/export/index.ts";
+} from "../src/services/markdown-export/index.ts";
 
 const markdown = { kind: "markdown" as const, content: "# Hi" };
 const text = { kind: "text" as const, content: "plain" };

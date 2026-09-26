@@ -2,7 +2,7 @@
 @source "../src";
 @import "tw-animate-css";
 @import "highlight.js/styles/github.css";
-@import "./components/docs/diagram-colors.css";
+@import "./services/diagrams/diagram-colors.css";
 
 /* Fonts and KaTeX's stylesheet are deliberately NOT imported here.
  *

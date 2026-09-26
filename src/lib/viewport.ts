@@ -107,7 +107,7 @@ function sameFrame(a: ViewFrame | null, b: ViewFrame | null): boolean {
 
 /**
  * What the viewport frames: an `<svg>`, or anything that frames itself by a
- * viewBox the same way. The GPU diagram stage (lib/diagram-engine) implements
+ * viewBox the same way. The GPU diagram stage (services/diagrams/engine) implements
  * these three members over its canvas, so pan, zoom and the camera hand-off
  * behave identically whichever renderer is drawing.
  */

@@ -9,7 +9,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "build:dev": "vite build --mode development",
-    "build:wasm": "cargo build --release --target wasm32-unknown-unknown --manifest-path engine/layout/Cargo.toml && cp engine/layout/target/wasm32-unknown-unknown/release/diagram_layout.wasm src/lib/diagram-engine/diagram_layout.wasm",
+    "build:wasm": "cargo build --release --target wasm32-unknown-unknown --manifest-path engine/layout/Cargo.toml && cp engine/layout/target/wasm32-unknown-unknown/release/diagram_layout.wasm src/services/diagrams/engine/diagram_layout.wasm",
     "bench:diagrams": "vite --config bench/vite.config.ts",
     "preview": "vite preview",
     "lint": "eslint .",

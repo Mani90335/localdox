@@ -5,7 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 import tsConfigPaths from "vite-tsconfig-paths";
 import { nitro } from "nitro/vite";
 import path from "path";
-import { mathjaxAsset } from "./vite-mathjax-asset";
+import { mathjaxAsset } from "./build/vite-mathjax-asset";
 
 export default defineConfig({
   plugins: [
@@ -23,7 +23,7 @@ export default defineConfig({
     tailwindcss(),
     tsConfigPaths({ projects: ["./tsconfig.json"] }),
     // MathJax 4 is the math fallback, loaded by URL rather than imported — see
-    // the plugin's own header for why, and `src/lib/math/adapters/mathjax.ts`
+    // the plugin's own header for why, and `src/services/math/adapters/mathjax.ts`
     // for the consumer.
     mathjaxAsset(),
     nitro({ preset: "node-server" }),
