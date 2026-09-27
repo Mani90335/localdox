@@ -598,6 +598,49 @@ export class DiagramRenderer {
     this.markState();
   }
 
+  /**
+   * Which node (by index, not a string id — the caller maps that through
+   * `Scene.nodeIndex`) sits under a client-space point, or `null`.
+   *
+   * Mirrors the client → diagram-space conversion `render()` already does
+   * for letterboxing (`renderer.ts:648-661`), then an axis-aligned box test
+   * against the node's own width/height. Not exact for a diamond or
+   * ellipse's corners — close enough for a click target, the same way the
+   * SVG path's own click handling is "whichever element the browser hit,"
+   * not an analytically precise shape test.
+   */
+  hitTest(clientX: number, clientY: number): number | null {
+    const rect = this.element.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.max(1, Math.round(rect.width * dpr));
+    const height = Math.max(1, Math.round(rect.height * dpr));
+    const { frame } = this;
+    const scale = Math.min(width / frame.width, height / frame.height);
+    const offsetX = (width - frame.width * scale) / 2;
+    const offsetY = (height - frame.height * scale) / 2;
+    const x = frame.x + ((clientX - rect.left) * dpr - offsetX) / scale;
+    const y = frame.y + ((clientY - rect.top) * dpr - offsetY) / scale;
+
+    let best: number | null = null;
+    let bestArea = Infinity;
+    const pad = this.maxNodeHalf;
+    this.nodeGrid.query(x - pad, y - pad, x + pad, y + pad, (i) => {
+      if (this.nodeState[i * 4] <= 0) return; // a hidden node isn't a click target
+      const hw = this.scene.nodeW[i] / 2;
+      const hh = this.scene.nodeH[i] / 2;
+      if (Math.abs(x - this.scene.nodeX[i]) > hw || Math.abs(y - this.scene.nodeY[i]) > hh) return;
+      // Smallest containing box wins, so a small node nested near a large
+      // one's corner is still reachable.
+      const area = this.scene.nodeW[i] * this.scene.nodeH[i];
+      if (area < bestArea) {
+        bestArea = area;
+        best = i;
+      }
+    });
+    return best;
+  }
+
   /** Show these step numbers on the arrows (index = edge), or none. */
   setBadges(numbers: (string | undefined)[] | null): void {
     this.badges = numbers;

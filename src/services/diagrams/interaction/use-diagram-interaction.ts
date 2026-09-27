@@ -12,16 +12,64 @@
 import { useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { SvgViewport } from "@/lib/viewport";
-import { readGraph, type ExplainerGraph } from "../explainer/graph";
+import { readGraph, type ExplainerEdge, type ExplainerGraph } from "../explainer/graph";
 import { frameFor, homeFrame } from "../explainer/camera";
+import { clampInside, type Frame } from "../explainer/camera-path";
 import { findMatches, type DiagramMatch } from "./diagram-search";
 import { neighborsOf, applyVisibility } from "./diagram-isolation";
 import { markNode, markEdge, clearMarks } from "./diagram-emphasis";
+import type { IsolationInfo } from "./types";
 
-export interface IsolationInfo {
-  visibleIds: Set<string>;
-  count: number;
-  total: number;
+export type { IsolationInfo } from "./types";
+
+/**
+ * A sequence diagram's participants all sit in one row near the top;
+ * `frameFor` (which frames by node bounding boxes) would zoom into a thin
+ * horizontal sliver and cut off every message below. Isolating instead keeps
+ * the full vertical extent and crops only the horizontal range to the
+ * visible participants' x-span.
+ */
+function frameForSequenceIsolation(graph: ExplainerGraph, nodeIds: Iterable<string>): Frame {
+  const home = homeFrame(graph);
+  let minX = Infinity;
+  let maxX = -Infinity;
+  for (const id of nodeIds) {
+    const node = graph.nodes.get(id);
+    if (!node) continue;
+    minX = Math.min(minX, node.x - node.width / 2);
+    maxX = Math.max(maxX, node.x + node.width / 2);
+  }
+  if (!Number.isFinite(minX)) return home;
+  const pad = Math.max(1, maxX - minX) * 0.2;
+  const width = Math.max(1, maxX - minX) + pad * 2;
+  return clampInside({ x: minX - pad, y: home.y, width, height: home.height }, home);
+}
+
+/**
+ * Where a sequence-diagram message match actually is: its own drawn
+ * geometry, not the two participants' boxes near the top (which is all
+ * `frameFor` would use, landing far from where the message is drawn).
+ */
+function frameForEdge(graph: ExplainerGraph, edge: ExplainerEdge): Frame {
+  const home = homeFrame(graph);
+  let box: { x: number; y: number; width: number; height: number };
+  try {
+    box = edge.path.getBBox();
+  } catch {
+    return home;
+  }
+  const aspect = home.width / home.height;
+  const pad = Math.max(box.width, box.height, 20) * 0.6;
+  let width = box.width + pad * 2;
+  let height = width / aspect;
+  const minHeight = box.height + pad * 2;
+  if (height < minHeight) {
+    height = minHeight;
+    width = height * aspect;
+  }
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  return clampInside({ x: cx - width / 2, y: cy - height / 2, width, height }, home);
 }
 
 export function useDiagramInteraction(viewportRef: RefObject<SvgViewport | null>) {
@@ -67,7 +115,10 @@ export function useDiagramInteraction(viewportRef: RefObject<SvgViewport | null>
     const graph = graphRef.current;
     if (!graph || ids.size === 0) return;
     applyVisibility(graph, ids);
-    viewportRef.current?.setBase(frameFor(graph, [...ids]));
+    const frame = graph.sequence
+      ? frameForSequenceIsolation(graph, ids)
+      : frameFor(graph, [...ids]);
+    viewportRef.current?.setBase(frame);
     setIsolation({ visibleIds: ids, count: ids.size, total: graph.nodes.size });
   }
 
@@ -88,6 +139,27 @@ export function useDiagramInteraction(viewportRef: RefObject<SvgViewport | null>
     const remaining = new Set(graph.nodes.keys());
     for (const id of selectedIds) remaining.delete(id);
     applyIsolationTo(remaining);
+  }
+
+  /**
+   * Which known node (if any) a click landed on or inside.
+   *
+   * By id, walking up from the click target, rather than a class selector
+   * (`g.node`): flowchart/state/class/ER nodes carry that class, but a
+   * sequence diagram's participant group does not — `readSequence` gives it
+   * a plain `<g>` with just an id. Id lookup covers every diagram shape
+   * `readGraph` supports without the click handler needing to know which one
+   * it's looking at.
+   */
+  function nodeIdFromElement(el: Element): string | null {
+    const graph = graphRef.current;
+    if (!graph) return null;
+    let current: Element | null = el;
+    while (current && current !== graph.svg) {
+      if (graph.nodes.has(current.id)) return current.id;
+      current = current.parentElement;
+    }
+    return null;
   }
 
   function toggleNode(nodeId: string): void {
@@ -123,6 +195,12 @@ export function useDiagramInteraction(viewportRef: RefObject<SvgViewport | null>
     // camera can show it.
     if (isolation) resetIsolation();
     markMatch(match);
+    if (graph.sequence && match.kind === "edge") {
+      // A message's own geometry, not its participants' boxes near the top.
+      const edge = graph.edges.find((candidate) => candidate.id === match.id);
+      if (edge) viewportRef.current?.frameTo(frameForEdge(graph, edge));
+      return;
+    }
     const ids = idsForMatch(graph, match);
     if (ids.length) viewportRef.current?.frameTo(frameFor(graph, ids));
   }
@@ -164,7 +242,7 @@ export function useDiagramInteraction(viewportRef: RefObject<SvgViewport | null>
   function onRendered(svg: SVGSVGElement): void {
     const graph = readGraph(svg);
     graphRef.current = graph;
-    setGraphReady(Boolean(graph && !graph.sequence));
+    setGraphReady(Boolean(graph));
     clearState();
   }
 
@@ -184,6 +262,7 @@ export function useDiagramInteraction(viewportRef: RefObject<SvgViewport | null>
     graphReady,
     onRendered,
     discardGraph,
+    nodeIdFromElement,
     search: {
       query,
       setQuery,

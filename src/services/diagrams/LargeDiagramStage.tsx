@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import { loadScene, diagramTheme } from "./engine/engine";
 import { DiagramRenderer } from "./engine/renderer";
@@ -6,6 +6,8 @@ import { attachMinimap, type Minimap } from "./engine/minimap";
 import { homeFrame } from "./explainer/camera";
 import { zoomCeiling } from "./engine/zoom";
 import { ZoomControls } from "./Mermaid";
+import { DiagramTopBar, SelectionActionTray } from "./DiagramInteractionBar";
+import { useGpuDiagramInteraction } from "./engine/interaction/use-gpu-diagram-interaction";
 import { describeRenderError } from "./render-error";
 import { useSvgViewport } from "./use-svg-viewport";
 import { TALL_STAGE_RATIO, clampStageRatio, stageBoxStyle, stageWidthCap } from "./stage-ratio";
@@ -39,7 +41,8 @@ export function LargeDiagramStage({
   const hostRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [ratio, setRatio] = useState<number | null>(null);
-  const { state: view, attach, detach, zoomIn, zoomOut, reset } = useSvgViewport();
+  const { viewportRef, state: view, attach, detach, zoomIn, zoomOut, reset } = useSvgViewport();
+  const interaction = useGpuDiagramInteraction(viewportRef);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -49,6 +52,7 @@ export function LargeDiagramStage({
     let minimap: Minimap | null = null;
     setLoading(true);
     onError(null);
+    interaction.discardGraph();
 
     void (async () => {
       try {
@@ -63,6 +67,7 @@ export function LargeDiagramStage({
           maxZoom: zoomCeiling(scene.width, scene.height),
         });
         viewport.setBase(homeFrame(scene.graph));
+        interaction.onReady(renderer, scene);
         minimap = attachMinimap(
           renderer,
           scene,
@@ -81,10 +86,19 @@ export function LargeDiagramStage({
     return () => {
       disposed = true;
       detach();
+      interaction.discardGraph();
       minimap?.destroy();
       renderer?.destroy();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code, dark, attach, detach, onError, onRatio]);
+
+  const onHostClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      interaction.handleNodeClick(event.clientX, event.clientY);
+    },
+    [interaction],
+  );
 
   useEffect(() => reset(), [fill, reset]);
 
@@ -94,6 +108,14 @@ export function LargeDiagramStage({
       className="group/stage relative h-full w-full"
       style={fill || !cap ? undefined : { maxWidth: `calc(${cap})`, marginInline: "auto" }}
     >
+      <DiagramTopBar interaction={interaction} />
+      {interaction.selectMode && interaction.selectedIds.size > 0 && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-start gap-2 p-3">
+          <div className="pointer-events-auto">
+            <SelectionActionTray interaction={interaction} />
+          </div>
+        </div>
+      )}
       <div
         className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 p-3 ${
           fill ? "" : "opacity-90"
@@ -114,6 +136,7 @@ export function LargeDiagramStage({
       )}
       <div
         ref={hostRef}
+        onClick={onHostClick}
         tabIndex={0}
         aria-label="Large Mermaid diagram. Drag to pan; pinch or Ctrl/⌘ + scroll to zoom; + − 0 on the keyboard."
         className={`overflow-hidden rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${

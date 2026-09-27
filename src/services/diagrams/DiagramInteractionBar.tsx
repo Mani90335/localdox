@@ -22,9 +22,9 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { Tray, TrayButton } from "./Mermaid";
-import type { useDiagramInteraction } from "./interaction/use-diagram-interaction";
+import type { DiagramInteractionApi } from "./interaction/types";
 
-type Interaction = ReturnType<typeof useDiagramInteraction>;
+type Interaction = DiagramInteractionApi;
 
 export function DiagramTopBar({ interaction }: { interaction: Interaction }) {
   const [searchOpen, setSearchOpen] = useState(false);

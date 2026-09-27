@@ -7,11 +7,9 @@
  */
 
 import type { ExplainerGraph } from "../explainer/graph";
+import type { DiagramMatch } from "./types";
 
-export interface DiagramMatch {
-  kind: "node" | "edge";
-  id: string;
-}
+export type { DiagramMatch } from "./types";
 
 /** A point to sort a match by, so results read top-to-bottom, left-to-right. */
 function matchPosition(graph: ExplainerGraph, match: DiagramMatch): { x: number; y: number } {

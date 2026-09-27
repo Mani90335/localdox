@@ -1034,11 +1034,11 @@ function StaticStage({
     (event: React.MouseEvent<HTMLDivElement>) => {
       const target = event.target as Element | null;
       if (interaction.selectMode) {
-        const nodeEl = target?.closest?.("g.node");
-        if (!nodeEl) return;
+        const nodeId = target ? interaction.nodeIdFromElement(target) : null;
+        if (!nodeId) return;
         event.preventDefault();
         event.stopPropagation();
-        interaction.toggleNode(nodeEl.id);
+        interaction.toggleNode(nodeId);
         return;
       }
       const node = target?.closest?.(COLORABLE_NODES);
