@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { applyDeviceTier } from "@/lib/platform/device-tier";
+import { THEME_COLOR_DARK, THEME_COLOR_LIGHT } from "@/lib/theme-color";
 
 // Mermaid loads each diagram type (flowchart, ERD, etc.) in a separate Vite
 // chunk. After a deployment, an already-open tab can still reference a chunk
@@ -106,8 +107,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "author", content: "Localdox" },
       { property: "og:title", content: "Localdox" },
       { property: "og:description", content: "Localdox" },
-      { name: "theme-color", content: "#ffffff", media: "(prefers-color-scheme: light)" },
-      { name: "theme-color", content: "#09090b", media: "(prefers-color-scheme: dark)" },
+      { name: "theme-color", content: THEME_COLOR_LIGHT, media: "(prefers-color-scheme: light)" },
+      { name: "theme-color", content: THEME_COLOR_DARK, media: "(prefers-color-scheme: dark)" },
       { property: "og:image", content: "https://localdox.web.app/og-image.jpg" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

@@ -11,10 +11,12 @@
 // inline and `!important`, and an override that has to beat them has nowhere
 // else to go.
 
+import { HL_COLORS, HL_FOREGROUND } from "@/lib/markdown/dom-highlighter";
+
 /** The palette offered for a node. Deliberately the same six hues as the text
  *  highlighter: a reader who has learned what yellow means while reading should
  *  not meet a different yellow when they recolour a box. */
-export const NODE_COLORS = ["#fde047", "#86efac", "#93c5fd", "#f9a8d4", "#fdba74", "#d8b4fe"];
+export const NODE_COLORS = HL_COLORS;
 
 /** One diagram's overrides: node key to colour. */
 export type NodeOverrides = Record<string, string>;
@@ -125,7 +127,7 @@ function paint(node: Element, color: string | null): void {
   for (const label of node.querySelectorAll<HTMLElement>(".nodeLabel")) {
     // Dark ink on every one of these fills, in both themes — the fill is the
     // reader's choice and does not change with the theme, so neither can this.
-    if (color) label.style.setProperty("color", "#0a0a0a", "important");
+    if (color) label.style.setProperty("color", HL_FOREGROUND, "important");
     else label.style.removeProperty("color");
   }
 }

@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { DocsApp } from "@/components/docs/DocsApp";
+import { THEME_COLOR_DARK, THEME_COLOR_LIGHT } from "@/lib/theme-color";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -15,8 +16,8 @@ export const Route = createFileRoute("/")({
         property: "og:description",
         content: "Turn your files into a polished viewing experience.",
       },
-      { name: "theme-color", content: "#ffffff", media: "(prefers-color-scheme: light)" },
-      { name: "theme-color", content: "#09090b", media: "(prefers-color-scheme: dark)" },
+      { name: "theme-color", content: THEME_COLOR_LIGHT, media: "(prefers-color-scheme: light)" },
+      { name: "theme-color", content: THEME_COLOR_DARK, media: "(prefers-color-scheme: dark)" },
       { property: "og:image", content: "https://localdox.web.app/og-image.jpg" },
       { name: "twitter:image", content: "https://localdox.web.app/og-image.jpg" },
     ],
