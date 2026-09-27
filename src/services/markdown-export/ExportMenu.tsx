@@ -12,12 +12,15 @@
  * during the wait would start a second render of the same diagrams.
  */
 
-import { useState } from "react";
+import { useContext, useState } from "react";
+import { ConversionContext } from "@/services/doc-conversion/ConversionContext";
+import { canConvertToMarkdown, latestMarkdownCopies } from "@/services/doc-conversion/types";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Download, FileText, FileType, Globe, Loader2, Printer } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -47,6 +50,9 @@ export function ExportMenu({ file, mediaContext }: { file: MdFile; mediaContext?
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<ExportFormat | null>(null);
   const formats = availableFormats(file);
+  const conversion = useContext(ConversionContext);
+  const canCreateMarkdown = conversion && canConvertToMarkdown(file);
+  const copy = conversion ? latestMarkdownCopies(conversion.files).get(file.id) : undefined;
 
   const run = async (format: ExportFormat) => {
     setOpen(false);
@@ -76,16 +82,47 @@ export function ExportMenu({ file, mediaContext }: { file: MdFile; mediaContext?
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <button
+          type="button"
           disabled={busy !== null}
           title="Export this document"
+          aria-label="Export"
           aria-haspopup="menu"
           aria-expanded={open}
-          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60 coarse:h-11 coarse:w-11"
+          className="flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-60 coarse:h-11"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          <span>{busy ? "Exporting…" : "Export"}</span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="z-(--z-dropdown) w-64">
+        {canCreateMarkdown && (
+          <>
+            <DropdownMenuItem
+              disabled={!!conversion.runningId}
+              onSelect={() => conversion.onConvert(file.id)}
+              className="items-start gap-2.5 py-2"
+            >
+              <FileText className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                <span className="block font-medium">
+                  {copy ? "Convert again" : "Convert to Markdown"}
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Create a Markdown copy in this workspace
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Images stay in the original
+                </span>
+              </span>
+            </DropdownMenuItem>
+            {copy && (
+              <DropdownMenuItem onSelect={() => conversion.onOpen(copy.id)}>
+                <FileText className="mr-2 h-4 w-4" /> Open Markdown copy
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+          </>
+        )}
         {formats.map((format) => {
           const Icon = FORMAT_ICON[format];
           return (

@@ -1,3 +1,4 @@
+import { ExportMenu } from "@/services/markdown-export/ExportMenu";
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Maximize, Minimize } from "lucide-react";
 import { dataUrlToArrayBuffer } from "@/lib/markdown/document-utils";
@@ -205,6 +206,7 @@ export function PresentationViewer({
             >
               {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
             </button>
+            <ExportMenu file={file} />
           </>
         }
       />

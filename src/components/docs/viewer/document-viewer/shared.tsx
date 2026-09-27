@@ -1,3 +1,4 @@
+import { ExportMenu } from "@/services/markdown-export/ExportMenu";
 import type { DocumentUpdate } from "@/services/office-editing";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import { ViewerHeader, type ViewerNav } from "../../navigation/ViewerHeader";
@@ -106,21 +107,11 @@ export function ViewerMasthead({
 }
 
 export function ViewerFrame({
+  file,
   children,
   action,
   navAction,
-  isBookmarked,
-  onToggleBookmark,
-  prevFile,
-  nextFile,
-  onNavFile,
-  onOpenPalette,
 }: {
-  /**
-   * Accepted so call sites can keep passing the open document, and to leave the
-   * per-type `icon` prop in place, but the header no longer renders either: the
-   * sidebar marks the active file, so this space belongs to search.
-   */
   file?: MdFile;
   children: React.ReactNode;
   action?: React.ReactNode;
@@ -129,16 +120,20 @@ export function ViewerFrame({
   isBookmarked?: boolean;
   onToggleBookmark?: () => void;
 } & Pick<Props, "prevFile" | "nextFile" | "onNavFile" | "onOpenPalette">) {
-  const nav = useFileNav({ prevFile, nextFile, onNavFile });
   return (
     <section className="min-h-[calc(100dvh-4rem)] bg-background">
       <ViewerHeader
         navAction={navAction}
-        // Starring and editing live in the file's three-dots menu in the
-        // sidebar, next to the other things you do *to* a document. What stays
-        // here is per-view state — zoom, fullscreen, the mind map — which has
-        // no meaning anywhere else.
-        actions={action}
+        actions={
+          file ? (
+            <>
+              {action}
+              <ExportMenu file={file} />
+            </>
+          ) : (
+            action
+          )
+        }
       />
       {children}
     </section>

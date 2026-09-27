@@ -130,29 +130,6 @@ export function FileMenu({
       {open && (
         <MenuPanel>
           {/* Working on the document itself. */}
-          {onOpenMarkdown && (
-            <MenuItem
-              icon={FileText}
-              label="Open Markdown copy"
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onOpenMarkdown();
-              }}
-            />
-          )}
-          {onConvert && (
-            <MenuItem
-              icon={FileText}
-              label={hasMarkdownCopy ? "Convert again" : "Convert to Markdown"}
-              disabled={conversionDisabled}
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onConvert();
-              }}
-            />
-          )}
           {onEdit && (
             <MenuItem
               icon={SquarePen}
@@ -197,7 +174,7 @@ export function FileMenu({
           {/* Getting the document out of the app. Share and Download were two
               rows saying the same thing — "a copy, elsewhere" — so they share
               one flyout instead of two slots in the top-level list. */}
-          {(onShare || onDownload) && (
+          {(onShare || onDownload || onConvert || onOpenMarkdown) && (
             <>
               <MenuSeparator />
               <MenuItem
@@ -279,6 +256,29 @@ export function FileMenu({
 
       {open && submenu === "export" && (
         <MenuFlyout anchor={anchor}>
+          {onOpenMarkdown && (
+            <MenuItem
+              icon={FileText}
+              label="Open Markdown copy"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                onOpenMarkdown();
+              }}
+            />
+          )}
+          {onConvert && (
+            <MenuItem
+              icon={FileText}
+              label={hasMarkdownCopy ? "Convert again" : "Convert to Markdown"}
+              disabled={conversionDisabled}
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                onConvert();
+              }}
+            />
+          )}
           {onShare && (
             <MenuItem
               icon={Share2}
