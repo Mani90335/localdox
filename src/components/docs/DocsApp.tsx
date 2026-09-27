@@ -85,6 +85,9 @@ let pendingSettingsTab: "workspace" | undefined;
 const AskAiPanel = lazy(() =>
   import("@/services/ai/AskAiPanel").then((m) => ({ default: m.AskAiPanel })),
 );
+const SharePreviewDialog = lazy(() =>
+  import("./workspace/SharePreviewDialog").then((m) => ({ default: m.SharePreviewDialog })),
+);
 const SharedFilesDialog = lazy(() =>
   import("./workspace/SharedFilesDialog").then((m) => ({ default: m.SharedFilesDialog })),
 );
@@ -146,12 +149,12 @@ import {
   copyLink,
   fetchShare,
   parseSharedFiles,
-  serializeSharedFiles,
   uploadShare,
   SHARE_HASH,
   SHARE_FILES_HASH,
   type SharedFilesPayload,
 } from "@/lib/workspace/share";
+import type { ShareRequest } from "./workspace/SharePreviewDialog";
 import { MAX_UPLOAD_BYTES, getMaxStorageBytes, formatBytes } from "@/lib/workspace/storage-limits";
 import {
   useDocumentConversion,
@@ -175,6 +178,36 @@ interface WorkspaceLite {
   id: string;
   name: string;
   docCount?: number;
+}
+
+/**
+ * Import a `#share=` link at most once per page load. The restore effect can
+ * run twice for one visit (a StrictMode re-run, or a route swap remounting the
+ * app) while the first import is still awaiting the network, and the hash is
+ * only cleared after it lands — so both runs share this one import instead of
+ * each writing its own copy of the workspace.
+ */
+const sharedWorkspaceImports = new Map<string, Promise<WorkspaceRecord>>();
+function importSharedWorkspaceOnce(key: string): Promise<WorkspaceRecord> {
+  let pending = sharedWorkspaceImports.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const ws = parseWorkspaceImport(await fetchShare(key));
+      ws.id = crypto.randomUUID();
+      // This runs during boot, before anything is on screen, so a name clash
+      // is settled by numbering rather than by a modal prompt the reader would
+      // meet before the app has even drawn.
+      const already = await persistence.listWorkspaceSummaries();
+      ws.name = availableWorkspaceName(`${ws.name} (Shared)`, already);
+      await persistence.serial(() => persistence.putWorkspace(ws));
+      toast.success("Shared workspace imported successfully!", { id: "share-import" });
+      return ws;
+    })();
+    // A failed import may be retried by reloading the same link.
+    pending.catch(() => sharedWorkspaceImports.delete(key));
+    sharedWorkspaceImports.set(key, pending);
+  }
+  return pending;
 }
 
 export function DocsApp() {
@@ -773,25 +806,17 @@ export function DocsApp() {
         let hashSharedWs: WorkspaceRecord | null = null;
         if (window.location.hash.startsWith(SHARE_HASH)) {
           try {
-            const json = await fetchShare(window.location.hash.slice(SHARE_HASH.length));
-            const ws = parseWorkspaceImport(json);
-            ws.id = crypto.randomUUID();
-            // This runs during boot, before anything is on screen, so a name
-            // clash is settled by numbering rather than by a modal prompt the
-            // reader would meet before the app has even drawn.
-            const already = await persistence.listWorkspaceSummaries();
-            ws.name = availableWorkspaceName(`${ws.name} (Shared)`, already);
-            await persistence.serial(() => persistence.putWorkspace(ws));
-            hashSharedWs = ws;
+            hashSharedWs = await importSharedWorkspaceOnce(
+              window.location.hash.slice(SHARE_HASH.length),
+            );
             window.history.replaceState(
               null,
               "",
               window.location.pathname + window.location.search,
             );
-            toast.success("Shared workspace imported successfully!");
           } catch (e) {
             console.error("Failed to import shared workspace", e);
-            toast.error("Invalid or corrupted shared workspace link.");
+            toast.error("Invalid or corrupted shared workspace link.", { id: "share-import" });
           }
         }
 
@@ -2011,8 +2036,7 @@ flowchart LR
       setSaveStatus("saved");
       savePrefs({ lastWorkspaceId: copy.id });
       toast.success(`Your version is saved as “${copy.name}”.`, {
-        description:
-          conflict === "deleted" ? undefined : "The other tab's version is unchanged.",
+        description: conflict === "deleted" ? undefined : "The other tab's version is unchanged.",
       });
     } catch (error) {
       console.error("Could not keep this tab's version", error);
@@ -2274,30 +2298,35 @@ flowchart LR
     [persistNow, refreshWorkspaceList, hydrateWorkspace, storedWorkspaces, switchWorkspace],
   );
 
-  const exportWorkspace = useCallback(() => {
-    const rec = buildRecord();
-    const blob = new Blob([serializeWorkspace(rec)], { type: "application/json" });
+  /** Save a workspace backup (full, or a share selection) as a .json download. */
+  const downloadJson = useCallback((json: string, name: string) => {
+    const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${rec.name.trim().replace(/\s+/g, "-").toLowerCase() || "workspace"}.json`;
+    a.download = `${name.trim().replace(/\s+/g, "-").toLowerCase() || "workspace"}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }, [buildRecord]);
+  }, []);
 
-  const shareWorkspace = useCallback(async () => {
-    try {
-      toast.loading("Generating share link...", { id: "share-workspace" });
-      const key = await uploadShare(serializeWorkspace(buildRecord()));
-      const url = `${window.location.origin}${window.location.pathname}${SHARE_HASH}${key}`;
-      await copyLink(url);
-      toast.success("Workspace link copied to clipboard!", { id: "share-workspace" });
-    } catch (e) {
-      console.error(e);
-      toast.error("Failed to generate share link. Workspace might be too large.", {
-        id: "share-workspace",
-      });
+  const exportWorkspace = useCallback(() => {
+    const rec = buildRecord();
+    downloadJson(serializeWorkspace(rec), rec.name);
+  }, [buildRecord, downloadJson]);
+
+  // Sharing uploads to a third party, so it never happens straight from a menu
+  // click: both entry points open SharePreviewDialog, which names the
+  // destination, lists the files, keeps the Bin and annotations out by default
+  // and offers a local download instead. Backup export stays separate above.
+  const [shareRequest, setShareRequest] = useState<ShareRequest | null>(null);
+
+  const shareWorkspace = useCallback(() => {
+    const record = buildRecord();
+    if (record.files.length === 0) {
+      toast.info("This workspace has no files to share yet.");
+      return;
     }
+    setShareRequest({ mode: "workspace", record, fileIds: record.files.map((f) => f.id) });
   }, [buildRecord]);
 
   /**
@@ -2305,38 +2334,24 @@ flowchart LR
    * this one asks the recipient where the files should land — see
    * `SharedFilesDialog` and `acceptSharedFiles`.
    */
-  const shareFiles = useCallback(async (fileIds: string[]) => {
-    const picked = snapshotRef.current.files.filter((f) => fileIds.includes(f.id));
-    if (picked.length === 0) return;
-    const label = picked.length === 1 ? `“${picked[0].name}”` : `${picked.length} files`;
-    try {
-      toast.loading(`Generating link for ${label}...`, { id: "share-files" });
-      const json = serializeSharedFiles(
-        picked.map((f) => ({
-          id: f.id,
-          name: f.name,
-          content: f.content,
-          data: f.data,
-          mimeType: f.mimeType,
-          size: f.size,
-          addedAt: f.addedAt,
-          kind: f.kind,
-        })),
-        workspaceNameRef.current,
-      );
-      const key = await uploadShare(json);
-      const url = `${window.location.origin}${window.location.pathname}${SHARE_FILES_HASH}${key}`;
-      await copyLink(url);
-      toast.success(`Link to ${label} copied to clipboard!`, { id: "share-files" });
-    } catch (e) {
-      console.error(e);
-      toast.error("Failed to generate share link. The files might be too large.", {
-        id: "share-files",
-      });
-    }
+  const shareFiles = useCallback(
+    (fileIds: string[]) => {
+      const record = buildRecord();
+      const ids = record.files.filter((f) => fileIds.includes(f.id)).map((f) => f.id);
+      if (ids.length > 0) setShareRequest({ mode: "files", record, fileIds: ids });
+    },
+    [buildRecord],
+  );
+
+  const uploadShareLink = useCallback(async (mode: ShareRequest["mode"], json: string) => {
+    const key = await uploadShare(json);
+    const hash = mode === "workspace" ? SHARE_HASH : SHARE_FILES_HASH;
+    // Always the app root: a link made from /settings or /saved should open the
+    // reader for the recipient, not the sender's current page.
+    return `${new URL(import.meta.env.BASE_URL ?? "/", window.location.origin).href}${hash}${key}`;
   }, []);
 
-  const shareFile = useCallback((fileId: string) => void shareFiles([fileId]), [shareFiles]);
+  const shareFile = useCallback((fileId: string) => shareFiles([fileId]), [shareFiles]);
 
   // ---- receiving a #share-files= link ----
   //
@@ -2426,7 +2441,7 @@ flowchart LR
           if (!workspaceIdRef.current) {
             const id = crypto.randomUUID();
             workspaceIdRef.current = id;
-              storageRevisionRef.current = undefined;
+            storageRevisionRef.current = undefined;
             workspaceNameRef.current = payload.sourceName;
             createdAtRef.current = Date.now();
             setWorkspaceId(id);
@@ -2926,21 +2941,36 @@ flowchart LR
 
   // Rendered from both the empty state and the reader — a shared link can land
   // on either.
-  const shareDialog = incomingShare ? (
-    <Suspense fallback={null}>
-      <SharedFilesDialog
-        open
-        files={incomingShare.files}
-        sourceName={incomingShare.sourceName}
-        currentWorkspaceName={workspaceId ? workspaceNameRef.current : null}
-        busy={importingShare}
-        onDismiss={() => setIncomingShare(null)}
-        onImport={(target: "new" | "current", ids: string[], name: string) =>
-          void acceptSharedFiles(target, ids, name)
-        }
-      />
-    </Suspense>
-  ) : null;
+  const shareDialog = (
+    <>
+      {incomingShare && (
+        <Suspense fallback={null}>
+          <SharedFilesDialog
+            open
+            files={incomingShare.files}
+            sourceName={incomingShare.sourceName}
+            currentWorkspaceName={workspaceId ? workspaceNameRef.current : null}
+            busy={importingShare}
+            onDismiss={() => setIncomingShare(null)}
+            onImport={(target: "new" | "current", ids: string[], name: string) =>
+              void acceptSharedFiles(target, ids, name)
+            }
+          />
+        </Suspense>
+      )}
+      {shareRequest && (
+        <Suspense fallback={null}>
+          <SharePreviewDialog
+            request={shareRequest}
+            onDismiss={() => setShareRequest(null)}
+            onUpload={uploadShareLink}
+            onCopy={copyLink}
+            onDownload={downloadJson}
+          />
+        </Suspense>
+      )}
+    </>
+  );
 
   const {
     hits: searchHits,

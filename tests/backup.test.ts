@@ -10,6 +10,8 @@ import {
 } from "../src/lib/workspace/persistence.ts";
 import { MAX_IMPORT_BYTES, ImportValidationError } from "../src/lib/workspace/import-schema.ts";
 import {
+  buildWorkspaceShare,
+  countAnnotations,
   compressAndEncode,
   decodeAndDecompress,
   parseSharedFiles,
@@ -208,7 +210,10 @@ test("malformed, duplicated, cyclic, too deep and oversized backups are rejected
     const w = structuredClone(base) as any;
     mutate(w);
     assert.throws(
-      () => parseWorkspaceImport(JSON.stringify({ format: "localdox-workspace", version: 2, workspace: w })),
+      () =>
+        parseWorkspaceImport(
+          JSON.stringify({ format: "localdox-workspace", version: 2, workspace: w }),
+        ),
       (error: Error) => error instanceof ImportValidationError && pattern.test(error.message),
     );
   };
@@ -228,12 +233,16 @@ test("malformed, duplicated, cyclic, too deep and oversized backups are rejected
   bad((w) => {
     // Well under the JSON limit as text, but the declared payload is the
     // decoded budget: one base64 file just over it.
-    w.files[2].data = "data:application/pdf;base64," + "A".repeat(Math.ceil(MAX_IMPORT_BYTES / 0.75) + 8);
+    w.files[2].data =
+      "data:application/pdf;base64," + "A".repeat(Math.ceil(MAX_IMPORT_BYTES / 0.75) + 8);
   }, /limit/);
 
   assert.throws(() => parseWorkspaceImport("{not json"), /not valid JSON/);
   assert.throws(
-    () => parseWorkspaceImport(JSON.stringify({ format: "localdox-workspace", version: 99, workspace: base })),
+    () =>
+      parseWorkspaceImport(
+        JSON.stringify({ format: "localdox-workspace", version: 99, workspace: base }),
+      ),
     /newer version/,
   );
   assert.throws(
@@ -248,7 +257,10 @@ test("dangling references are dropped instead of pointing at nothing", () => {
   w.ui.panes![0].tabs.push("missing");
   w.files[0].folderId = "no-such-folder";
   const imported = parseWorkspaceImport(serializeWorkspace(w));
-  assert.equal(imported.saved!.some((s) => s.id === "ghost"), false);
+  assert.equal(
+    imported.saved!.some((s) => s.id === "ghost"),
+    false,
+  );
   assert.deepEqual(imported.ui.panes![0].tabs, ["note", "pdf"]);
   assert.equal(imported.files[0].folderId, null);
 });
@@ -271,4 +283,94 @@ test("compressed share payloads stop decompressing at the import budget", async 
   const bomb = await compressAndEncode("0".repeat(MAX_IMPORT_BYTES + 1024 * 1024));
   assert.ok(bomb.length < 1024 * 1024);
   await assert.rejects(decodeAndDecompress(bomb), /import limit/);
+});
+
+// ---- A03: what a share link carries ----
+
+const liveIds = (w: WorkspaceRecord) => w.files.filter((f) => f.deletedAt == null).map((f) => f.id);
+
+test("a default workspace share leaves out the Bin, annotations, history and layout", () => {
+  const w = richWorkspace();
+  const shared = buildWorkspaceShare(w, { fileIds: liveIds(w), includeAnnotations: false });
+  const json = serializeWorkspace(shared);
+
+  assert.deepEqual(
+    shared.files.map((f) => f.id),
+    ["note", "pdf", "derived"],
+  );
+  assert.ok(!json.includes("binned text"), "binned content must not be uploaded");
+  for (const secret of ["Compare with chapter 3", "Entry point", "heading note"])
+    assert.ok(!json.includes(secret), `private note "${secret}" must not be uploaded`);
+  assert.deepEqual(shared.saved, []);
+  assert.deepEqual(shared.highlights, []);
+  assert.deepEqual(shared.bookmarks, []);
+  assert.deepEqual(shared.ui.recentFileIds, []);
+  assert.deepEqual(shared.ui.panes, []);
+  assert.deepEqual(shared.ui.expanded, {});
+  assert.equal(shared.ui.scrollTop, 0);
+  assert.equal(shared.ui.activeFileId, "derived");
+  assert.deepEqual(shared.ui.fileOrder, ["derived", "note", "pdf"]);
+  assert.notEqual(shared.id, w.id, "the sender's workspace id stays local");
+  assert.ok(shared.files.every((f) => !("deletedAt" in f)));
+  // The source workspace is untouched.
+  assert.equal(w.saved?.length, 3);
+});
+
+test("a share keeps only the folders on the path to a shared file", () => {
+  const w = richWorkspace();
+  const onlyNote = buildWorkspaceShare(w, { fileIds: ["note"], includeAnnotations: false });
+  assert.deepEqual(onlyNote.folders?.map((f) => f.id).sort(), ["inner", "outer"]);
+  assert.equal(onlyNote.files[0].folderId, "inner");
+
+  const onlyDerived = buildWorkspaceShare(w, { fileIds: ["derived"], includeAnnotations: false });
+  assert.deepEqual(onlyDerived.folders, [], "empty folder names don't travel");
+  // Its source PDF isn't shared, so the link to it is cut rather than dangling.
+  assert.equal(onlyDerived.files[0].derivedFrom?.sourceFileId, undefined);
+  assert.equal(onlyDerived.files[0].derivedFrom?.sourceName, "paper.pdf");
+});
+
+test("annotations travel only when opted in, and only for shared files", () => {
+  const w = richWorkspace();
+  assert.equal(countAnnotations(w, liveIds(w)), 3);
+  const shared = buildWorkspaceShare(w, { fileIds: liveIds(w), includeAnnotations: true });
+  assert.deepEqual(
+    shared.saved?.map((s) => s.id),
+    ["star-table", "star-code"],
+  );
+  assert.deepEqual(
+    shared.highlights?.map((h) => h.id),
+    ["hl"],
+  );
+  assert.deepEqual(shared.bookmarks, ["note#title"]);
+
+  // A binned file the sender ticks explicitly arrives live, with its star only if opted in.
+  const withBin = buildWorkspaceShare(w, { fileIds: ["binned"], includeAnnotations: true });
+  assert.equal(withBin.files[0].deletedAt, undefined);
+  assert.deepEqual(
+    withBin.saved?.map((s) => s.id),
+    ["star-file"],
+  );
+});
+
+test("a shared workspace imports as the previewed selection", () => {
+  const w = richWorkspace();
+  const shared = buildWorkspaceShare(w, { fileIds: ["note", "pdf"], includeAnnotations: false });
+  const received = parseWorkspaceImport(serializeWorkspace(shared));
+  assert.deepEqual(
+    received.files.map((f) => [f.id, f.folderId, f.deletedAt]),
+    [
+      ["note", "inner", undefined],
+      ["pdf", "outer", undefined],
+    ],
+  );
+  assert.equal(received.files[1].data, w.files[2].data);
+  assert.deepEqual(received.saved ?? [], []);
+  assert.deepEqual(received.highlights, []);
+
+  // The file-link payload is built from the same selection.
+  const files = parseSharedFiles(serializeSharedFiles(shared.files, w.name));
+  assert.deepEqual(
+    files.files.map((f) => f.id),
+    ["note", "pdf"],
+  );
 });
