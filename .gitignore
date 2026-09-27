@@ -44,3 +44,32 @@ graphify-out/
 
 # Rust build output (the shipped .wasm is copied into src/lib/diagram-engine)
 engine/*/target/
+
+# Sensitive files
+*.pem
+*.key
+*.cert
+*.pfx
+*.p12
+*.jks
+*.keystore
+secrets.json
+secret.json
+service-account*.json
+firebase-adminsdk*.json
+client_secret*.json
+oauth*.json
+auth*.json
+.claude/
+.gemini/
+*.pub
+id_rsa*
+*.ovpn
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+firebase-debug.log
+firebase-debug.*.log
+google-services.json
+GoogleService-Info.plist
