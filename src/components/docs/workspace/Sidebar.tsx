@@ -1,164 +1,39 @@
 import { embedMediaFolderIds } from "@/lib/workspace/embed-media";
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { isEditableTarget, hasModKey, modKeyLabel } from "@/lib/platform/keyboard";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { isEditableTarget, hasModKey } from "@/lib/platform/keyboard";
 import {
   ChevronRight,
   Settings,
-  MoreVertical,
   Trash2,
-  Pencil,
-  SquarePen,
   GripVertical,
   Check,
-  Plus,
-  Sparkles,
   PanelLeft,
   Search,
   ArrowLeft,
   ArrowRight,
-  FileText,
-  FileType,
-  FileSpreadsheet,
-  FileJson,
-  FileImage,
-  FileVideo,
-  FileAudio,
-  Workflow,
-  Presentation,
-  Globe,
-  File as FileIcon,
   Folder,
   FolderOpen,
-  FolderPlus,
-  FolderInput,
-  FilePlus,
-  Download,
-  Printer,
-  Upload,
-  CheckSquare,
-  Share2,
-  Columns2,
-  Hash,
-  Table,
-  Code,
-  Quote,
-  List,
-  PenTool,
-  Star,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import { splitIntoSubtopics } from "@/lib/markdown/markdown-utils";
 import type { Highlight } from "@/lib/markdown/dom-highlighter";
 import { savedTypeLabel, type SavedEntry, type SavedItem } from "@/lib/workspace/saved-items";
-import type { MdFile, DocumentKind } from "@/lib/markdown/markdown-utils";
+import type { MdFile } from "@/lib/markdown/markdown-utils";
 import { readingMinutes } from "@/lib/markdown/markdown-utils";
 import { fileLabel, getDocumentKind, isEditableKind } from "@/lib/markdown/document-utils";
-import { availableFormats, FORMAT_LABEL, type ExportFormat } from "@/services/markdown-export";
+import { availableFormats, type ExportFormat } from "@/services/markdown-export";
 import { WorkspaceStrip, initials } from "./WorkspaceStrip";
 import { useNavHistory } from "@/hooks/use-nav-history";
 import { canConvertToMarkdown, latestMarkdownCopies } from "@/services/doc-conversion";
+import { kindIcon, kindMeta, savedIcon, savedByFile } from "./sidebar/file-glyphs";
+import { isOutsideMenu, MenuItem, MenuPanel } from "./sidebar/menu-primitives";
+import { GroupActionMenu } from "./sidebar/GroupActionMenu";
+import { FileMenu } from "./sidebar/FileMenu";
+import { AddMenu } from "./sidebar/AddMenu";
+import { FolderMenu } from "./sidebar/FolderMenu";
+import type { SidebarFolder } from "./sidebar/types";
+import { SearchPanel, type SearchPanelState } from "./sidebar/SearchPanel";
 
-/** A glyph per export format, so the flyout scans by shape like the file list. */
-const FORMAT_ICON: Record<ExportFormat, LucideIcon> = {
-  docx: FileType,
-  pdf: Printer,
-  markdown: FileText,
-  html: Globe,
-  original: Download,
-};
-
-// Arc-style "favicon" per file type — a small colored glyph that anchors each
-// row so the list scans by shape, not just text.
-const KIND_ICON: Partial<Record<DocumentKind, LucideIcon>> = {
-  markdown: FileText,
-  mermaid: Workflow,
-  board: PenTool,
-  text: FileText,
-  docx: FileType,
-  pdf: FileType,
-  spreadsheet: FileSpreadsheet,
-  csv: FileSpreadsheet,
-  json: FileJson,
-  presentation: Presentation,
-  "google-doc": Globe,
-  "google-slide": Globe,
-  html: Globe,
-  image: FileImage,
-  video: FileVideo,
-  audio: FileAudio,
-};
-
-function kindIcon(kind: DocumentKind): LucideIcon {
-  return KIND_ICON[kind] ?? FileIcon;
-}
-
-/*
- * Colour per file type, and the short label the row shows on its right.
- *
- * The glyphs above were already distinct in shape, but every one of them was
- * drawn in the same muted grey at 14px, where the difference between a sheet
- * and a document is a couple of pixels of stroke — the list could only be read
- * by name. Hue is the fastest channel the eye has for this, so each family gets
- * one and the list becomes scannable before a single word is read.
- *
- * The label matters for a second reason: rows drop the file extension, so
- * "metrics" and "config" gave no clue what they were. The label puts the type
- * back, in the column that was otherwise empty for every non-text file.
- */
-const KIND_META: Partial<Record<DocumentKind, { tone: string; label: string }>> = {
-  markdown: { tone: "text-sky-500 dark:text-sky-400", label: "MD" },
-  text: { tone: "text-slate-500 dark:text-slate-400", label: "TXT" },
-  mermaid: { tone: "text-cyan-600 dark:text-cyan-400", label: "DIAGRAM" },
-  board: { tone: "text-fuchsia-500 dark:text-fuchsia-400", label: "BOARD" },
-  docx: { tone: "text-blue-600 dark:text-blue-400", label: "DOCX" },
-  pdf: { tone: "text-rose-500 dark:text-rose-400", label: "PDF" },
-  spreadsheet: { tone: "text-emerald-600 dark:text-emerald-400", label: "SHEET" },
-  csv: { tone: "text-emerald-600 dark:text-emerald-400", label: "CSV" },
-  json: { tone: "text-amber-600 dark:text-amber-400", label: "JSON" },
-  presentation: { tone: "text-orange-500 dark:text-orange-400", label: "DECK" },
-  "google-doc": { tone: "text-blue-600 dark:text-blue-400", label: "DOC" },
-  "google-slide": { tone: "text-orange-500 dark:text-orange-400", label: "SLIDES" },
-  html: { tone: "text-indigo-500 dark:text-indigo-400", label: "HTML" },
-  image: { tone: "text-violet-500 dark:text-violet-400", label: "IMAGE" },
-  video: { tone: "text-pink-500 dark:text-pink-400", label: "VIDEO" },
-  audio: { tone: "text-teal-500 dark:text-teal-400", label: "AUDIO" },
-};
-
-function kindMeta(kind: DocumentKind) {
-  return KIND_META[kind] ?? { tone: "text-muted-foreground", label: "FILE" };
-}
-
-/** Glyph for a saved item, so the Saved list scans by what was starred. */
-function savedIcon(item: SavedItem): LucideIcon {
-  if (item.kind === "file") return FileText;
-  if (item.kind === "section") return Hash;
-  switch (item.blockType) {
-    case "table":
-      return Table;
-    case "code":
-      return Code;
-    case "quote":
-      return Quote;
-    case "image":
-      return FileImage;
-    case "list":
-      return List;
-    default:
-      return Star;
-  }
-}
-
-/** Saved items grouped under the file they came from, newest group first. */
-function savedByFile(items: SavedEntry[]): Array<[string, SavedEntry[]]> {
-  const groups = new Map<string, SavedEntry[]>();
-  for (const item of items) {
-    const bucket = groups.get(item.fileName);
-    if (bucket) bucket.push(item);
-    else groups.set(item.fileName, [item]);
-  }
-  return [...groups.entries()];
-}
+export type { SidebarFolder };
+export { AddMenu };
 
 /**
  * How the file list is presented in the sidebar.
@@ -191,16 +66,6 @@ const VIEW_LABEL: Record<SidebarView["mode"], string> = {
   grouped: "Grouped",
   saved: "Saved",
 };
-
-/** A sidebar folder, as far as the sidebar is concerned. */
-export interface SidebarFolder {
-  id: string;
-  name: string;
-  /** Folder this one sits inside; null/undefined = top level. */
-  parentId?: string | null;
-  /** Managed attachment folder, independent of its display name. */
-  purpose?: "embed-media";
-}
 
 /**
  * Drag payload for filing a document into a folder. Distinct from the reorder
@@ -295,8 +160,10 @@ interface Props {
    * Undocked (mobile drawer) keeps the compact Ask AI hero layout.
    */
   docked?: boolean;
-  onOpenPalette?: () => void;
+  onOpenSearch?: () => void;
   onToggleSidebar?: () => void;
+  /** Non-null swaps the file tree for the VS Code-style search panel. */
+  search?: SearchPanelState | null;
 }
 
 function SidebarImpl({
@@ -351,13 +218,31 @@ function SidebarImpl({
   onShareFile,
   onShareFiles,
   docked = false,
-  onOpenPalette,
+  onOpenSearch,
   onToggleSidebar,
+  search = null,
 }: Props) {
-  const hiddenFolders = useMemo(() => showEmbedMedia ? new Set<string>() : embedMediaFolderIds(allFolders), [showEmbedMedia, allFolders]);
-  const folders = useMemo(() => allFolders.filter((folder) => !hiddenFolders.has(folder.id)), [allFolders, hiddenFolders]);
-  const hiddenFiles = useMemo(() => new Set(files.filter((file) => file.folderId && hiddenFolders.has(file.folderId)).map((file) => file.id)), [files, hiddenFolders]);
-  const saved = useMemo(() => allSaved.filter((entry) => !hiddenFiles.has(entry.fileId)), [allSaved, hiddenFiles]);
+  const hiddenFolders = useMemo(
+    () => (showEmbedMedia ? new Set<string>() : embedMediaFolderIds(allFolders)),
+    [showEmbedMedia, allFolders],
+  );
+  const folders = useMemo(
+    () => allFolders.filter((folder) => !hiddenFolders.has(folder.id)),
+    [allFolders, hiddenFolders],
+  );
+  const hiddenFiles = useMemo(
+    () =>
+      new Set(
+        files
+          .filter((file) => file.folderId && hiddenFolders.has(file.folderId))
+          .map((file) => file.id),
+      ),
+    [files, hiddenFolders],
+  );
+  const saved = useMemo(
+    () => allSaved.filter((entry) => !hiddenFiles.has(entry.fileId)),
+    [allSaved, hiddenFiles],
+  );
 
   const currentWorkspace = useMemo(
     () => workspaces.find((w) => w.id === currentWorkspaceId) ?? null,
@@ -859,7 +744,7 @@ function SidebarImpl({
                 every binary file, leaving half the list with a ragged, unused
                 right edge and no indication of what those rows held. */}
             <span
-              className={`shrink-0 text-[0.6875rem] tabular-nums ${
+              className={`shrink-0 text-2xs tabular-nums ${
                 current ? "text-muted-foreground" : "text-muted-foreground/60"
               } ${isTextual ? "" : "font-semibold tracking-wider"}`}
             >
@@ -962,9 +847,9 @@ function SidebarImpl({
             <span className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight text-foreground">
               Localdox
             </span>
-            {onOpenPalette && (
+            {onOpenSearch && (
               <button
-                onClick={onOpenPalette}
+                onClick={onOpenSearch}
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11"
                 aria-label="Search docs"
                 title="Search docs"
@@ -1014,7 +899,7 @@ function SidebarImpl({
           adding to it. Create and Upload used to be a pair of full-width
           buttons above; as a `+` beside the label they take no vertical space
           and sit next to the list they add to. */}
-      {onView && (
+      {onView && !search && (
         <div className="flex items-center gap-1 px-3 pb-1 pt-3">
           <div ref={viewMenuRef} className="relative min-w-0 flex-1">
             <button
@@ -1058,105 +943,109 @@ function SidebarImpl({
         </div>
       )}
 
-      <nav className="flex-1 overflow-y-auto px-3 pb-3">
-        {reordering && !viewActive && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-2 text-xs text-primary">
-            <GripVertical className="h-3.5 w-3.5 shrink-0" />
-            <span className="flex-1">Drag files to reorder</span>
-            <button
-              onClick={toggleReorder}
-              className="shrink-0 rounded px-2 py-0.5 text-xs font-semibold hover:bg-primary/15"
-            >
-              Done
-            </button>
-          </div>
-        )}
-        {view.mode === "saved" ? (
-          saved.length === 0 ? (
-            <p className="px-2 py-4 text-sm text-muted-foreground">
-              No saved items yet. Star a document, a section, a table or a code block.
-            </p>
-          ) : (
-            savedByFile(saved).map(([fileName, items]) => (
-              <div key={fileName} className="mb-3">
-                <div className="px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  {fileName}
+      {search ? (
+        <SearchPanel {...search} />
+      ) : (
+        <nav className="flex-1 overflow-y-auto px-3 pb-3">
+          {reordering && !viewActive && (
+            <div className="mb-2 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-2 text-xs text-primary">
+              <GripVertical className="h-3.5 w-3.5 shrink-0" />
+              <span className="flex-1">Drag files to reorder</span>
+              <button
+                onClick={toggleReorder}
+                className="shrink-0 rounded px-2 py-0.5 text-xs font-semibold hover:bg-primary/15"
+              >
+                Done
+              </button>
+            </div>
+          )}
+          {view.mode === "saved" ? (
+            saved.length === 0 ? (
+              <p className="px-2 py-4 text-sm text-muted-foreground">
+                No saved items yet. Star a document, a section, a table or a code block.
+              </p>
+            ) : (
+              savedByFile(saved).map(([fileName, items]) => (
+                <div key={fileName} className="mb-3">
+                  <div className="px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {fileName}
+                  </div>
+                  <ul className="space-y-1">
+                    {items.map((item) => {
+                      const Icon = savedIcon(item);
+                      return (
+                        <li
+                          key={item.id}
+                          className="group flex items-start gap-1 rounded-lg px-1 hover:bg-accent/60"
+                        >
+                          <button
+                            onClick={() => onOpenSaved(item)}
+                            className="flex min-w-0 flex-1 items-start gap-2 rounded-md py-2 pl-2 pr-1.5 text-left"
+                            title={item.text || item.title}
+                          >
+                            <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-medium text-foreground/80">
+                                {item.title}
+                              </span>
+                              <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                {savedTypeLabel(item)}
+                                {item.orphaned && (
+                                  <span className="text-amber-600 dark:text-amber-400">
+                                    · edited away
+                                  </span>
+                                )}
+                              </span>
+                            </span>
+                          </button>
+                          <button
+                            onClick={() => onRemoveSaved(item.id)}
+                            className="mt-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-100 transition-opacity hover:text-destructive md:opacity-0 md:group-hover:opacity-100"
+                            aria-label="Remove saved item"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </div>
-                <ul className="space-y-1">
-                  {items.map((item) => {
-                    const Icon = savedIcon(item);
-                    return (
-                      <li
-                        key={item.id}
-                        className="group flex items-start gap-1 rounded-lg px-1 hover:bg-accent/60"
-                      >
-                        <button
-                          onClick={() => onOpenSaved(item)}
-                          className="flex min-w-0 flex-1 items-start gap-2 rounded-md py-2 pl-2 pr-1.5 text-left"
-                          title={item.text || item.title}
-                        >
-                          <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium text-foreground/80">
-                              {item.title}
-                            </span>
-                            <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                              {savedTypeLabel(item)}
-                              {item.orphaned && (
-                                <span className="text-amber-600 dark:text-amber-400">
-                                  · edited away
-                                </span>
-                              )}
-                            </span>
-                          </span>
-                        </button>
-                        <button
-                          onClick={() => onRemoveSaved(item.id)}
-                          className="mt-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-100 transition-opacity hover:text-destructive md:opacity-0 md:group-hover:opacity-100"
-                          aria-label="Remove saved item"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))
-          )
-        ) : total === 0 && folders.length === 0 ? null : (
-          <>
-            {showFolders && rootFolders.map((folder) => renderFolder(folder, 0))}
-            {/* The top level's own drop target, and the reason a file can be
+              ))
+            )
+          ) : total === 0 && folders.length === 0 ? null : (
+            <>
+              {showFolders && rootFolders.map((folder) => renderFolder(folder, 0))}
+              {/* The top level's own drop target, and the reason a file can be
                 dragged back out of a folder: it wraps the unfiled list *and*
                 the empty space below it, so the gap under the last row is a
                 real place to drop rather than dead pixels. */}
-            <div
-              className={`min-h-16 rounded-lg ${
-                // Only while something is actually being dragged. This used to
-                // test `dropFolderId === null`, which is the *resting* state —
-                // so the ring was drawn permanently, reading as a stray border
-                // around the unfiled files.
-                showFolders && draggingFileId !== null && dropFolderId === null
-                  ? "ring-2 ring-primary/60"
-                  : ""
-              }`}
-              {...(showFolders ? dropTargetProps(null) : {})}
-            >
-              {groups.map((groupItem) => (
-                <div key={groupItem.label || "__all"} className={groupItem.label ? "mb-3" : ""}>
-                  {groupItem.label && (
-                    <div className="px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      {groupItem.label}
-                    </div>
-                  )}
-                  {groupItem.items.map(renderFileRow)}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </nav>
+              <div
+                className={`min-h-16 rounded-lg ${
+                  // Only while something is actually being dragged. This used to
+                  // test `dropFolderId === null`, which is the *resting* state —
+                  // so the ring was drawn permanently, reading as a stray border
+                  // around the unfiled files.
+                  showFolders && draggingFileId !== null && dropFolderId === null
+                    ? "ring-2 ring-primary/60"
+                    : ""
+                }`}
+                {...(showFolders ? dropTargetProps(null) : {})}
+              >
+                {groups.map((groupItem) => (
+                  <div key={groupItem.label || "__all"} className={groupItem.label ? "mb-3" : ""}>
+                    {groupItem.label && (
+                      <div className="px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        {groupItem.label}
+                      </div>
+                    )}
+                    {groupItem.items.map(renderFileRow)}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </nav>
+      )}
 
       <div className="flex items-center gap-2 border-t border-sidebar-border p-2">
         {/* Settings apply to whichever workspace is open, so its trigger sits
@@ -1184,14 +1073,14 @@ function SidebarImpl({
                 <Settings className="h-3.5 w-3.5" />
               </button>
             </div>
-            <span className="max-w-[76px] truncate text-[11px] font-medium text-sidebar-foreground">
+            <span className="max-w-19 truncate text-2xs font-medium text-sidebar-foreground">
               {currentWorkspace.name}
             </span>
           </div>
         )}
         {onSwitchWorkspace && otherWorkspaces.length > 0 && (
           <>
-            <div className="h-8 w-[2px] shrink-0 rounded-full bg-border" />
+            <div className="h-8 w-0.5 shrink-0 rounded-full bg-border" />
             <WorkspaceStrip
               workspaces={otherWorkspaces}
               currentId={null}
@@ -1223,812 +1112,3 @@ function SidebarImpl({
  * identities to make that hold.
  */
 export const Sidebar = memo(SidebarImpl);
-
-function GroupActionMenu({
-  onShare,
-  onMoveToBin,
-  onDownload,
-  onCancel,
-  onSelectAll,
-  allSelected,
-}: {
-  onShare?: () => void;
-  onMoveToBin: () => void;
-  onDownload?: () => void;
-  onCancel: () => void;
-  onSelectAll: () => void;
-  allSelected: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (isOutsideMenu(e.target as Node, rootRef.current)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  return (
-    <div ref={rootRef} className="relative ml-0.5 flex shrink-0 items-center">
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((o) => !o);
-        }}
-        className={`flex h-6 w-6 items-center justify-center rounded text-primary transition-opacity hover:bg-accent hover:text-primary ${open ? "opacity-100" : "opacity-100"}`}
-        aria-label="Group options"
-      >
-        <MoreVertical className="h-4 w-4" />
-      </button>
-      {open && (
-        <MenuPanel>
-          {/* Also bound to Cmd/Ctrl+A while multi-select is on; shown here so
-              the shortcut is discoverable rather than folklore. */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-              onSelectAll();
-            }}
-            disabled={allSelected}
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
-          >
-            <CheckSquare className="h-3 w-3" />
-            Select All
-            <kbd className="ml-auto text-[10px] font-medium text-muted-foreground">
-              {modKeyLabel}A
-            </kbd>
-          </button>
-          <div className="my-1 h-px bg-border" />
-          {onShare && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onShare();
-              }}
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-foreground hover:bg-accent"
-            >
-              <Share2 className="h-3 w-3" />
-              Share Selected
-            </button>
-          )}
-          {onDownload && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onDownload();
-              }}
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-foreground hover:bg-accent"
-            >
-              <Download className="h-3 w-3" />
-              Download Selected
-            </button>
-          )}
-          {/* One removal, not two. Binning is reversible for thirty days, so
-              there is no separate "delete" to offer beside it. */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-              onMoveToBin();
-            }}
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-destructive hover:bg-accent/50"
-          >
-            <Trash2 className="h-3 w-3" />
-            Move Selected to Bin
-          </button>
-          <div className="my-1 h-px bg-border" />
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-              onCancel();
-            }}
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-foreground hover:bg-accent"
-          >
-            Cancel Selection
-          </button>
-        </MenuPanel>
-      )}
-    </div>
-  );
-}
-
-function FileMenu({
-  onEdit,
-  onConvert,
-  conversionDisabled,
-  hasMarkdownCopy,
-  onOpenMarkdown,
-  onRename,
-  onMoveToBin,
-  folders = [],
-  currentFolderId = null,
-  onMoveToFolder,
-  onAddToSplit,
-  alreadyInSplit,
-  onDownload,
-  formats = ["original"],
-  onShare,
-  reordering,
-  onToggleReorder,
-  onSelectMode,
-}: {
-  /** Show this document in a column of its own, beside what is being read. */
-  onAddToSplit?: () => void;
-  /** Already has a column — the item says so rather than offering it twice. */
-  alreadyInSplit?: boolean;
-  /** Open this document in the editor. Absent for non-editable file types. */
-  onEdit?: () => void;
-  onConvert?: () => void;
-  conversionDisabled?: boolean;
-  hasMarkdownCopy?: boolean;
-  onOpenMarkdown?: () => void;
-  onRename: () => void;
-  /**
-   * Send the document to the Bin. Recoverable for 30 days, which is why this
-   * replaced both "Archive" and "Delete" — two ways to make a file go away,
-   * neither of which was reversible in an obvious place.
-   */
-  onMoveToBin: () => void;
-  folders?: SidebarFolder[];
-  currentFolderId?: string | null;
-  onMoveToFolder?: (folderId: string | null) => void;
-  /**
-   * Write the document out in one of the offered formats.
-   *
-   * A format rather than a bare "download", because Word and PDF are the two
-   * ways a document actually leaves this app and get the same reach as handing
-   * back the original bytes did. `formats` says which ones this document can
-   * produce — a spreadsheet the app only reads has no markdown to convert, so
-   * it offers the original alone rather than three items that would fail.
-   */
-  onDownload?: (format: ExportFormat) => void;
-  formats?: ExportFormat[];
-  onShare?: () => void;
-  reordering?: boolean;
-  onToggleReorder?: () => void;
-  onSelectMode?: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  // Which flyout is open beside the menu, and the row it hangs off.
-  const [submenu, setSubmenu] = useState<"move" | "export" | null>(null);
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  // Opening one flyout closes the other, and both close with the menu.
-  const openFlyout = (which: "move" | "export") => (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setAnchor(e.currentTarget as HTMLElement);
-    setSubmenu((sub) => (sub === which ? null : which));
-  };
-
-  useEffect(() => {
-    if (!open) {
-      setSubmenu(null);
-      setAnchor(null);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (isOutsideMenu(e.target as Node, rootRef.current)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  return (
-    <div ref={rootRef} className="relative ml-0.5 flex shrink-0 items-center">
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((o) => !o);
-        }}
-        /* From `md` up this reveals on hover, which on a touch tablet means it
-           never reveals at all — every per-file action (edit, rename, share,
-           remove) was unreachable there. `coarse:opacity-100` restores it, and
-           the ::before pads the 24px glyph to a 44px target; growing the button
-           itself would have re-flowed every row in the tree. */
-        className={`relative flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground coarse:before:absolute coarse:before:-inset-2.5 coarse:before:content-[''] ${open ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100 coarse:opacity-100"}`}
-        aria-label="Options"
-      >
-        <MoreVertical className="h-4 w-4" />
-      </button>
-      {open && (
-        <MenuPanel>
-          {/* Working on the document itself. */}
-          {onOpenMarkdown && (
-            <MenuItem
-              icon={FileText}
-              label="Open Markdown copy"
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onOpenMarkdown();
-              }}
-            />
-          )}
-          {onConvert && (
-            <MenuItem
-              icon={FileText}
-              label={hasMarkdownCopy ? "Convert again" : "Convert to Markdown"}
-              disabled={conversionDisabled}
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onConvert();
-              }}
-            />
-          )}
-          {onEdit && (
-            <MenuItem
-              icon={SquarePen}
-              label="Edit"
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onEdit();
-              }}
-            />
-          )}
-          <MenuItem
-            icon={Pencil}
-            label="Rename"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-              onRename();
-            }}
-          />
-          {onAddToSplit && (
-            <MenuItem
-              icon={Columns2}
-              label={alreadyInSplit ? "Already in split view" : "Add to split view"}
-              disabled={alreadyInSplit}
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onAddToSplit();
-              }}
-            />
-          )}
-          {onMoveToFolder && folders.length > 0 && (
-            <MenuItem
-              icon={FolderInput}
-              label="Move to folder"
-              onClick={openFlyout("move")}
-              trailing={<ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
-            />
-          )}
-
-          {/* Getting the document out of the app. Share and Download were two
-              rows saying the same thing — "a copy, elsewhere" — so they share
-              one flyout instead of two slots in the top-level list. */}
-          {(onShare || onDownload) && (
-            <>
-              <MenuSeparator />
-              <MenuItem
-                icon={Upload}
-                label="Export"
-                onClick={openFlyout("export")}
-                trailing={<ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
-              />
-            </>
-          )}
-
-          {/* How the list behaves — not about this document at all, so it sits
-              apart from the rows that are. */}
-          {(onToggleReorder || onSelectMode) && <MenuSeparator />}
-          {onToggleReorder && (
-            <MenuItem
-              icon={reordering ? Check : GripVertical}
-              label={reordering ? "Done reordering" : "Reorder"}
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onToggleReorder();
-              }}
-            />
-          )}
-          {onSelectMode && (
-            <MenuItem
-              icon={CheckSquare}
-              label="Select"
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onSelectMode();
-              }}
-            />
-          )}
-
-          <MenuSeparator />
-          <MenuItem
-            icon={Trash2}
-            label="Move to Bin"
-            destructive
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-              onMoveToBin();
-            }}
-          />
-        </MenuPanel>
-      )}
-
-      {open && submenu === "move" && onMoveToFolder && (
-        <MenuFlyout anchor={anchor}>
-          <MenuItem
-            icon={FileText}
-            label="Top level"
-            disabled={currentFolderId === null}
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-              onMoveToFolder(null);
-            }}
-          />
-          {folders.map((folder) => (
-            <MenuItem
-              key={folder.id}
-              icon={Folder}
-              label={folder.name}
-              disabled={currentFolderId === folder.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onMoveToFolder(folder.id);
-              }}
-            />
-          ))}
-        </MenuFlyout>
-      )}
-
-      {open && submenu === "export" && (
-        <MenuFlyout anchor={anchor}>
-          {onShare && (
-            <MenuItem
-              icon={Share2}
-              label="Share link"
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onShare();
-              }}
-            />
-          )}
-          {/* One row per format rather than a single "Download" that always
-              produced the source file. Word and PDF are what a document is
-              usually wanted as; the original stays last for the cases where the
-              bytes themselves are the point. */}
-          {onDownload &&
-            formats.map((format) => (
-              <MenuItem
-                key={format}
-                icon={FORMAT_ICON[format]}
-                label={FORMAT_LABEL[format]}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setOpen(false);
-                  onDownload(format);
-                }}
-              />
-            ))}
-        </MenuFlyout>
-      )}
-    </div>
-  );
-}
-
-/**
- * The shared look for every popover menu in the sidebar — a file row's
- * three-dots menu, a folder row's, and the `+` menu.
- *
- * Rows are a comfortable tap size with a full-size icon rather than the cramped
- * 12px glyphs these menus used to use, and related actions sit in groups
- * between separators instead of running together as one undifferentiated list.
- */
-function MenuItem({
-  icon: Icon,
-  label,
-  onClick,
-  destructive,
-  disabled,
-  trailing,
-  iconClassName,
-}: {
-  icon: LucideIcon;
-  label: string;
-  onClick: (e: React.MouseEvent) => void;
-  destructive?: boolean;
-  disabled?: boolean;
-  /** Rendered at the end of the row — a chevron for a submenu, say. */
-  trailing?: React.ReactNode;
-  iconClassName?: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm transition-colors disabled:opacity-40 disabled:hover:bg-transparent ${
-        destructive ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-accent"
-      }`}
-    >
-      <Icon className={`h-4 w-4 shrink-0 ${iconClassName ?? ""}`} strokeWidth={1.5} />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {trailing}
-    </button>
-  );
-}
-
-/** Divider between groups of menu items. */
-function MenuSeparator() {
-  return <div className="my-1 h-px bg-border" />;
-}
-
-/**
- * A nested list that opens *beside* its parent menu rather than inside it.
- *
- * The folder list and the export actions used to unfold in place, pushing the
- * rest of the menu down and making a long list of folders scroll inside a panel
- * that was already a popover. A second panel alongside the first is how a menu
- * of menus behaves everywhere else, and it leaves the parent's own rows where
- * the reader left them.
- *
- * Positioned against the parent row: opening to the right, flipping to the left
- * when that would run off-screen, and pulled up when it would overhang the
- * bottom.
- */
-function MenuFlyout({
-  anchor,
-  children,
-}: {
-  anchor: HTMLElement | null;
-  children: React.ReactNode;
-}) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const place = () => {
-      if (!anchor) return;
-      const box = anchor.getBoundingClientRect();
-      let left = box.right + MENU_GAP;
-      if (left + MENU_WIDTH > window.innerWidth - VIEWPORT_MARGIN) {
-        left = box.left - MENU_WIDTH - MENU_GAP;
-      }
-      if (left < VIEWPORT_MARGIN) left = VIEWPORT_MARGIN;
-
-      const height = panelRef.current?.offsetHeight ?? 0;
-      let top = box.top;
-      if (height && top + height > window.innerHeight - VIEWPORT_MARGIN) {
-        top = Math.max(VIEWPORT_MARGIN, window.innerHeight - VIEWPORT_MARGIN - height);
-      }
-      setPos({ top, left });
-    };
-    place();
-    window.addEventListener("scroll", place, true);
-    window.addEventListener("resize", place);
-    return () => {
-      window.removeEventListener("scroll", place, true);
-      window.removeEventListener("resize", place);
-    };
-  }, [anchor, children]);
-
-  if (typeof document === "undefined") return null;
-  return createPortal(
-    <div
-      ref={panelRef}
-      // Same tag as MenuPanel: the click-away handler treats a click in here as
-      // inside the menu, not outside it.
-      data-sidebar-menu-panel
-      className="fixed z-(--z-menu) max-h-[min(60vh,22rem)] w-56 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-xl"
-      style={{
-        top: pos?.top ?? 0,
-        left: pos?.left ?? 0,
-        visibility: pos ? "visible" : "hidden",
-      }}
-    >
-      {children}
-    </div>,
-    document.body,
-  );
-}
-
-/** Shared shell for the sidebar's popover menus. */
-const MENU_WIDTH = 224; // w-56
-const MENU_GAP = 6;
-const VIEWPORT_MARGIN = 8;
-
-/**
- * True when a click landed outside both the menu root and its panel. `MenuPanel`
- * portals the panel to <body>, so it is no longer a DOM descendant of the root —
- * a plain `root.contains(target)` test would read every click on a menu item as
- * a click outside and close the menu before the item could fire.
- */
-function isOutsideMenu(target: Node | null, root: HTMLElement | null) {
-  if (!root || !target) return false;
-  if (root.contains(target)) return false;
-  return !(target instanceof Element && target.closest("[data-sidebar-menu-panel]"));
-}
-
-/**
- * Menus fly out to the *side* of their trigger rather than dropping below it:
- * dropped inside the sidebar column a panel covers the rows underneath, hiding
- * the very list the reader is working in. Opening beside the trigger puts the
- * panel over the content area and leaves the file list readable.
- *
- * It has to be portaled with fixed coordinates to do that. The file list is a
- * `overflow-y-auto` scroller, and a scroll container clips on *both* axes — an
- * absolutely positioned panel would be cut off at the sidebar's edge, which is
- * the very problem this is solving. Measuring the trigger and rendering to
- * <body> escapes the clip; the trade-off is that the panel must be repositioned
- * on scroll and resize rather than riding along with its anchor.
- */
-function MenuPanel({
-  align = "right",
-  children,
-}: {
-  align?: "left" | "right";
-  children: React.ReactNode;
-}) {
-  const anchorRef = useRef<HTMLSpanElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const place = () => {
-      // The anchor sits inside the menu root, so its parent chain reaches the
-      // trigger's positioned wrapper — the box the panel aligns against.
-      const anchor = anchorRef.current?.parentElement;
-      if (!anchor) return;
-      const box = anchor.getBoundingClientRect();
-
-      // Open toward `align`, flipping to the other side only when that would
-      // run past the viewport edge.
-      let left = align === "right" ? box.right + MENU_GAP : box.left - MENU_WIDTH - MENU_GAP;
-      if (left + MENU_WIDTH > window.innerWidth - VIEWPORT_MARGIN)
-        left = box.left - MENU_WIDTH - MENU_GAP;
-      if (left < VIEWPORT_MARGIN) left = VIEWPORT_MARGIN;
-
-      // Top-aligned with the trigger, pulled up if the panel would overhang the
-      // bottom of the screen.
-      const height = panelRef.current?.offsetHeight ?? 0;
-      let top = box.top;
-      if (height && top + height > window.innerHeight - VIEWPORT_MARGIN)
-        top = Math.max(VIEWPORT_MARGIN, window.innerHeight - VIEWPORT_MARGIN - height);
-
-      setPos({ top, left });
-    };
-    place();
-    // `true` catches scrolling in the sidebar's own scroller, not just the page.
-    window.addEventListener("scroll", place, true);
-    window.addEventListener("resize", place);
-    return () => {
-      window.removeEventListener("scroll", place, true);
-      window.removeEventListener("resize", place);
-    };
-  }, [align, children]);
-
-  return (
-    <>
-      {/* Zero-size marker left in the menu root so the portaled panel can measure it. */}
-      <span ref={anchorRef} className="hidden" aria-hidden />
-      {typeof document !== "undefined" &&
-        createPortal(
-          <div
-            ref={panelRef}
-            // Tagged so each menu's click-away handler can tell a click on its
-            // own portaled panel from a genuine click outside the menu.
-            data-sidebar-menu-panel
-            className="fixed z-(--z-menu) w-56 rounded-xl border border-border bg-popover p-1.5 shadow-xl"
-            style={{
-              top: pos?.top ?? 0,
-              left: pos?.left ?? 0,
-              // Measured before it is placed; hidden for that first frame so it
-              // never flashes in the corner.
-              visibility: pos ? "visible" : "hidden",
-            }}
-          >
-            {children}
-          </div>,
-          document.body,
-        )}
-    </>
-  );
-}
-
-/**
- * The `+` menu: the three ways to add to a workspace. Shared by the expanded
- * sidebar's list header and the collapsed rail, so both offer the same options.
- */
-export function AddMenu({
-  onCreateFile,
-  onCreateMermaid,
-  onCreateBoard,
-  onCreateFolder,
-  onUpload,
-  align = "right",
-  className,
-  buttonClassName,
-}: {
-  onCreateFile?: () => void;
-  onCreateMermaid?: () => void;
-  onCreateBoard?: () => void;
-  onCreateFolder?: () => void;
-  onUpload: () => void;
-  align?: "left" | "right";
-  className?: string;
-  buttonClassName?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (isOutsideMenu(e.target as Node, rootRef.current)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  return (
-    <div ref={rootRef} className={`relative shrink-0 ${className ?? ""}`}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-label="Add to workspace"
-        title="Add to workspace"
-        className={
-          buttonClassName ??
-          "flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11"
-        }
-      >
-        <Plus className="h-4 w-4" />
-      </button>
-
-      {open && (
-        <MenuPanel align={align}>
-          {onCreateFile && (
-            <MenuItem
-              icon={FilePlus}
-              label="New file"
-              onClick={() => {
-                setOpen(false);
-                onCreateFile();
-              }}
-            />
-          )}
-          {onCreateBoard && (
-            <MenuItem
-              icon={PenTool}
-              label="New board"
-              onClick={() => {
-                setOpen(false);
-                onCreateBoard();
-              }}
-            />
-          )}
-          {onCreateFolder && (
-            <MenuItem
-              icon={FolderPlus}
-              label="New folder"
-              onClick={() => {
-                setOpen(false);
-                onCreateFolder();
-              }}
-            />
-          )}
-          <MenuItem
-            icon={Upload}
-            label="Upload files"
-            onClick={() => {
-              setOpen(false);
-              onUpload();
-            }}
-          />
-        </MenuPanel>
-      )}
-    </div>
-  );
-}
-
-/** Three-dots menu on a folder row: create inside it, rename it, delete it. */
-function FolderMenu({
-  onNewFile,
-  onNewMermaid,
-  onNewBoard,
-  onNewFolder,
-  onRename,
-  onDelete,
-}: {
-  onNewFile?: () => void;
-  onNewMermaid?: () => void;
-  onNewBoard?: () => void;
-  onNewFolder?: () => void;
-  onRename?: () => void;
-  onDelete?: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (isOutsideMenu(e.target as Node, rootRef.current)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  const item = (label: string, Icon: LucideIcon, run: () => void, destructive = false) => (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        setOpen(false);
-        run();
-      }}
-      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent ${
-        destructive ? "text-destructive hover:bg-accent/50" : "text-foreground"
-      }`}
-    >
-      <Icon className="h-3 w-3" />
-      {label}
-    </button>
-  );
-
-  return (
-    <div ref={rootRef} className="relative ml-0.5 flex shrink-0 items-center">
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((o) => !o);
-        }}
-        className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground md:opacity-0 md:group-hover:opacity-100"
-        aria-label="Folder options"
-      >
-        <MoreVertical className="h-4 w-4" />
-      </button>
-      {open && (
-        <MenuPanel>
-          {onNewFile && item("New File here", FilePlus, onNewFile)}
-          {onNewBoard && item("New Board here", PenTool, onNewBoard)}
-          {onNewFolder && item("New Folder", FolderPlus, onNewFolder)}
-          {(onNewFile || onNewBoard || onNewFolder) && (onRename || onDelete) && (
-            <div className="my-1 h-px bg-border" />
-          )}
-          {onRename && item("Rename folder", Pencil, onRename)}
-          {onDelete && item("Delete folder", Trash2, onDelete, true)}
-        </MenuPanel>
-      )}
-    </div>
-  );
-}
