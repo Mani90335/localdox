@@ -71,6 +71,7 @@
     "lucide-react": "^0.575.0",
     "mammoth": "^1.12.0",
     "mathjax": "^4.1.3",
+    "mathlive": "^0.110.0",
     "mermaid": "^11.16.0",
     "mermaid-animator": "^0.9.1",
     "pdfjs-dist": "^6.3.289",
