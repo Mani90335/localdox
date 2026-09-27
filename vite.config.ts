@@ -36,6 +36,9 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
+    // The WASM glue is already ESM. Keep its relative binary URL intact and
+    // prevent first conversion from triggering a dependency-discovery reload.
+    exclude: ["@firecrawl/anydoc-wasm"],
     // Pre-bundling is a dev-server optimization, independent of production
     // code splitting. Excluding these libraries causes large module waterfalls
     // and leaves CommonJS imports unconverted when a viewer is first opened.
