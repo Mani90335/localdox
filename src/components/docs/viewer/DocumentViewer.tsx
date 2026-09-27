@@ -1,3 +1,4 @@
+import type { DocumentUpdate } from "@/services/office-editing";
 import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
 // `xlsx` (~563 kB) and `jszip` (~273 kB) are imported where they are used, not
 // here: a static import put both in the app's main chunk, so every reader
@@ -63,6 +64,8 @@ interface Props {
   fillAvailableHeight?: boolean;
   /** Persist an edited document. Omitted where the viewer is read-only. */
   onContentChange?: (fileId: string, content: string) => void;
+  onDocumentSave?: (fileId: string, update: DocumentUpdate) => void;
+  onEditorDirtyChange?: (dirty: boolean) => void;
   /** Opens the workspace command palette from the header's search field. */
   onOpenPalette?: () => void;
   /**
@@ -106,8 +109,8 @@ function DocumentViewerImpl(props: Props) {
   const { file } = props;
   const kind = file.kind ?? getDocumentKind(file.name, file.mimeType);
   if (kind === "pdf") return <PdfViewer {...props} />;
-  if (kind === "docx") return <DocxViewer {...props} />;
-  if (kind === "spreadsheet" || kind === "csv") return <SpreadsheetViewer {...props} />;
+  if (kind === "docx" || kind === "spreadsheet" || kind === "csv")
+    return <EditableOfficeViewer key={file.id} {...props} />;
   if (kind === "json") return <JsonViewer {...props} />;
   if (kind === "mermaid") return <MermaidFileViewer {...props} />;
   if (kind === "board") return <BoardFileViewer {...props} />;
@@ -117,6 +120,52 @@ function DocumentViewerImpl(props: Props) {
   if (kind === "google-doc" || kind === "google-slide")
     return <GoogleViewer {...props} isSlides={kind === "google-slide"} />;
   return <UnknownViewer {...props} />;
+}
+
+const OfficeEditor = lazy(() =>
+  import("@/services/office-editing/OfficeEditor").then((module) => ({
+    default: module.OfficeEditor,
+  })),
+);
+
+function EditableOfficeViewer(props: Props) {
+  const { file, onDocumentSave, embedded, startInEditFileId, onStartInEditConsumed } = props;
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (startInEditFileId === file.id && onDocumentSave && !embedded) {
+      setEditing(true);
+      onStartInEditConsumed?.();
+    }
+  }, [startInEditFileId, file.id, onDocumentSave, embedded, onStartInEditConsumed]);
+  if (editing && onDocumentSave)
+    return (
+      <Suspense fallback={<Loading label="Loading editor" />}>
+        <OfficeEditor
+          file={file}
+          onSave={onDocumentSave}
+          onDone={() => setEditing(false)}
+          onDirtyChange={props.onEditorDirtyChange}
+        />
+      </Suspense>
+    );
+  const kind = file.kind ?? getDocumentKind(file.name, file.mimeType);
+  return (
+    <>
+      {onDocumentSave && !embedded && (
+        <div className="flex justify-end px-4 pt-3">
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Edit {kind === "docx" ? "document" : "spreadsheet"}
+          </button>
+        </div>
+      )}
+      {kind === "docx" ? <DocxViewer {...props} /> : <SpreadsheetViewer {...props} />}
+    </>
+  );
 }
 
 /**
@@ -197,8 +246,11 @@ function MermaidFileViewer({
             // The editor reports the document the text was typed into, so a
             // commit that lands after a file switch still goes to the right
             // file. `undefined` content means the draft never changed.
-            onDone={(fileId, content) => {
-              if (content !== undefined) onContentChange?.(fileId, content);
+            onSave={() => {
+              /* This animation editor commits only on Done. */
+            }}
+            onDone={(_cursorIndex, content) => {
+              if (content !== undefined) onContentChange?.(file.id, content);
               setEditing(false);
             }}
             // Nothing was written, so cancelling only leaves.
@@ -368,8 +420,7 @@ function HtmlFileViewer({
               <Eye className="h-3.5 w-3.5" /> Done · Preview
             </button>
           </div>
-        ) : (
-          editing ? (
+        ) : editing ? (
           <div className="flex items-center gap-1.5">
             <button
               type="button"
@@ -380,7 +431,7 @@ function HtmlFileViewer({
             </button>
             <button
               type="button"
-              onClick={commitEdit}
+              onClick={doneEdit}
               className="inline-flex h-8 items-center rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
               title="Save and stop editing"
             >
@@ -389,22 +440,21 @@ function HtmlFileViewer({
           </div>
         ) : (
           <button
-              type="button"
-              onClick={() => setShowSource((on) => !on)}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              aria-pressed={showSource}
-            >
-              {showSource ? (
-                <>
-                  <Eye className="h-3.5 w-3.5" /> Preview
-                </>
-              ) : (
-                <>
-                  <Code2 className="h-3.5 w-3.5" /> Source
-                </>
-              )}
-            </button>
-        )
+            type="button"
+            onClick={() => setShowSource((on) => !on)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            aria-pressed={showSource}
+          >
+            {showSource ? (
+              <>
+                <Eye className="h-3.5 w-3.5" /> Preview
+              </>
+            ) : (
+              <>
+                <Code2 className="h-3.5 w-3.5" /> Source
+              </>
+            )}
+          </button>
         )
       }
     >
@@ -756,7 +806,7 @@ function SpreadsheetViewer({
         const kind = file.kind ?? getDocumentKind(file.name, file.mimeType);
         const workbook =
           kind === "csv"
-            ? XLSX.read(file.content, { type: "string", dense: true })
+            ? XLSX.read(file.content, { type: "string", dense: true, raw: true })
             : XLSX.read(dataUrlToArrayBuffer(file.data), {
                 type: "array",
                 dense: true,
