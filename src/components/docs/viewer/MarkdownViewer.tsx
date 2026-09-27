@@ -8,7 +8,6 @@ import {
 } from "@/lib/markdown/markdown-media";
 import { isLocalReference } from "@/lib/markdown/media-references";
 import type { FolderRecord } from "@/lib/workspace/persistence";
-import { ResizableMarkdownTable } from "./ResizableMarkdownTable";
 import {
   remarkConvertedHtml,
   convertedAnchorMap,
@@ -1266,7 +1265,9 @@ function MarkdownViewerImpl({
       li: (p: any) => <li {...p}>{p.children}</li>,
       table: foldable((p: any) => (
         <SavableBlock blockType="table" className="docs-savable-table">
-          <ResizableMarkdownTable {...p} />
+          <div className="docs-table-wrap">
+            <table {...p} />
+          </div>
         </SavableBlock>
       )),
       td: (p: any) => <td {...p}>{p.children}</td>,

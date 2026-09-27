@@ -39,31 +39,29 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
 
-test("Markdown tables resize, scroll without wrapping, and never break words", async ({ page }) => {
+test("Markdown tables fit the content column, wrap at spaces, and never break words", async ({
+  page,
+}) => {
   await upload(
     page,
     "widths.md",
     Buffer.from(
-      "# Widths\n\n| Name | Description |\n| --- | --- |\n| unbreakableidentifierabcdefghijklmnopqrstuvwxyz | Several words that can wrap at spaces in a narrow column |\n",
+      "# Widths\n\nSome prose.\n\n| Name | Description |\n| --- | --- |\n| unbreakableidentifierabcdefghijklmnopqrstuvwxyz | Several words that can wrap at spaces in a narrow column |\n",
     ),
   );
-  const table = page.locator(".docs-table-container");
-  await expect(table).toBeVisible();
-  const cell = table.locator("td").first();
+  const wrap = page.locator(".docs-table-wrap");
+  await expect(wrap).toBeVisible();
+  const cell = wrap.locator("td").first();
   expect(await cell.evaluate((node) => getComputedStyle(node).overflowWrap)).toBe("normal");
-  const handle = page.getByRole("button", { name: "Resize column 2", exact: true });
-  const original = await table
-    .locator("table")
+  expect(await cell.evaluate((node) => getComputedStyle(node).whiteSpace)).toBe("normal");
+  const paragraphWidth = await page
+    .locator(".docs-prose p")
+    .first()
     .evaluate((node) => node.getBoundingClientRect().width);
-  await handle.focus();
-  await page.keyboard.press("ArrowRight");
-  expect(
-    await table.locator("table").evaluate((node) => node.getBoundingClientRect().width),
-  ).toBeGreaterThan(original);
-  await page.getByRole("checkbox", { name: "Wrap words" }).uncheck();
-  expect(await cell.evaluate((node) => getComputedStyle(node).whiteSpace)).toBe("nowrap");
-  await page.getByRole("button", { name: "Reset widths" }).click();
-  expect(await table.locator("col").count()).toBe(0);
+  const wrapWidth = await wrap.evaluate((node) => node.getBoundingClientRect().width);
+  expect(Math.abs(wrapWidth - paragraphWidth)).toBeLessThan(1);
+  await expect(page.getByRole("checkbox", { name: "Wrap words" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Reset widths" })).toHaveCount(0);
 });
 
 test("CSV editing preserves strings, quotes pasted cells, cancels, and persists after reload", async ({
