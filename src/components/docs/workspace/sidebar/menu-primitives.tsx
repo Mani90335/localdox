@@ -9,7 +9,7 @@ export const VIEWPORT_MARGIN = 8;
 
 /**
  * True when a click landed outside both the menu root and its panel. `MenuPanel`
- * portals the panel to <body>, so it is no longer a DOM descendant of the root —
+ * portals the panel outside the menu root, so it is no longer a DOM descendant —
  * a plain `root.contains(target)` test would read every click on a menu item as
  * a click outside and close the menu before the item could fire.
  */
@@ -122,7 +122,8 @@ export function MenuFlyout({
     >
       {children}
     </div>,
-    document.body,
+    // Keep modal-owned menus inside its focus and pointer-event boundary.
+    anchor?.closest('[role="dialog"]') ?? document.body,
   );
 }
 
@@ -136,7 +137,8 @@ export function MenuFlyout({
  * `overflow-y-auto` scroller, and a scroll container clips on *both* axes — an
  * absolutely positioned panel would be cut off at the sidebar's edge, which is
  * the very problem this is solving. Measuring the trigger and rendering to
- * <body> escapes the clip; the trade-off is that the panel must be repositioned
+ * the containing dialog (or <body>) escapes the clip while preserving modal
+ * focus containment; the trade-off is that the panel must be repositioned
  * on scroll and resize rather than riding along with its anchor.
  */
 export function MenuPanel({
@@ -206,7 +208,7 @@ export function MenuPanel({
           >
             {children}
           </div>,
-          document.body,
+          anchorRef.current?.closest('[role="dialog"]') ?? document.body,
         )}
     </>
   );

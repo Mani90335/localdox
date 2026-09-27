@@ -15,6 +15,7 @@ import { Sidebar, AddMenu, DEFAULT_VIEW, type SidebarView } from "./workspace/Si
 import { MarkdownViewer } from "./viewer/MarkdownViewer";
 import { PaneDocument } from "./viewer/PaneDocument";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { Sheet, SheetClose, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useSearchIndex } from "@/hooks/use-search-index";
 import type { SearchHit } from "@/lib/search/schema";
@@ -233,6 +234,7 @@ export function DocsApp() {
      narrowest, plus the handle between them — below that a split is worse than
      no split, so the panes stack top to bottom instead of getting thinner. */
   const splitStacks = useMediaQuery("(max-width: 767px)");
+  const mobileNavigation = useMediaQuery("(max-width: 1023px)");
   const setActiveFileId = useCallback((fileId: string | null) => {
     setPaneLayout((layout) => {
       if (fileId === null) {
@@ -331,6 +333,20 @@ export function DocsApp() {
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
   const [scrollTarget, setScrollTarget] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerOpenerRef = useRef<HTMLElement | null>(null);
+  const drawerContentRef = useRef<HTMLDivElement | null>(null);
+  const openDrawer = useCallback(() => {
+    if (!drawerOpen) {
+      drawerOpenerRef.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+    setDrawerOpen(true);
+  }, [drawerOpen]);
+  // CSS hiding a modal leaves its focus trap and scroll lock active. Close it
+  // when the docked sidebar takes over, including when browser zoom changes.
+  useEffect(() => {
+    if (!mobileNavigation) setDrawerOpen(false);
+  }, [mobileNavigation]);
   const {
     theme,
     setTheme,
@@ -2882,13 +2898,13 @@ flowchart LR
     const onKey = (e: KeyboardEvent) => {
       if (hasModKey(e) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        if (splitStacks) setDrawerOpen(true);
+        if (mobileNavigation) openDrawer();
         setSearchOpen((open) => !open);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [splitStacks]);
+  }, [mobileNavigation, openDrawer]);
 
   // Append AI output to the open document, or spin it out into a new one.
   const insertAiOutput = useCallback(
@@ -3142,9 +3158,9 @@ flowchart LR
       <div className="min-h-dvh bg-background">
         <Header
           hideOnDesktop
-          onMenu={() => setDrawerOpen(true)}
+          onMenu={openDrawer}
           onOpenPalette={() => {
-            setDrawerOpen(true);
+            openDrawer();
             setSearchOpen(true);
           }}
           hasFiles
@@ -3288,101 +3304,118 @@ flowchart LR
             </div>
           </div>
 
-          {drawerOpen && (
-            <div className="fixed inset-0 z-(--z-overlay) lg:hidden">
-              <div
-                className="absolute inset-0 bg-foreground/20 backdrop-blur-sm"
-                onClick={() => setDrawerOpen(false)}
-              />
-              <div className="absolute left-0 top-0 flex h-full w-80 max-w-[85vw] flex-col border-r border-border bg-background shadow-2xl animate-in slide-in-from-left duration-200 pl-[env(safe-area-inset-left)] pb-[env(safe-area-inset-bottom)]">
-                <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
-                  <span className="text-sm font-semibold truncate px-1">
-                    {workspaceNameRef.current || "Workspace"}
-                  </span>
-                  <button
-                    onClick={() => setDrawerOpen(false)}
-                    aria-label="Close"
-                    className="-mr-2 inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-                <div className="min-h-0 flex-1">
-                  <Sidebar
-                    showEmbedMedia={showEmbedMedia}
-                    files={files}
-                    activeFileId={activeFileId}
-                    activeHeadingId={activeHeadingId}
-                    expanded={expanded}
-                    onToggleFile={toggleFile}
-                    onSelect={handleSelect}
-                    onAddFiles={() => inputRef.current?.click()}
-                    onRemoveFile={moveToBin}
-                    onDownloadFile={downloadFile}
-                    onDownloadFiles={downloadFiles}
-                    onMoveToWorkspace={workspaces.length > 1 ? setPendingMove : undefined}
-                    onShareFile={shareFile}
-                    onShareFiles={(ids) => void shareFiles(ids)}
-                    onRenameFile={renameFile}
-                    onEditFile={editFile}
-                    onConvertFile={conversion.start}
-                    convertingFileId={conversion.runningId}
-                    folders={folders}
-                    onCreateFile={createFile}
-                    onCreateMermaid={createMermaidFile}
-                    onCreateBoard={createBoardFile}
-                    onCreateFolder={createFolder}
-                    onRenameFolder={renameFolder}
-                    onDeleteFolder={deleteFolder}
-                    onMoveFileToFolder={moveFileToFolder}
-                    onMoveFolderToFolder={moveFolderToFolder}
-                    onReorderFile={reorderFile}
-                    onSortByName={sortFilesByName}
-                    view={sidebarView}
-                    onView={setSidebarView}
-                    saved={savedEntries}
-                    onOpenSaved={openSaved}
-                    onRemoveSaved={removeSaved}
-                    theme={theme}
-                    onCycleTheme={cycleTheme}
-                    currentWorkspaceName={workspaceNameRef.current}
-                    canDeleteWorkspace={workspaces.length > 1}
-                    onRenameCurrentWorkspace={(name) =>
-                      workspaceIdRef.current && void renameWorkspace(workspaceIdRef.current, name)
-                    }
-                    onDeleteCurrentWorkspace={() =>
-                      workspaceIdRef.current && void deleteWorkspace(workspaceIdRef.current)
-                    }
-                    onClearStorage={clearAllStorage}
-                    highlights={highlights}
-                    onRemoveHighlight={removeHighlight}
-                    onOpenSettings={(tab) => {
-                      setDrawerOpen(false);
-                      openSettings(tab);
-                    }}
-                    onAskAi={
-                      aiEnabled
-                        ? () => {
-                            setDrawerOpen(false);
-                            openAskAi();
-                          }
-                        : undefined
-                    }
-                    workspaces={workspaces}
-                    currentWorkspaceId={workspaceId}
-                    onSwitchWorkspace={(id) => {
-                      setDrawerOpen(false);
-                      switchWorkspace(id);
-                    }}
-                    onImportWorkspace={importWorkspace}
-                    onExportWorkspace={exportWorkspace}
-                    onShareWorkspace={shareWorkspace}
-                    search={searchPanelState}
-                  />
-                </div>
+          <Sheet open={drawerOpen && mobileNavigation} onOpenChange={setDrawerOpen}>
+            <SheetContent
+              ref={drawerContentRef}
+              side="left"
+              aria-describedby={undefined}
+              showCloseButton={false}
+              className="flex w-80 max-w-[85vw] flex-col gap-0 p-0 pl-[env(safe-area-inset-left)] pb-[env(safe-area-inset-bottom)]"
+              onCloseAutoFocus={(event) => {
+                // There are multiple openers (menu, search, keyboard shortcut),
+                // so a single SheetTrigger cannot restore the right one.
+                event.preventDefault();
+                const opener = drawerOpenerRef.current;
+                if (opener?.isConnected && opener.getClientRects().length) opener.focus();
+              }}
+              onEscapeKeyDown={(event) => {
+                // Sidebar menus and search own their Escape handlers. Let
+                // those close first without also dismissing their parent.
+                if (
+                  searchOpen ||
+                  drawerContentRef.current?.querySelector("[data-sidebar-menu-panel]")
+                ) {
+                  event.preventDefault();
+                }
+              }}
+            >
+              <SheetTitle className="sr-only">Workspace navigation</SheetTitle>
+              <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
+                <span className="text-sm font-semibold truncate px-1">
+                  {workspaceNameRef.current || "Workspace"}
+                </span>
+                <SheetClose
+                  aria-label="Close"
+                  className="-mr-2 inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11"
+                >
+                  <X className="h-4 w-4" />
+                </SheetClose>
               </div>
-            </div>
-          )}
+              <div className="min-h-0 flex-1">
+                <Sidebar
+                  showEmbedMedia={showEmbedMedia}
+                  files={files}
+                  activeFileId={activeFileId}
+                  activeHeadingId={activeHeadingId}
+                  expanded={expanded}
+                  onToggleFile={toggleFile}
+                  onSelect={handleSelect}
+                  onAddFiles={() => inputRef.current?.click()}
+                  onRemoveFile={moveToBin}
+                  onDownloadFile={downloadFile}
+                  onDownloadFiles={downloadFiles}
+                  onMoveToWorkspace={workspaces.length > 1 ? setPendingMove : undefined}
+                  onShareFile={shareFile}
+                  onShareFiles={(ids) => void shareFiles(ids)}
+                  onRenameFile={renameFile}
+                  onEditFile={editFile}
+                  onConvertFile={conversion.start}
+                  convertingFileId={conversion.runningId}
+                  folders={folders}
+                  onCreateFile={createFile}
+                  onCreateMermaid={createMermaidFile}
+                  onCreateBoard={createBoardFile}
+                  onCreateFolder={createFolder}
+                  onRenameFolder={renameFolder}
+                  onDeleteFolder={deleteFolder}
+                  onMoveFileToFolder={moveFileToFolder}
+                  onMoveFolderToFolder={moveFolderToFolder}
+                  onReorderFile={reorderFile}
+                  onSortByName={sortFilesByName}
+                  view={sidebarView}
+                  onView={setSidebarView}
+                  saved={savedEntries}
+                  onOpenSaved={openSaved}
+                  onRemoveSaved={removeSaved}
+                  theme={theme}
+                  onCycleTheme={cycleTheme}
+                  currentWorkspaceName={workspaceNameRef.current}
+                  canDeleteWorkspace={workspaces.length > 1}
+                  onRenameCurrentWorkspace={(name) =>
+                    workspaceIdRef.current && void renameWorkspace(workspaceIdRef.current, name)
+                  }
+                  onDeleteCurrentWorkspace={() =>
+                    workspaceIdRef.current && void deleteWorkspace(workspaceIdRef.current)
+                  }
+                  onClearStorage={clearAllStorage}
+                  highlights={highlights}
+                  onRemoveHighlight={removeHighlight}
+                  onOpenSettings={(tab) => {
+                    setDrawerOpen(false);
+                    openSettings(tab);
+                  }}
+                  onAskAi={
+                    aiEnabled
+                      ? () => {
+                          setDrawerOpen(false);
+                          openAskAi();
+                        }
+                      : undefined
+                  }
+                  workspaces={workspaces}
+                  currentWorkspaceId={workspaceId}
+                  onSwitchWorkspace={(id) => {
+                    setDrawerOpen(false);
+                    switchWorkspace(id);
+                  }}
+                  onImportWorkspace={importWorkspace}
+                  onExportWorkspace={exportWorkspace}
+                  onShareWorkspace={shareWorkspace}
+                  search={searchPanelState}
+                />
+              </div>
+            </SheetContent>
+          </Sheet>
 
           {/* One boundary for the whole content column. The settings page and the
             binary-document viewers are code-split; the markdown viewer is not,

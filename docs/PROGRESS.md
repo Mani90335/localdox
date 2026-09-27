@@ -1,4 +1,46 @@
-Latest update — 2026-09-28
+Latest update — 2026-09-28 (A09)
+
+Completed A09: mobile navigation now uses the existing Radix Sheet primitive
+with an accessible name, contained focus, background isolation, scroll locking,
+and focus restoration to the actual opener (Menu, Search, or a shortcut's
+previous control). Close, backdrop, and Escape dismiss it; nested search and
+sidebar menus consume Escape first. Menu panels and export flyouts owned by the
+drawer now portal inside its focus boundary, so their actions remain usable.
+The existing close button and safe-area spacing are retained. The viewport no
+longer disables user zoom. The search shortcut now follows the sidebar's 1024px
+breakpoint, fixing hidden search at tablet widths; moving to desktop closes the
+modal and releases its focus/scroll locks without reopening it on shrink.
+
+Validation: the pre-fix production build failed the new accessible-dialog and
+zoom assertions. The initial browser test draft also exposed two harness
+issues (hidden desktop search input selected alongside the mobile input, and
+Ctrl used on macOS); those were corrected before final validation. A nested
+menu regression caught and drove the portal/Escape integration fix.
+Final npm run typecheck, npm test (233/233), npm run build, and git diff --check
+passed. Focused ESLint has zero errors and 13 existing warnings (12 DocsApp
+hook warnings, verified against HEAD, and one menu-primitives refresh warning).
+Production-preview Playwright passed 24/24 across mobile-navigation, search,
+sharing, persistence, and editing. Seven new mobile tests cover forward/reverse
+Tab containment, programmatic background focus attempts, background accessibility
+isolation, dismissal and restored focus, search result selection, tablet search,
+desktop resize and reopening, 320px bounds, nested Escape handling, keyboard
+rename, and focus in export flyouts. Tests emulate touch in Chromium.
+
+Chrome DevTools MCP independently verified the named modal and accessibility
+isolation, nested menu dismissal, focus returning to Menu, released pointer/
+scroll locks, and the unrestricted viewport meta tag. No console warnings or
+errors appeared in that final navigation. The configured MCP profile was busy,
+so verification used the already installed MCP server with an isolated temporary
+profile. Build/browser commands needed sandbox escalation for localhost servers.
+No baseline audit evidence was overwritten; the working tree was clean initially.
+
+Limits: no physical-device pinch gesture, Safari/Firefox, screen reader, or full
+WCAG audit was performed. The 320px check covers navigation bounds, not all
+viewers' reflow. The full browser suite and audit performance harnesses were not
+rerun. Package 7's broader UX work remains pending, and A10 still blocks the
+reliability release. This change does not claim any performance release gate.
+
+Previous update — 2026-09-28 (A06)
 
 Completed A06: search now notices filename-only changes. DocumentIndex caches
 the filename along with content and replaces both filename and content rows
@@ -146,11 +188,11 @@ Pending (not started, or started but not committed)
 - Package 4: A06 is done (2026-09-28 update above). A07's unchanged-query refresh is covered; its remaining worker protocol/lifecycle work is pending.
 - Package 5: A04 (500-edge Stepped diagram makes a 52,311 px page), A05 (3,000-section Markdown), A08 (PDF zoom memory), R01–R04.
 - Package 6: B01–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
-- Package 7: A09 (mobile drawer focus and blocked zoom) and the UX items.
+- Package 7: A09 is done (latest update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
 - Package 8: A12 (Gemini models, not yet checked against Google's current list), B04, B05, R05, R06, and the lint debt (76 errors).
 
-None of PLAN.md's release gates are met yet. The reliability release still needs A09 and A10 as well as what's done.
+None of PLAN.md's release gates are met yet. The reliability release still needs A10 as well as what's done.
 
 Historical working-tree note (superseded by the clean-tree check on 2026-09-28)
 
