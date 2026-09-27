@@ -24,6 +24,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -208,6 +209,8 @@ interface Props {
   onShareFile?: () => void;
   readingMode?: ReadingMode;
   onToggleReadingMode?: () => void;
+  /** Percentage of the available width the reading/editing column takes up. */
+  contentWidth?: number;
   /** Open the Ask AI panel prefilled from the current selection. */
   onAskAi?: (prefill: { selection: string; actionId?: string }) => void;
 }
@@ -351,6 +354,7 @@ function MarkdownViewerImpl({
   onShareFile,
   readingMode = "paginated",
   onToggleReadingMode,
+  contentWidth = 50,
   onAskAi,
 }: Props) {
   const singleMode = readingMode === "single";
@@ -1720,7 +1724,14 @@ function MarkdownViewerImpl({
         {lightbox && <Lightbox {...lightbox} onClose={() => setLightbox(null)} />}
 
         <div
-          className={`docs-reading-pane mx-auto flex w-full max-w-4xl gap-8 px-6 py-10 md:px-10 md:py-16`}
+          className="docs-reading-pane mx-auto flex w-full gap-8 px-6 py-10 md:px-10 md:py-16"
+          // A share of the pane's own inline size (`cqi`, from the
+          // `container-type: inline-size` below), not of the viewport — so the
+          // column already tracks the sidebar being collapsed or expanded, and
+          // only the slider in Settings needs to move it. styles.css only reads
+          // this at `md:` and up: a phone-width column cut down to 40-50% of an
+          // already-narrow screen would be unreadable.
+          style={{ "--docs-content-width": `${contentWidth}cqi` } as CSSProperties}
         >
           <article
             onMouseUp={() => openCreateMenu()}

@@ -442,6 +442,7 @@ export function DocsApp() {
   );
   const [mathNumbering, setMathNumbering] = useState<boolean>(() => loadPrefs().mathNumbering);
   const [mathExplorer, setMathExplorer] = useState<boolean>(() => loadPrefs().mathExplorer);
+  const [contentWidth, setContentWidth] = useState<number>(() => loadPrefs().contentWidth);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [highlightQuery, setHighlightQuery] = useState<string | null>(null);
@@ -769,6 +770,10 @@ export function DocsApp() {
   useEffect(() => {
     savePrefs({ mathRenderer, mathNumbering, mathExplorer });
   }, [mathRenderer, mathNumbering, mathExplorer]);
+
+  useEffect(() => {
+    savePrefs({ contentWidth });
+  }, [contentWidth]);
 
   /**
    * Switching engines invalidates every rendered equation: the cache is keyed
@@ -3082,6 +3087,8 @@ flowchart LR
         onSetTheme={setTheme}
         readingMode={readingMode}
         onSetReadingMode={setReadingMode}
+        contentWidth={contentWidth}
+        onSetContentWidth={setContentWidth}
         mathRenderer={mathRenderer}
         onSetMathRenderer={setMathRenderer}
         mathNumbering={mathNumbering}
@@ -3578,6 +3585,7 @@ flowchart LR
                                   onRemoveSaved={removeSaved}
                                   onOpenArtifact={openEmbeddedArtifact}
                                   readingMode={readingMode}
+                                  contentWidth={contentWidth}
                                   // An edit request belongs to the column the
                                   // reader is working in, not to every column
                                   // showing that document. `revealInPane` has
@@ -3654,6 +3662,7 @@ flowchart LR
                   onShareFile={shareActiveFile}
                   onAskAi={aiEnabled ? askAiFromSelection : undefined}
                   readingMode={readingMode}
+                  contentWidth={contentWidth}
                   mathPreferences={mathPreferences}
                   workspaceId={workspaceId}
                   workspaceRevision={workspaceRevision}

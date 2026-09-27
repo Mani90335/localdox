@@ -53,6 +53,7 @@ export function PaneDocument({
   onRemoveSaved,
   onOpenArtifact,
   readingMode,
+  contentWidth,
   mathPreferences,
   startInEditFileId,
   onStartInEditConsumed,
@@ -82,6 +83,7 @@ export function PaneDocument({
   onRemoveSaved: (id: string) => void;
   onOpenArtifact?: (fileId: string, workspaceId: string) => void;
   readingMode: ReadingMode;
+  contentWidth?: number;
   mathPreferences?: MathPreferences;
   startInEditFileId?: string | null;
   onStartInEditConsumed?: () => void;
@@ -180,6 +182,7 @@ export function PaneDocument({
       onToggleSaved={toggleSaved}
       onRemoveSaved={onRemoveSaved}
       readingMode={readingMode}
+      contentWidth={contentWidth}
       mathPreferences={mathPreferences}
       workspaceId={workspaceId}
       workspaceRevision={workspaceRevision}

@@ -537,6 +537,29 @@
     --bleed: clamp(0rem, (100cqi - var(--measure)) / 2, 5.5rem);
   }
 }
+/*
+ * The reader's own width setting (Settings → Layout → Content width), a share
+ * of the pane rather than of the viewport, so it already tracks the sidebar
+ * collapsing or expanding on its own. Higher specificity than the rules above,
+ * so it wins outright rather than needing `!important`. The bleed a wide block
+ * gets is re-derived from the same width, so tables and diagrams keep reaching
+ * exactly to the column's own edge at every setting, not just the default one.
+ *
+ * Only from `md:` up: on a phone the pane is already the whole screen, and a
+ * column cut down to 40-50% of that would be unreadable. `--docs-content-width`
+ * is only ever set by <MarkdownViewer>, so this is inert everywhere else
+ * `.docs-prose` appears (converted documents, inline artifacts).
+ */
+@media (min-width: 768px) {
+  .docs-reading-pane .docs-prose {
+    max-width: var(--docs-content-width, var(--measure));
+  }
+  @container reading (min-width: 0px) {
+    .docs-reading-pane .docs-prose {
+      --bleed: clamp(0rem, (100cqi - var(--docs-content-width, var(--measure))) / 2, 5.5rem);
+    }
+  }
+}
 .docs-prose > * {
   min-width: 0;
 }

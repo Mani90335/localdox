@@ -605,6 +605,25 @@ export interface Prefs {
    * so it is opt-in.
    */
   mathExplorer: boolean;
+  /**
+   * How wide the reading/editing column gets, as a percentage of the space
+   * available next to the sidebar.
+   *
+   * Because it is a percentage of that space rather than a fixed pixel width,
+   * it already tracks the sidebar being collapsed or expanded on its own —
+   * only the slider itself needs a setting. 100 fills all the available
+   * width; the low end keeps a narrow, book-like column.
+   */
+  contentWidth: number;
+}
+
+/** The column can't get narrower than this, or wider than this. */
+export const CONTENT_WIDTH_MIN = 40;
+export const CONTENT_WIDTH_MAX = 100;
+
+function clampContentWidth(value: unknown): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? value : DEFAULT_PREFS.contentWidth;
+  return Math.min(CONTENT_WIDTH_MAX, Math.max(CONTENT_WIDTH_MIN, n));
 }
 
 const PREFS_KEY = "localdox:prefs";
@@ -625,6 +644,7 @@ const DEFAULT_PREFS: Prefs = {
   mathRenderer: "auto",
   mathNumbering: true,
   mathExplorer: false,
+  contentWidth: 50,
 };
 
 export function loadPrefs(): Prefs {
@@ -640,6 +660,7 @@ export function loadPrefs(): Prefs {
       showEmbedMedia: stored.showEmbedMedia !== false,
       theme: migrateTheme(stored.theme),
       readingFont: migrateFont(stored.readingFont),
+      contentWidth: clampContentWidth(stored.contentWidth),
     };
   } catch {
     return { ...DEFAULT_PREFS };

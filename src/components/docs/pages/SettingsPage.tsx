@@ -33,7 +33,7 @@ import type { Highlight } from "@/lib/markdown/dom-highlighter";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { ThemePref, ReadingMode, ReadingFont } from "@/lib/workspace/persistence";
 import type { MathRendererType } from "@/services/math";
-import { BIN_RETENTION_MS } from "@/lib/workspace/persistence";
+import { BIN_RETENTION_MS, CONTENT_WIDTH_MIN, CONTENT_WIDTH_MAX } from "@/lib/workspace/persistence";
 import { savedTypeLabel, type SavedEntry, type SavedItem } from "@/lib/workspace/saved-items";
 import { STORAGE_QUOTA_FRACTION, formatBytes } from "@/lib/workspace/storage-limits";
 
@@ -60,6 +60,8 @@ export interface SettingsPageProps {
   onSetTheme: (theme: ThemePref) => void;
   readingMode: ReadingMode;
   onSetReadingMode: (mode: ReadingMode) => void;
+  contentWidth: number;
+  onSetContentWidth: (percent: number) => void;
   readingFont: ReadingFont;
   onSetReadingFont: (font: ReadingFont) => void;
   googleFont: string | null;
@@ -135,6 +137,8 @@ export function SettingsPage({
   onSetTheme,
   readingMode,
   onSetReadingMode,
+  contentWidth,
+  onSetContentWidth,
   readingFont,
   onSetReadingFont,
   googleFont,
@@ -261,6 +265,8 @@ export function SettingsPage({
                 onSetTheme={onSetTheme}
                 readingMode={readingMode}
                 onSetReadingMode={onSetReadingMode}
+                contentWidth={contentWidth}
+                onSetContentWidth={onSetContentWidth}
                 readingFont={readingFont}
                 onSetReadingFont={onSetReadingFont}
                 googleFont={googleFont}
@@ -293,6 +299,8 @@ export function SettingsPage({
                 onSetTheme={onSetTheme}
                 readingMode={readingMode}
                 onSetReadingMode={onSetReadingMode}
+                contentWidth={contentWidth}
+                onSetContentWidth={onSetContentWidth}
                 readingFont={readingFont}
                 onSetReadingFont={onSetReadingFont}
                 googleFont={googleFont}
@@ -422,6 +430,8 @@ function AppearanceSettings({
   onSetTheme,
   readingMode,
   onSetReadingMode,
+  contentWidth,
+  onSetContentWidth,
   readingFont,
   onSetReadingFont,
   googleFont,
@@ -457,6 +467,8 @@ function AppearanceSettings({
   onSetAiEnabled: (on: boolean) => void;
   readingMode: ReadingMode;
   onSetReadingMode: (mode: ReadingMode) => void;
+  contentWidth: number;
+  onSetContentWidth: (percent: number) => void;
   readingFont: ReadingFont;
   onSetReadingFont: (font: ReadingFont) => void;
   googleFont: string | null;
@@ -538,6 +550,31 @@ function AppearanceSettings({
               </button>
             );
           })}
+        </Group>
+        <Group className="mt-3">
+          <div className="px-4 py-3.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <label htmlFor="content-width" className="text-sm text-foreground">
+                Content width
+              </label>
+              <span className="text-sm tabular-nums text-muted-foreground">{contentWidth}%</span>
+            </div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              How much of the space beside the sidebar the reading and editing column fills.
+              Narrow keeps a book-like line length; full width uses all of it. It already
+              adjusts when you collapse or expand the sidebar.
+            </p>
+            <input
+              id="content-width"
+              type="range"
+              min={CONTENT_WIDTH_MIN}
+              max={CONTENT_WIDTH_MAX}
+              step={5}
+              value={contentWidth}
+              onChange={(e) => onSetContentWidth(Number(e.target.value))}
+              className="mt-3 h-1.5 w-full cursor-pointer accent-primary"
+            />
+          </div>
         </Group>
       </Section>
 
