@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { dataUrlToArrayBuffer, getDocumentKind } from "@/lib/markdown/document-utils";
 import { ErrorState, Loading, ViewerFrame, ViewerMasthead } from "./shared";
 import type { Props } from "./shared";
 
 type SheetData = { name: string; rows: string[][] };
 
-const ROW_HEIGHT = 33;
+const ROW_HEIGHT = 36;
 const OVERSCAN = 12;
 
 /**
@@ -30,6 +30,8 @@ function compareCells(a: string, b: string): number {
 
 export function SpreadsheetViewer({
   file,
+  embedded,
+  viewerAction,
   isBookmarked,
   onToggleBookmark,
   prevFile,
@@ -42,6 +44,7 @@ export function SpreadsheetViewer({
   const [query, setQuery] = useState("");
   const [deferredQuery, setDeferredQuery] = useState("");
   const [sort, setSort] = useState<{ column: number; direction: 1 | -1 } | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ scrollTop: 0, height: 600 });
@@ -54,6 +57,11 @@ export function SpreadsheetViewer({
 
   useEffect(() => {
     let alive = true;
+    setLoaded(false);
+    setError("");
+    setQuery("");
+    setDeferredQuery("");
+    setSort(null);
     void (async () => {
       try {
         const XLSX = await import("xlsx");
@@ -76,7 +84,7 @@ export function SpreadsheetViewer({
           const raw = XLSX.utils.sheet_to_json(workbook.Sheets[name], {
             header: 1,
             defval: "",
-            blankrows: false,
+            blankrows: true,
           }) as unknown[][];
           // Stringified in place. Mapping into a second matrix doubles peak
           // memory for a sheet that can already be hundreds of megabytes.
@@ -90,6 +98,7 @@ export function SpreadsheetViewer({
           return { name, rows: raw as string[][] };
         });
         if (!alive) return;
+        setLoaded(true);
         setSheets(next);
         setActive(0);
         setError("");
@@ -102,7 +111,14 @@ export function SpreadsheetViewer({
     };
   }, [file.content, file.data, file.kind, file.mimeType, file.name]);
   const sheet = sheets[active];
-  const headers = sheet?.rows[0] ?? [];
+  const headers = useMemo(() => {
+    const width = sheet?.rows.reduce((max, row) => Math.max(max, row.length), 0) ?? 0;
+    return Array.from({ length: width }, (_, column) => sheet?.rows[0]?.[column] ?? "");
+  }, [sheet]);
+  const sourceRowNumbers = useMemo(
+    () => new Map(sheet?.rows.map((row, index) => [row, index + 1])),
+    [sheet],
+  );
   const rows = useMemo(() => {
     const body = sheet?.rows;
     if (!body || body.length < 2) return [] as string[][];
@@ -202,6 +218,8 @@ export function SpreadsheetViewer({
   return (
     <ViewerFrame
       file={file}
+      embedded={embedded}
+      action={viewerAction}
       isBookmarked={isBookmarked}
       onToggleBookmark={onToggleBookmark}
       prevFile={prevFile}
@@ -211,7 +229,7 @@ export function SpreadsheetViewer({
     >
       {error ? (
         <ErrorState message={error} />
-      ) : !sheet ? (
+      ) : !loaded ? (
         <Loading label="Loading spreadsheet" />
       ) : (
         <div className="mx-auto max-w-7xl p-4 md:p-7">
@@ -220,44 +238,42 @@ export function SpreadsheetViewer({
             kindLabel={/\.csv$/i.test(file.name) ? "CSV" : "Spreadsheet"}
             meta={
               <>
-                {rows.length.toLocaleString()} {rows.length === 1 ? "row" : "rows"} ·{" "}
+                {Math.max(0, (sheet?.rows.length ?? 0) - 1).toLocaleString()} rows ·{" "}
                 {headers.length} {headers.length === 1 ? "column" : "columns"}
               </>
             }
-            actions={
-              /* The search field used to be the first thing in the panel and
-                 ran the full width of it — a control sized for a thousand rows
-                 sitting above nine. It is a filter, so it is sized like one and
-                 placed with the other controls. */
-              <div className="relative w-52">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Filter rows"
-                  aria-label="Filter rows"
-                  className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
-                />
-              </div>
-            }
           />
           <div className="overflow-hidden rounded-xl border border-border bg-card shadow-(--shadow-1)">
-            {sheets.length > 1 && (
-              <div className="flex gap-1 overflow-x-auto border-b border-border px-2 pt-2">
-                {sheets.map((item, index) => (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2.5">
+              <div className="relative w-full sm:w-64">
+                <Search
+                  aria-hidden
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Filter rows…"
+                  aria-label="Filter rows"
+                  className="h-9 w-full rounded-md border border-border bg-background pl-9 pr-9 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                />
+                {query && (
                   <button
-                    key={item.name}
-                    onClick={() => {
-                      setActive(index);
-                      setSort(null);
-                    }}
-                    className={`shrink-0 rounded-t-md px-3 py-2 text-xs font-semibold ${active === index ? "bg-background text-primary shadow-[0_-1px_0_var(--color-border)]" : "text-muted-foreground hover:bg-accent"}`}
+                    type="button"
+                    aria-label="Clear filter"
+                    onClick={() => setQuery("")}
+                    className="absolute right-0 top-0 flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
                   >
-                    {item.name}
+                    <X className="h-3.5 w-3.5" />
                   </button>
-                ))}
+                )}
               </div>
-            )}
+              <span role="status" className="text-xs text-muted-foreground">
+                {deferredQuery.trim()
+                  ? `${rows.length.toLocaleString()} matching rows`
+                  : "Select a column heading to sort"}
+              </span>
+            </div>
             <div
               ref={scrollRef}
               onScroll={(e) =>
@@ -266,9 +282,15 @@ export function SpreadsheetViewer({
                   height: e.currentTarget.clientHeight,
                 })
               }
-              className="max-h-[calc(100dvh-15rem)] overflow-auto"
+              className="max-h-[calc(100dvh-18rem)] min-h-40 overflow-auto"
+              role="region"
+              aria-label="Spreadsheet data"
+              tabIndex={0}
             >
-              <table className="spreadsheet-table w-full border-collapse text-left text-sm">
+              <table
+                aria-label={sheet?.name ?? file.name}
+                className="spreadsheet-table w-full border-collapse text-left text-sm"
+              >
                 <thead>
                   <tr>
                     <th className="sticky left-0 top-0 z-20 w-12 bg-muted px-3 py-2 text-right text-xs font-medium text-muted-foreground">
@@ -277,13 +299,6 @@ export function SpreadsheetViewer({
                     {headers.map((header, column) => (
                       <th
                         key={`${header}-${column}`}
-                        onClick={() =>
-                          setSort((previous) =>
-                            previous?.column === column
-                              ? { column, direction: previous.direction === 1 ? -1 : 1 }
-                              : { column, direction: 1 },
-                          )
-                        }
                         aria-sort={
                           sort?.column === column
                             ? sort.direction === 1
@@ -294,25 +309,49 @@ export function SpreadsheetViewer({
                         /* A numeric column's heading follows its figures to the
                            right edge. A heading that sits left of the column it
                            labels reads as belonging to the column beside it. */
-                        className={`sticky top-0 z-10 cursor-pointer select-none whitespace-nowrap bg-muted px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-accent ${
+                        className={`sticky top-0 z-10 cursor-pointer select-none whitespace-nowrap bg-muted px-3 text-xs font-semibold text-foreground transition-colors hover:bg-accent ${
                           numericColumns[column] ? "text-right" : "text-left"
                         }`}
                       >
-                        {header || `Column ${column + 1}`}
-                        {/* The caret holds its space whether or not the column
+                        <button
+                          type="button"
+                          className={`inline-flex w-full items-center gap-1 py-2 focus-visible:outline-2 focus-visible:outline-primary ${numericColumns[column] ? "justify-end" : "justify-start"}`}
+                          onClick={() =>
+                            setSort((previous) =>
+                              previous?.column === column
+                                ? { column, direction: previous.direction === 1 ? -1 : 1 }
+                                : { column, direction: 1 },
+                            )
+                          }
+                        >
+                          {header || `Column ${column + 1}`}
+                          {/* The caret holds its space whether or not the column
                             is the sorted one, so clicking through the headings
                             does not shunt every other column sideways. */}
-                        <span
-                          aria-hidden
-                          className={`ml-1 inline-block w-2 ${sort?.column === column ? "text-primary" : "text-transparent"}`}
-                        >
-                          {sort?.column === column && sort.direction === -1 ? "↓" : "↑"}
-                        </span>
+                          <span
+                            aria-hidden
+                            className={`ml-1 inline-block w-2 ${sort?.column === column ? "text-primary" : "text-transparent"}`}
+                          >
+                            {sort?.column === column && sort.direction === -1 ? "↓" : "↑"}
+                          </span>
+                        </button>
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
+                  {total === 0 && (
+                    <tr>
+                      <td
+                        colSpan={headers.length + 1}
+                        className="px-4 py-16 text-center text-sm text-muted-foreground"
+                      >
+                        {deferredQuery.trim()
+                          ? "No rows match your filter."
+                          : "This sheet has no data rows."}
+                      </td>
+                    </tr>
+                  )}
                   {/* Spacers stand in for the rows outside the window so the
                       scrollbar still reflects the full sheet. */}
                   {first > 0 ? (
@@ -324,8 +363,8 @@ export function SpreadsheetViewer({
                     const rowIndex = first + offset;
                     return (
                       <tr key={rowIndex} style={{ height: ROW_HEIGHT }}>
-                        <td className="sticky left-0 z-10 bg-card px-3 py-2 text-right text-xs text-muted-foreground">
-                          {rowIndex + 1}
+                        <td className="sticky left-0 z-10 bg-card px-3 py-0 text-right text-xs text-muted-foreground">
+                          {sourceRowNumbers.get(row)}
                         </td>
                         {headers.map((_, column) => (
                           <td
@@ -336,7 +375,7 @@ export function SpreadsheetViewer({
                                single number. Left-aligned proportional figures
                                — what this was — make 2840000 and 412 look the
                                same length. Text stays left. */
-                            className={`whitespace-nowrap border-t border-hairline px-3 py-2 text-foreground/85 ${
+                            className={`whitespace-nowrap border-t border-hairline px-3 py-0 text-foreground/85 ${
                               numericColumns[column]
                                 ? "text-right font-medium tabular-nums"
                                 : "text-left"
@@ -356,6 +395,26 @@ export function SpreadsheetViewer({
                 </tbody>
               </table>
             </div>
+            {sheets.length > 1 && (
+              <div className="flex gap-1 overflow-x-auto border-t border-border bg-muted/20 px-2">
+                {sheets.map((item, index) => (
+                  <button
+                    type="button"
+                    aria-pressed={active === index}
+                    key={item.name}
+                    onClick={() => {
+                      setActive(index);
+                      setSort(null);
+                      setQuery("");
+                      setDeferredQuery("");
+                    }}
+                    className={`shrink-0 border-b-2 px-3 py-2 text-xs font-semibold ${active === index ? "border-primary bg-primary/5 text-primary" : "border-transparent text-muted-foreground hover:bg-accent"}`}
+                  >
+                    {item.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

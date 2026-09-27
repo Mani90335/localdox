@@ -33,21 +33,21 @@ export function EditableOfficeViewer(props: Props) {
       </Suspense>
     );
   const kind = file.kind ?? getDocumentKind(file.name, file.mimeType);
-  return (
-    <>
-      {onDocumentSave && !embedded && (
-        <div className="flex justify-end px-4 pt-3">
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            Edit {kind === "docx" ? "document" : "spreadsheet"}
-          </button>
-        </div>
-      )}
-      {kind === "docx" ? <DocxViewer {...props} /> : <SpreadsheetViewer {...props} />}
-    </>
+  const viewerAction =
+    onDocumentSave && !embedded ? (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        aria-label={kind === "docx" ? "Edit document" : "Edit spreadsheet"}
+        className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground coarse:h-11"
+      >
+        <Pencil className="h-4 w-4" />
+        Edit
+      </button>
+    ) : undefined;
+  return kind === "docx" ? (
+    <DocxViewer {...props} viewerAction={viewerAction} />
+  ) : (
+    <SpreadsheetViewer {...props} viewerAction={viewerAction} />
   );
 }

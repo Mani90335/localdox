@@ -76,20 +76,25 @@ export function OfficeEditor(props: OfficeEditorProps) {
         }
       }}
     >
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-semibold">Edit {file.name}</h1>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+        <div className="min-w-0">
+          <h1 className="truncate font-semibold">Edit {file.name}</h1>
           <p className="text-xs text-muted-foreground">
             {dirty ? "Unsaved changes" : "Changes save when you choose Save"}
           </p>
         </div>
         <div className="flex gap-2">
-          <button type="button" className={buttonClass} disabled={saving} onClick={onDone}>
+          <button
+            type="button"
+            className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+            disabled={saving}
+            onClick={onDone}
+          >
             Cancel
           </button>
           <button
             type="button"
-            className={buttonClass}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             disabled={!ready || saving}
             onClick={() => void save()}
           >
@@ -276,33 +281,44 @@ function SheetEditor({ file, register, changed, onError }: EditorProps) {
         {!csv &&
           " Formulas recalculate when opened in Excel; this editor does not calculate results."}
       </p>
-      <div className="mb-2 flex flex-wrap gap-2">
-        {book.SheetNames.map((sheetName, index) => (
-          <button
-            type="button"
-            className={buttonClass}
-            aria-pressed={active === index}
-            key={sheetName}
-            onClick={() => {
-              setActive(index);
-              setScrollTop(0);
-              setScrollLeft(0);
-              viewport.current?.scrollTo(0, 0);
-            }}
-          >
-            {sheetName}
-          </button>
-        ))}
-        <button type="button" className={buttonClass} onClick={() => change(rowCount, 0, "")}>
+      <div className="flex flex-wrap items-center gap-1 rounded-t-lg border border-b-0 border-border bg-muted/20 px-2 py-1">
+        {!csv &&
+          book.SheetNames.length > 1 &&
+          book.SheetNames.map((sheetName, index) => (
+            <button
+              type="button"
+              className={`border-b-2 px-3 py-2 text-sm font-medium ${active === index ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:bg-accent"}`}
+              aria-pressed={active === index}
+              key={sheetName}
+              onClick={() => {
+                setActive(index);
+                setScrollTop(0);
+                setScrollLeft(0);
+                viewport.current?.scrollTo(0, 0);
+              }}
+            >
+              {sheetName}
+            </button>
+          ))}
+        <div className="flex-1" />
+        <button
+          type="button"
+          className="rounded-md px-3 py-2 text-xs text-muted-foreground hover:bg-accent"
+          onClick={() => change(rowCount, 0, "")}
+        >
           Add row
         </button>
-        <button type="button" className={buttonClass} onClick={() => change(0, columnCount, "")}>
+        <button
+          type="button"
+          className="rounded-md px-3 py-2 text-xs text-muted-foreground hover:bg-accent"
+          onClick={() => change(0, columnCount, "")}
+        >
           Add column
         </button>
       </div>
       <div
         ref={viewport}
-        className="h-[60dvh] overflow-auto rounded-lg border border-border"
+        className="h-[60dvh] overflow-auto rounded-b-lg border border-border"
         onScroll={(event) => {
           setScrollTop(event.currentTarget.scrollTop);
           setScrollLeft(event.currentTarget.scrollLeft);

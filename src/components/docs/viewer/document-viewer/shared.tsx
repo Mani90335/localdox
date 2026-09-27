@@ -5,6 +5,7 @@ import { ViewerHeader, type ViewerNav } from "../../navigation/ViewerHeader";
 
 export interface Props {
   file: MdFile;
+  viewerAction?: React.ReactNode;
   isBookmarked?: boolean;
   onToggleBookmark?: () => void;
   onRemoveFile?: () => void;
@@ -84,9 +85,9 @@ export function ViewerMasthead({
   actions?: React.ReactNode;
 }) {
   return (
-    <header className="mb-4 flex items-end justify-between gap-4">
+    <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
-        <p className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <p className="flex flex-wrap items-center gap-2 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
           <span>{kindLabel}</span>
           {meta && (
             <>
@@ -108,11 +109,13 @@ export function ViewerMasthead({
 
 export function ViewerFrame({
   file,
+  embedded,
   children,
   action,
   navAction,
 }: {
   file?: MdFile;
+  embedded?: boolean;
   children: React.ReactNode;
   action?: React.ReactNode;
   navAction?: React.ReactNode;
@@ -120,6 +123,7 @@ export function ViewerFrame({
   isBookmarked?: boolean;
   onToggleBookmark?: () => void;
 } & Pick<Props, "prevFile" | "nextFile" | "onNavFile" | "onOpenPalette">) {
+  if (embedded) return <>{children}</>;
   return (
     <section className="min-h-[calc(100dvh-4rem)] bg-background">
       <ViewerHeader

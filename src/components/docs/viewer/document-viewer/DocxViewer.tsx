@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { dataUrlToArrayBuffer } from "@/lib/markdown/document-utils";
-import { ErrorState, Loading, ViewerFrame } from "./shared";
+import { ErrorState, Loading, ViewerFrame, ViewerMasthead } from "./shared";
 import type { Props } from "./shared";
 
 interface MammothBrowser {
@@ -9,6 +9,8 @@ interface MammothBrowser {
 
 export function DocxViewer({
   file,
+  embedded,
+  viewerAction,
   isBookmarked,
   onToggleBookmark,
   prevFile,
@@ -16,10 +18,12 @@ export function DocxViewer({
   onNavFile,
   onOpenPalette,
 }: Props) {
-  const [html, setHtml] = useState("");
+  const [html, setHtml] = useState<string | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
     let alive = true;
+    setHtml(null);
+    setError("");
     const buffer = dataUrlToArrayBuffer(file.data);
     if (!buffer) {
       setError("This Word file is missing its document data.");
@@ -52,6 +56,8 @@ export function DocxViewer({
   return (
     <ViewerFrame
       file={file}
+      embedded={embedded}
+      action={viewerAction}
       isBookmarked={isBookmarked}
       onToggleBookmark={onToggleBookmark}
       prevFile={prevFile}
@@ -61,13 +67,24 @@ export function DocxViewer({
     >
       {error ? (
         <ErrorState message={error} />
-      ) : !html ? (
+      ) : html === null ? (
         <Loading label="Formatting Word document" />
       ) : (
-        <article
-          className="docx-prose mx-auto max-w-4xl px-5 py-10 md:px-10"
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+        <div className="mx-auto max-w-5xl p-4 md:p-7">
+          {!embedded && <ViewerMasthead file={file} kindLabel="Word document" />}
+          <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-(--shadow-1)">
+            {html ? (
+              <article
+                className="docx-prose mx-auto max-w-4xl px-5 py-8 md:px-12 md:py-12"
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
+            ) : (
+              <p className="px-5 py-16 text-center text-sm text-muted-foreground">
+                This document is empty.
+              </p>
+            )}
+          </div>
+        </div>
       )}
     </ViewerFrame>
   );
