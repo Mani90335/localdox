@@ -12,6 +12,7 @@
  * and for anyone who wants the markdown itself.
  */
 
+import type { MediaContext } from "@/lib/markdown/media-context";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 
 export type ExportFormat = "docx" | "pdf" | "markdown" | "html" | "original";
@@ -137,11 +138,12 @@ export async function exportDocuments(
   files: readonly MdFile[],
   format: ExportFormat,
   onProgress?: (done: number, total: number) => void,
+  context?: MediaContext,
 ): Promise<BatchExportResult> {
   const result: BatchExportResult = { ok: 0, failed: [] };
   for (const [index, file] of files.entries()) {
     try {
-      await exportDocument(file, format);
+      await exportDocument(file, format, context);
       result.ok++;
     } catch (error) {
       result.failed.push({
@@ -167,7 +169,11 @@ function toMarkdownSource(file: Pick<MdFile, "kind" | "content">): string {
   return file.content;
 }
 
-export async function exportDocument(file: MdFile, format: ExportFormat): Promise<ExportResult> {
+export async function exportDocument(
+  file: MdFile,
+  format: ExportFormat,
+  context: MediaContext = {},
+): Promise<ExportResult> {
   const base = safeName(baseName(file.name));
 
   if (format === "original") {
@@ -198,6 +204,13 @@ export async function exportDocument(file: MdFile, format: ExportFormat): Promis
     const filename = `${base}.md`;
     triggerDownload(new Blob([source], { type: "text/markdown;charset=utf-8" }), filename);
     return { kind: "downloaded", filename };
+  }
+
+  if (format === "html" && file.kind !== "mermaid") {
+    const { buildMarkdownHTML } = await import("./media-bundle");
+    const result = await buildMarkdownHTML(file, context);
+    triggerDownload(result.blob, result.name);
+    return { kind: "downloaded", filename: result.name };
   }
 
   const { inferTitle } = await import("./docx");

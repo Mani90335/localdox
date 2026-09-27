@@ -1,3 +1,6 @@
+import { AttachmentPicker } from "./AttachmentPicker";
+import type { MediaContext } from "@/lib/markdown/media-context";
+import type { MdFile } from "@/lib/markdown/markdown-utils";
 import {
   forwardRef,
   memo,
@@ -50,7 +53,7 @@ interface Props {
    */
   onSave: (fileId: string, content: string) => void;
   /** Leave the editor, keeping the current draft. Passes back the cursor's source index. */
-  onDone: (cursorIndex?: number) => void;
+  onDone: (cursorIndex?: number, content?: string) => void;
   /** Leave the editor, restoring `initialContent`. Passes back the cursor's source index. */
   onCancel: (cursorIndex?: number) => void;
   /** Shown when "Inspect in source" couldn't pin the text to a source span. */
@@ -76,6 +79,8 @@ interface Props {
    * the text it names.
    */
   onRename?: (name: string) => void;
+  mediaContext?: MediaContext;
+  onImportAttachments?: (files: File[]) => Promise<MdFile[]>;
 }
 
 function MarkdownEditorImpl(
@@ -89,6 +94,8 @@ function MarkdownEditorImpl(
     onDirtyChange,
     fileName,
     onRename,
+    mediaContext,
+    onImportAttachments,
   }: Props,
   handleRef: React.Ref<MarkdownEditorHandle>,
 ) {
@@ -272,6 +279,27 @@ function MarkdownEditorImpl(
     [applyFormat],
   );
 
+  const [attaching, setAttaching] = useState(false);
+  const attachmentSelection = useRef({ start: 0, end: 0 });
+  const openAttachments = () => {
+    const textarea = textareaRef.current;
+    attachmentSelection.current = {
+      start: textarea?.selectionStart ?? 0,
+      end: textarea?.selectionEnd ?? 0,
+    };
+    setAttaching(true);
+  };
+  const insertAttachment = (markdown: string) =>
+    applyFormat(({ text }) => {
+      const { start, end } = attachmentSelection.current;
+      const insertion = `\n\n${markdown}\n\n`;
+      return {
+        text: text.slice(0, start) + insertion + text.slice(end),
+        start: start + insertion.length,
+        end: start + insertion.length,
+      };
+    });
+
   // The name is edited locally and committed on blur or Enter, not on every
   // keystroke: renaming re-derives the document's kind from its extension, and
   // doing that mid-word would route the reader through a different viewer for
@@ -348,7 +376,11 @@ function MarkdownEditorImpl(
             Cancel
           </button>
           <button
-            onClick={() => onDone(textareaRef.current?.selectionStart)}
+            onClick={() => {
+              const pending = draftRef.current;
+              onSaveRef.current(pending.fileId, pending.text);
+              onDone(textareaRef.current?.selectionStart, pending.text);
+            }}
             className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90 active:scale-95 coarse:min-h-11 coarse:px-4"
           >
             <Eye className="h-3.5 w-3.5" /> Done · Preview
@@ -371,9 +403,21 @@ function MarkdownEditorImpl(
           nothing useful inside this `overflow-hidden` box, which is not itself
           a scroll container — the row simply parked partway down the field. The
           editor scrolls as part of the page, so the header travels with it. */}
+      {mediaContext && (
+        <AttachmentPicker
+          open={attaching}
+          onOpenChange={setAttaching}
+          context={mediaContext}
+          onInsert={insertAttachment}
+          onImport={onImportAttachments}
+        />
+      )}
       <div className="overflow-hidden rounded-lg border border-border bg-muted/30 focus-within:border-primary/50">
         <div className="border-b border-border bg-background/90">
-          <MarkdownToolbar onAction={applyFormat} />
+          <MarkdownToolbar
+            onAction={applyFormat}
+            onAttach={mediaContext ? openAttachments : undefined}
+          />
         </div>
         <textarea
           id="markdown-source"

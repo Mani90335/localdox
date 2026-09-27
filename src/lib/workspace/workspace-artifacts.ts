@@ -1,7 +1,7 @@
-import type { MdFile } from "../markdown/markdown-utils";
-import { getDocumentKind } from "../markdown/document-utils";
-import { parseHeadings, splitIntoSubtopics } from "../markdown/markdown-utils";
-import { persistence, type WorkspaceRecord } from "./persistence";
+import type { MdFile } from "../markdown/markdown-utils.ts";
+import { getDocumentKind } from "../markdown/document-utils.ts";
+import { parseHeadings, splitIntoSubtopics } from "../markdown/markdown-utils.ts";
+import { persistence, type WorkspaceRecord } from "./persistence.ts";
 
 export interface ResolvedArtifact {
   file: MdFile;
@@ -14,18 +14,19 @@ export interface ArtifactViewerDefinition {
   label: string;
 }
 
-// React Markdown intentionally removes unknown URL schemes. A reserved HTTPS
-// origin survives that safety filter while never causing a network request: it
-// is intercepted by the custom image renderer before an <img> is created.
-export const ARTIFACT_URL_PREFIX = "https://workspace-artifact.local/";
-
-export function isArtifactUrl(value?: string): value is string {
-  return typeof value === "string" && value.startsWith(ARTIFACT_URL_PREFIX);
-}
-
-export function artifactReference(value: string) {
-  return decodeURIComponent(value.slice(ARTIFACT_URL_PREFIX.length));
-}
+import {
+  artifactReference,
+  isArtifactUrl,
+  ARTIFACT_URL_PREFIX,
+  decodeReference,
+  findReferencedFile,
+} from "../markdown/media-references.ts";
+export {
+  artifactReference,
+  isArtifactUrl,
+  ARTIFACT_URL_PREFIX,
+} from "../markdown/media-references.ts";
+import type { FolderRecord } from "./persistence.ts";
 
 /** A small public registry makes adding another file viewer a one-line change. */
 export const ViewerRegistry = {
@@ -66,95 +67,106 @@ function hydrateFile(file: WorkspaceRecord["files"][number]): MdFile {
   };
 }
 
-const resolutionCache = new Map<string, Promise<ResolvedArtifact | null>>();
-
-/** Resolve `File.ext` in the current workspace or `Workspace/File.ext` globally. */
-export function resolveWorkspaceArtifact(
+/** Current in-memory files take precedence over persisted autosave snapshots. */
+export async function resolveWorkspaceArtifact(
   reference: string,
   currentWorkspaceId?: string | null,
-  revision?: string,
+  _revision?: string,
   currentFiles?: MdFile[],
   currentWorkspaceName = "Current workspace",
-) {
-  const clean = decodeURIComponent(reference).replace(/^\.\//, "").trim();
-  if (!clean.includes("/") && currentFiles && currentWorkspaceId) {
-    const file = currentFiles.find(
-      (item) => item.name.toLocaleLowerCase() === clean.toLocaleLowerCase(),
-    );
-    if (file)
-      return Promise.resolve({
-        file,
-        workspaceId: currentWorkspaceId,
-        workspaceName: currentWorkspaceName,
-      });
+  currentFolders?: FolderRecord[],
+  sourceFile?: MdFile,
+): Promise<ResolvedArtifact | null> {
+  const clean = decodeReference(reference).trim();
+  const stable = /^@([^/]+)\/(.+)$/.exec(clean);
+  if (stable) {
+    if (stable[1] === currentWorkspaceId && currentFiles) {
+      const file = currentFiles.find((item) => item.id === stable[2] && !item.deletedAt);
+      return file ? { file, workspaceId: stable[1], workspaceName: currentWorkspaceName } : null;
+    }
+    const workspace = await persistence.getWorkspace(stable[1]);
+    const file = workspace?.files.find((item) => item.id === stable[2] && !item.deletedAt);
+    return file && workspace
+      ? { file: hydrateFile(file), workspaceId: workspace.id, workspaceName: workspace.name }
+      : null;
   }
-  const cacheKey = `${currentWorkspaceId ?? ""}:${revision ?? ""}:${clean}`.toLocaleLowerCase();
-  if (resolutionCache.has(cacheKey)) return resolutionCache.get(cacheKey)!;
-  const result = persistence
-    .listWorkspaceSummaries()
-    .then(async (workspaces) => {
-      const [workspacePart, ...fileParts] = clean.split("/");
-      const hasWorkspace = fileParts.length > 0;
-      const fileName = hasWorkspace ? fileParts.join("/") : clean;
-      const candidates = hasWorkspace
-        ? workspaces.filter(
-            (workspace) => workspace.name.toLocaleLowerCase() === workspacePart.toLocaleLowerCase(),
-          )
-        : [
-            ...workspaces.filter((workspace) => workspace.id === currentWorkspaceId),
-            ...workspaces.filter((workspace) => workspace.id !== currentWorkspaceId),
-          ];
-      for (const summary of candidates) {
-        const workspace = await persistence.getWorkspace(summary.id);
-        if (!workspace) continue;
-        const file = workspace.files.find(
-          (item) => item.name.toLocaleLowerCase() === fileName.toLocaleLowerCase(),
-        );
-        if (file)
-          return {
-            file: hydrateFile(file),
-            workspaceId: workspace.id,
-            workspaceName: workspace.name,
-          };
-      }
-      return null;
-    })
-    .catch((error) => {
-      resolutionCache.delete(cacheKey);
-      throw error;
-    });
-  if (resolutionCache.size >= 100) resolutionCache.delete(resolutionCache.keys().next().value!);
-  resolutionCache.set(cacheKey, result);
-  return result;
+  // Most media is in memory already. Avoid cloning every uploaded file from
+  // IndexedDB once for every image/player in the document.
+  const current =
+    currentWorkspaceId && (!currentFiles || !currentFolders)
+      ? await persistence.getWorkspace(currentWorkspaceId)
+      : null;
+  const folders = currentFolders ?? current?.folders ?? [];
+  const files = currentFiles ?? current?.files.map(hydrateFile) ?? [];
+  const local = findReferencedFile(clean, files, folders, sourceFile);
+  if (local && currentWorkspaceId)
+    return { file: local, workspaceId: currentWorkspaceId, workspaceName: currentWorkspaceName };
+  // A repeated local name needs a path; don't silently pick a file elsewhere.
+  if (
+    !clean.includes("/") &&
+    files.filter((file) => !file.deletedAt && file.name.toLowerCase() === clean.toLowerCase())
+      .length > 1
+  )
+    return null;
+  const summaries = await persistence.listWorkspaceSummaries();
+  // Explicit workspace names can themselves contain slashes. Longest prefix wins.
+  const qualified = summaries
+    .filter((ws) => clean.toLowerCase().startsWith(ws.name.toLowerCase() + "/"))
+    .sort((a, b) => b.name.length - a.name.length);
+  const matches: ResolvedArtifact[] = [];
+  for (const summary of qualified.length
+    ? qualified
+    : summaries.filter((ws) => ws.id !== currentWorkspaceId)) {
+    const workspace = await persistence.getWorkspace(summary.id);
+    if (!workspace) continue;
+    const candidates = summary.id === currentWorkspaceId ? files : workspace.files.map(hydrateFile);
+    const file = findReferencedFile(
+      qualified.length ? clean.slice(summary.name.length + 1) : clean,
+      candidates,
+      summary.id === currentWorkspaceId ? folders : (workspace.folders ?? []),
+    );
+    if (file) matches.push({ file, workspaceId: summary.id, workspaceName: summary.name });
+  }
+  // Ambiguous names must be qualified; never silently attach another file.
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function clearArtifactResolutionCache() {
-  resolutionCache.clear();
+  /* Resolution always uses fresh records. */
 }
 
 /** Turn the two ergonomic Markdown forms into a standard custom image URL. */
 export function prepareWorkspaceEmbeds(markdown: string) {
   if (!markdown.includes("![[") && !markdown.includes("@[file]")) return markdown;
-  let fenced = false;
+  let fence: string | null = null;
   return markdown
     .split("\n")
     .map((line) => {
-      if (/^\s*```/.test(line)) {
-        fenced = !fenced;
+      const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+      if (marker) {
+        if (!fence) fence = marker[1];
+        else if (marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
         return line;
       }
-      if (fenced) return line;
+      if (fence || /^( {4}|\t)/.test(line)) return line;
       return line
-        .replace(
-          /!\[\[([^\]]+)\]\]/g,
-          (_, reference) =>
-            `![${reference}](${ARTIFACT_URL_PREFIX}${encodeURIComponent(reference.trim())})`,
+        .split(/(`+[^`]*(?:`[^`]+)*?`+)/g)
+        .map((part) =>
+          part.startsWith("`")
+            ? part
+            : part
+                .replace(
+                  /!\[\[([^\]]+)\]\]/g,
+                  (_, reference) =>
+                    `![${reference}](${ARTIFACT_URL_PREFIX}${encodeURIComponent(reference.trim())})`,
+                )
+                .replace(
+                  /@\[file\]\(([^)]+)\)/g,
+                  (_, reference) =>
+                    `![${reference}](${ARTIFACT_URL_PREFIX}${encodeURIComponent(reference.trim())})`,
+                ),
         )
-        .replace(
-          /@\[file\]\(([^)]+)\)/g,
-          (_, reference) =>
-            `![${reference}](${ARTIFACT_URL_PREFIX}${encodeURIComponent(reference.trim())})`,
-        );
+        .join("");
     })
     .join("\n");
 }

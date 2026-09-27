@@ -1,3 +1,4 @@
+import { Paperclip } from "lucide-react";
 import type { FormatAction } from "@/lib/markdown/markdown-format";
 import { TOOLBAR_GROUPS } from "@/lib/markdown/markdown-toolbar-items";
 
@@ -23,7 +24,13 @@ function shortcutLabel(shortcut: string): string {
     .replaceAll("+", apple ? "" : "+");
 }
 
-export function MarkdownToolbar({ onAction }: { onAction: (action: FormatAction) => void }) {
+export function MarkdownToolbar({
+  onAction,
+  onAttach,
+}: {
+  onAction: (action: FormatAction) => void;
+  onAttach?: () => void;
+}) {
   return (
     <div
       role="toolbar"
@@ -34,6 +41,18 @@ export function MarkdownToolbar({ onAction }: { onAction: (action: FormatAction)
       // reader loses the muscle memory that made it worth having.
       className="flex items-center gap-0.5 overflow-x-auto px-1 py-1 [scrollbar-none] [&::-webkit-scrollbar]:hidden"
     >
+      {onAttach && (
+        <button
+          type="button"
+          aria-label="Attach media or files"
+          title="Attach media or files"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onAttach}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent coarse:h-11 coarse:w-11"
+        >
+          <Paperclip className="h-3.5 w-3.5" />
+        </button>
+      )}
       {TOOLBAR_GROUPS.map((group, index) => (
         <div key={index} className="flex items-center gap-0.5">
           {index > 0 && <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />}

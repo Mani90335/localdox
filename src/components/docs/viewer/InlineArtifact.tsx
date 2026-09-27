@@ -1,6 +1,10 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ComponentPropsWithoutRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { FolderRecord } from "@/lib/workspace/persistence";
+import { isLocalReference, isArtifactUrl } from "@/lib/markdown/media-references";
+import { MarkdownMedia } from "./MarkdownMedia";
+import { remarkMedia, mediaUrlTransform, parseMediaSpec } from "@/lib/markdown/markdown-media";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import { dataUrlToBlob, getDocumentKind } from "@/lib/markdown/document-utils";
 const DocumentViewer = lazy(() =>
@@ -11,8 +15,6 @@ import { BoardEmbed } from "@/services/board";
 import {
   prepareWorkspaceEmbeds,
   resolveWorkspaceArtifact,
-  artifactReference,
-  isArtifactUrl,
   type ResolvedArtifact,
 } from "@/lib/workspace/workspace-artifacts";
 
@@ -22,6 +24,8 @@ interface Props {
   workspaceRevision?: string;
   currentWorkspaceFiles?: MdFile[];
   currentWorkspaceName?: string;
+  currentWorkspaceFolders?: FolderRecord[];
+  sourceFile?: MdFile;
   depth?: number;
   ancestors?: string[];
   onOpenArtifact?: (fileId: string, workspaceId: string) => void;
@@ -33,6 +37,8 @@ export function InlineArtifact({
   workspaceRevision,
   currentWorkspaceFiles,
   currentWorkspaceName,
+  currentWorkspaceFolders,
+  sourceFile,
   depth = 0,
   ancestors = [],
   onOpenArtifact,
@@ -48,6 +54,8 @@ export function InlineArtifact({
       workspaceRevision,
       currentWorkspaceFiles,
       currentWorkspaceName,
+      currentWorkspaceFolders,
+      sourceFile,
     )
       .then((result) => alive && setArtifact(result))
       .catch(() => {
@@ -62,6 +70,8 @@ export function InlineArtifact({
     workspaceRevision,
     currentWorkspaceFiles,
     currentWorkspaceName,
+    currentWorkspaceFolders,
+    sourceFile,
   ]);
 
   const objectUrl = useObjectUrl(artifact?.file);
@@ -95,7 +105,13 @@ export function InlineArtifact({
         }
       >
         {renderArtifact(file, objectUrl, {
-          currentWorkspaceId,
+          currentWorkspaceId: artifact.workspaceId,
+          currentWorkspaceFiles:
+            artifact.workspaceId === currentWorkspaceId ? currentWorkspaceFiles : undefined,
+          currentWorkspaceFolders:
+            artifact.workspaceId === currentWorkspaceId ? currentWorkspaceFolders : undefined,
+          currentWorkspaceName: artifact.workspaceName,
+          sourceFile: file,
           workspaceRevision,
           depth,
           ancestors,
@@ -140,6 +156,8 @@ function EmbeddedMarkdown({
   workspaceRevision,
   currentWorkspaceFiles,
   currentWorkspaceName,
+  currentWorkspaceFolders,
+  sourceFile,
   depth = 0,
   ancestors = [],
   onOpenArtifact,
@@ -148,7 +166,8 @@ function EmbeddedMarkdown({
   return (
     <article className="artifact-markdown docs-prose">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMedia]}
+        urlTransform={mediaUrlTransform}
         components={{
           pre: (props: ComponentPropsWithoutRef<"pre">) => {
             const codeElement = Array.isArray(props.children) ? props.children[0] : props.children;
@@ -164,28 +183,46 @@ function EmbeddedMarkdown({
             }
             return <pre {...props} />;
           },
-          img: (props: ComponentPropsWithoutRef<"img">) =>
-            isArtifactUrl(props.src) ? (
-              <InlineArtifact
-                reference={artifactReference(props.src)}
-                currentWorkspaceId={currentWorkspaceId}
-                workspaceRevision={workspaceRevision}
-                currentWorkspaceFiles={currentWorkspaceFiles}
-                currentWorkspaceName={currentWorkspaceName}
-                depth={depth + 1}
-                ancestors={[...ancestors, file.id]}
-                onOpenArtifact={onOpenArtifact}
-              />
-            ) : (
-              <img {...props} loading="lazy" />
-            ),
-          a: (props: ComponentPropsWithoutRef<"a">) => (
-            <a
-              {...props}
-              target={props.href?.startsWith("http") ? "_blank" : undefined}
-              rel="noreferrer"
+          img: (props) => (
+            <MarkdownMedia
+              src={props.src ?? ""}
+              alt={props.alt}
+              spec={parseMediaSpec((props as Record<string, unknown>)["data-media"])}
+              context={{
+                workspaceId: currentWorkspaceId,
+                workspaceRevision,
+                workspaceFiles: currentWorkspaceFiles,
+                workspaceFolders: currentWorkspaceFolders,
+                workspaceName: currentWorkspaceName,
+                sourceFile: file,
+                depth: depth + 1,
+                ancestors: [...ancestors, file.id],
+              }}
             />
           ),
+          a: (props: ComponentPropsWithoutRef<"a">) =>
+            isLocalReference(props.href ?? "") || isArtifactUrl(props.href) ? (
+              <MarkdownMedia
+                src={props.href ?? ""}
+                linkOnly
+                context={{
+                  workspaceId: currentWorkspaceId,
+                  workspaceRevision,
+                  workspaceFiles: currentWorkspaceFiles,
+                  workspaceFolders: currentWorkspaceFolders,
+                  workspaceName: currentWorkspaceName,
+                  sourceFile: file,
+                }}
+              >
+                {props.children}
+              </MarkdownMedia>
+            ) : (
+              <a
+                {...props}
+                target={props.href?.startsWith("http") ? "_blank" : undefined}
+                rel="noreferrer"
+              />
+            ),
         }}
       >
         {content}

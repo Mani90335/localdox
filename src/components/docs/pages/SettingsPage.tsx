@@ -12,6 +12,7 @@ import {
   Sparkles,
   Sigma,
   Pencil,
+  Plus,
   X,
 } from "lucide-react";
 import {
@@ -37,10 +38,13 @@ import { savedTypeLabel, type SavedEntry, type SavedItem } from "@/lib/workspace
 import { STORAGE_QUOTA_FRACTION, formatBytes } from "@/lib/workspace/storage-limits";
 
 export interface SettingsPageProps {
+  showEmbedMedia: boolean;
+  onSetShowEmbedMedia: (show: boolean) => void;
   workspaces: { id: string; name: string }[];
   currentWorkspaceId: string | null;
   onRenameWorkspace: (id: string, name: string) => void;
   onDeleteWorkspace: (id: string) => void;
+  onNewWorkspace: (name: string) => void;
   onClearStorage: () => void;
   saved: SavedEntry[];
   onOpenSaved: (item: SavedItem) => void;
@@ -109,10 +113,13 @@ function visibleTabs(aiEnabled: boolean) {
 }
 
 export function SettingsPage({
+  showEmbedMedia,
+  onSetShowEmbedMedia,
   workspaces,
   currentWorkspaceId,
   onRenameWorkspace,
   onDeleteWorkspace,
+  onNewWorkspace,
   onClearStorage,
   saved,
   onOpenSaved,
@@ -310,10 +317,13 @@ export function SettingsPage({
             )}
             {activeTab === "workspace" && (
               <WorkspaceSettings
+                showEmbedMedia={showEmbedMedia}
+                onSetShowEmbedMedia={onSetShowEmbedMedia}
                 workspaces={workspaces}
                 currentWorkspaceId={currentWorkspaceId}
                 onRename={onRenameWorkspace}
                 onDelete={onDeleteWorkspace}
+                onNew={onNewWorkspace}
                 onOpenWorkspace={onOpenWorkspace}
                 onImport={onImportWorkspace}
                 onExport={onExportWorkspace}
@@ -653,30 +663,102 @@ function AppearanceSettings({
 }
 
 function WorkspaceSettings({
+  showEmbedMedia,
+  onSetShowEmbedMedia,
   workspaces,
   currentWorkspaceId,
   onRename,
   onDelete,
+  onNew,
   onOpenWorkspace,
   onImport,
   onExport,
   onShare,
 }: {
+  showEmbedMedia: boolean;
+  onSetShowEmbedMedia: (show: boolean) => void;
   workspaces: { id: string; name: string }[];
   currentWorkspaceId: string | null;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
+  onNew: (name: string) => void;
   onOpenWorkspace: (id: string) => void;
   onImport: (file: File) => void;
   onExport: () => void;
   onShare: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+
+  const commitCreate = () => {
+    const name = newName.trim();
+    if (!name) return;
+    onNew(name);
+    setCreating(false);
+    setNewName("");
+  };
 
   return (
     <div className="space-y-10">
-      <Section title="Workspaces">
+      <Section title="Sidebar">
         <Group>
+          <Row label="Show embed-media folder"
+            hint="Across all workspaces. Hidden attachments still appear in documents and exports."
+            control={<Switch aria-label="Show embed-media folder" checked={showEmbedMedia} onCheckedChange={onSetShowEmbedMedia} />} />
+        </Group>
+      </Section>
+      <Section
+        title="Workspaces"
+        action={
+          !creating && (
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="coarse:min-h-11 inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New
+            </button>
+          )
+        }
+      >
+        <Group>
+          {creating && (
+            <div className="flex items-center gap-2 px-4 py-2.5">
+              <input
+                autoFocus
+                type="text"
+                placeholder="Workspace name..."
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitCreate();
+                  if (e.key === "Escape") {
+                    setCreating(false);
+                    setNewName("");
+                  }
+                }}
+                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/10 coarse:min-h-11"
+              />
+              <button
+                onClick={commitCreate}
+                disabled={!newName.trim()}
+                className="rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                Save
+              </button>
+              <IconButton
+                onClick={() => {
+                  setCreating(false);
+                  setNewName("");
+                }}
+                label="Cancel new workspace"
+              >
+                <X className="h-4 w-4" />
+              </IconButton>
+            </div>
+          )}
           {workspaces.map((ws) => (
             <WorkspaceItemRow
               key={ws.id}

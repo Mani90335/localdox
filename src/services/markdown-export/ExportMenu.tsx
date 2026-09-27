@@ -12,10 +12,17 @@
  * during the wait would start a second render of the same diagrams.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { Download, FileText, FileType, Globe, Loader2, Printer } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
+import type { MediaContext } from "@/lib/markdown/media-context";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import { availableFormats, FORMAT_LABEL, type ExportFormat } from "./index";
 
@@ -32,31 +39,13 @@ const FORMAT_HINT: Record<ExportFormat, string> = {
   docx: "Diagrams as images, headings as Word styles",
   pdf: "Print dialog — choose Save as PDF",
   markdown: "The source text",
-  html: "One self-contained page",
+  html: "Styled page; local attachments in a ZIP",
   original: "Exactly as uploaded",
 };
 
-export function ExportMenu({ file }: { file: MdFile }) {
+export function ExportMenu({ file, mediaContext }: { file: MdFile; mediaContext?: MediaContext }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<ExportFormat | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
   const formats = availableFormats(file);
 
   const run = async (format: ExportFormat) => {
@@ -64,7 +53,7 @@ export function ExportMenu({ file }: { file: MdFile }) {
     setBusy(format);
     try {
       const { exportDocument } = await import("./index");
-      const result = await exportDocument(file, format);
+      const result = await exportDocument(file, format, mediaContext);
       toast.success(
         result.kind === "printed" ? "Ready to save as PDF" : `Downloaded ${result.filename}`,
         {
@@ -84,44 +73,38 @@ export function ExportMenu({ file }: { file: MdFile }) {
   };
 
   return (
-    <div ref={rootRef} className="relative">
-      <button
-        onClick={() => setOpen((value) => !value)}
-        disabled={busy !== null}
-        title="Export this document"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60 coarse:h-11 coarse:w-11"
-      >
-        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-      </button>
-
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full z-(--z-dropdown) mt-1 w-64 rounded-lg border border-border bg-popover p-1 shadow-xl"
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          disabled={busy !== null}
+          title="Export this document"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60 coarse:h-11 coarse:w-11"
         >
-          {formats.map((format) => {
-            const Icon = FORMAT_ICON[format];
-            return (
-              <button
-                key={format}
-                role="menuitem"
-                onClick={() => void run(format)}
-                className="flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-accent"
-              >
-                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium">{FORMAT_LABEL[format]}</span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {FORMAT_HINT[format]}
-                  </span>
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="z-(--z-dropdown) w-64">
+        {formats.map((format) => {
+          const Icon = FORMAT_ICON[format];
+          return (
+            <DropdownMenuItem
+              key={format}
+              onSelect={() => void run(format)}
+              className="flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-accent"
+            >
+              <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium">{FORMAT_LABEL[format]}</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {FORMAT_HINT[format]}
                 </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
+              </span>
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
