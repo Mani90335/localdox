@@ -15,17 +15,7 @@ import {
   convertedFootnotes,
   ConvertedRemoteImage,
 } from "@/services/doc-conversion";
-import {
-  createContext,
-  memo,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 
@@ -34,7 +24,6 @@ import ReactMarkdown from "react-markdown";
 const MarkdownContent = memo(ReactMarkdown);
 import { useMarkdownPlugins } from "@/lib/markdown/markdown-plugins";
 import {
-  Check,
   Copy,
   Link2,
   ArrowLeft,
@@ -42,11 +31,6 @@ import {
   Clock,
   Pencil,
   Eye,
-  Info,
-  AlertTriangle,
-  Lightbulb,
-  AlertOctagon,
-  StickyNote,
   Tag,
   Trash2,
   X,
@@ -61,18 +45,11 @@ import {
   Crosshair,
   Code2,
   Download,
-  Expand,
-  Minimize2,
-  ChevronDown,
   FileText,
 } from "lucide-react";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { ReadingMode } from "@/lib/workspace/persistence";
 import { slugify } from "@/lib/markdown/markdown-utils";
-import { MermaidBlock } from "@/services/diagrams";
-import { SaveActionContext } from "../editor/save-action";
-import { MindMapBlock } from "@/services/mindmap";
-import { JsonTree } from "./JsonTree";
 import { ReadingProgress } from "../navigation/ReadingProgress";
 import { MarkdownEditor, type MarkdownEditorHandle } from "../editor/MarkdownEditor";
 import { detectEmbed, EmbedFrame, isVideoUrl, VideoPlayer } from "@/lib/markdown/media-embeds";
@@ -86,14 +63,14 @@ import {
   releaseTextIndex,
   contextAround,
   findAnchor,
-  nodeOffsets,
   sameQuote,
   textBetween,
+  queryRanges,
 } from "@/lib/markdown/text-offsets";
+import { createHighlightPainter } from "@/lib/markdown/highlight-registry";
 import {
   findSaved,
   savedExcerpt,
-  type SavedBlockType,
   type SavedDraft,
   type SavedItem,
 } from "@/lib/workspace/saved-items";
@@ -106,12 +83,24 @@ import {
   wordCount,
 } from "@/lib/markdown/markdown-utils";
 import { InlineArtifact } from "./InlineArtifact";
-import { InteractiveBlock } from "./InteractiveBlock";
 import {
   artifactReference,
   isArtifactUrl,
   prepareWorkspaceEmbeds,
 } from "@/lib/workspace/workspace-artifacts";
+import {
+  CollapseContext,
+  SavedContext,
+  type CollapseContextValue,
+  type SavedContextValue,
+} from "./markdown-viewer/contexts";
+import { elementOf, flashPassage } from "./markdown-viewer/flash-passage";
+import { HeadingLink } from "./markdown-viewer/HeadingLink";
+import { SavableBlock } from "./markdown-viewer/SavableBlock";
+import { CodeBlock } from "./markdown-viewer/CodeBlock";
+import { Callout } from "./markdown-viewer/Callout";
+import { extractText } from "./markdown-viewer/extract-text";
+import { remarkInteractiveBlockMeta } from "./markdown-viewer/remark-interactive-block-meta";
 import {
   Select,
   SelectContent,
@@ -217,102 +206,12 @@ interface Props {
 
 const stripExt = (name: string) => name.replace(/\.(md|markdown|mdx|txt)$/i, "");
 
-/** The element a range starts in, which is what actually scrolls. */
-const elementOf = (range: Range | null) =>
-  range
-    ? ((range.startContainer.nodeType === Node.ELEMENT_NODE
-        ? (range.startContainer as HTMLElement)
-        : range.startContainer.parentElement) ?? null)
-    : null;
-
-/** How long a jumped-to passage stays lit. */
-const FLASH_MS = 1800;
-
-/**
- * The CSS Custom Highlight API, as much of it as is needed here and only where
- * the browser has it. Typed locally because it is still absent from the DOM
- * lib this project builds against.
- */
-type HighlightRegistry = Map<string, object> | undefined;
-const highlightRegistry = (): HighlightRegistry =>
-  typeof CSS !== "undefined"
-    ? (CSS as unknown as { highlights?: Map<string, object> }).highlights
-    : undefined;
-
-/**
- * Flash a passage once, so that arriving somewhere is visible and not merely
- * true. Shared by the saved-item jump and the search jump.
- *
- * A text range gets a one-shot custom highlight, which can span elements; a
- * heading or an image, which arrive without a range, get the equivalent
- * class-based pulse.
- */
-function flashPassage(range: Range | null, target: HTMLElement | null) {
-  const registry = highlightRegistry();
-  const HighlightCtor = (globalThis as { Highlight?: new (...ranges: Range[]) => object })
-    .Highlight;
-  let clear: (() => void) | undefined;
-  if (range && registry && HighlightCtor) {
-    registry.set("dc-saved-flash", new HighlightCtor(range));
-    clear = () => void registry.delete("dc-saved-flash");
-  } else if (target) {
-    target.classList.add("docs-saved-flash");
-    clear = () => target.classList.remove("docs-saved-flash");
-  }
-  if (clear) setTimeout(clear, FLASH_MS);
-}
-
 /**
  * Viewer-specific remark passes, held at module scope so the array identity is
  * stable. Rebuilding it per render would make react-markdown re-parse the whole
  * document every time this component re-renders for any other reason.
  */
 const EXTRA_REMARK_PLUGINS = [remarkInteractiveBlockMeta, remarkMedia];
-
-/**
- * Star affordances live deep inside the rendered markdown (a heading, a table,
- * a code block), far from the state that knows what is starred. They read it
- * through this context rather than through props so that saving something
- * re-renders the stars alone — passing `saved` into the `components` memo would
- * rebuild every renderer and re-render the whole document on each star.
- */
-interface SavedContextValue {
-  /** The element offsets are measured against (the rendered page). */
-  containerRef: React.RefObject<HTMLDivElement | null>;
-  /** Page the reader is on; undefined in single-page mode (whole-doc offsets). */
-  subtopicId?: string;
-  isSaved: (probe: {
-    kind: SavedItem["kind"];
-    headingId?: string;
-    text?: string;
-  }) => SavedItem | undefined;
-  toggle: (draft: SavedDraft) => void;
-  remove: (id: string) => void;
-  enabled: boolean;
-  /**
-   * Changes when the rendered markdown does. `SavableBlock` reads its own
-   * `textContent` to know what it would save, and that read walks the block's
-   * whole subtree — it must happen when the document changes, not on every
-   * render of every block.
-   */
-  revision: string;
-}
-
-const SavedContext = createContext<SavedContextValue | null>(null);
-
-/**
- * Which sections the reader has wrapped up, shared between a heading and the
- * content beneath it.
- *
- * Collapsing is a property of the rendered document rather than of any one
- * element: the heading owns the control, but what it hides is its *siblings*,
- * up to the next heading of the same or higher rank. Both sides read this.
- */
-interface CollapseContextValue {
-  isCollapsed: (headingId: string) => boolean;
-  toggle: (headingId: string) => void;
-}
-const CollapseContext = createContext<CollapseContextValue | null>(null);
 
 function MarkdownViewerImpl({
   file,
@@ -802,21 +701,23 @@ function MarkdownViewerImpl({
     openCreateMenu({ x: e.clientX, y: e.clientY });
   };
 
+  const paintedHighlights = useRef<Array<{ hl: Highlight; range: Range }>>([]);
+
   // Paint persistent highlights with the CSS Custom Highlight API — no DOM
   // mutation, so React re-renders never wipe them and cross-node selections
   // highlight correctly. Groups map to ::highlight(dc-hl-N) rules in the CSS.
   useEffect(() => {
     const container = contentRef.current;
-    const CSSH = (typeof CSS !== "undefined" && (CSS as any).highlights) as
-      Map<string, any> | undefined;
-    if (!container || !CSSH || typeof (window as any).Highlight === "undefined") return;
+    const painter = createHighlightPainter();
+    if (!container || !painter.supported || !highlights.length) return;
     // Mid-edit the rendered document is a moving target (the draft autosaves
     // every 400ms). Re-anchoring waits for the reader to leave the editor.
     if (editMode) return;
 
     // Deferred to the next frame so adding a highlight doesn't repaint every
     // other one synchronously inside the same commit the reader is watching.
-    const frame = requestAnimationFrame(() => {
+    const paint = () => {
+      paintedHighlights.current = [];
       const groups: Record<string, Range[]> = {};
       // Corrections found along the way, written back once at the end.
       const repairs: Array<{ id: string; patch: Partial<Highlight> }> = [];
@@ -834,7 +735,7 @@ function MarkdownViewerImpl({
           // A stale subtopicId means the heading it was slugged from was edited.
           // Rather than dropping the highlight, let the current page try to
           // re-anchor it by text and adopt it if the text is here.
-          if (sectionExists && hl.subtopicId !== activeChunk.id) continue;
+          if (hl.subtopicId && sectionExists && hl.subtopicId !== activeChunk.id) continue;
           owned = hl.subtopicId === activeChunk.id;
         }
 
@@ -856,7 +757,12 @@ function MarkdownViewerImpl({
             // Only persist offsets measured in this highlight's own space —
             // writing whole-doc offsets onto a section highlight (or the
             // reverse) would corrupt it for the other reading mode.
-            if (range && !range.collapsed && (owned || !sectionExists)) {
+            if (
+              range &&
+              !range.collapsed &&
+              (owned || !sectionExists) &&
+              (hl.start !== anchor.start || hl.end !== anchor.end || hl.orphaned || !sectionExists)
+            ) {
               repairs.push({
                 id: hl.id,
                 patch: {
@@ -889,23 +795,30 @@ function MarkdownViewerImpl({
         if (hl.orphaned && !repairs.some((r) => r.id === hl.id)) {
           repairs.push({ id: hl.id, patch: { orphaned: false } });
         }
+        paintedHighlights.current.push({ hl, range });
         const g = hlGroup(hl.color);
         (groups[g] ||= []).push(range);
       }
 
-      HL_COLORS.forEach((c) => CSSH.delete(hlGroup(c)));
-      for (const [g, ranges] of Object.entries(groups)) {
-        CSSH.set(g, new (window as any).Highlight(...ranges));
-      }
+      painter.paint(groups);
 
       // Re-runs this effect, which then takes the fast path for every repaired
       // highlight and produces no further repairs.
       if (repairs.length) onRepairHighlights?.(repairs);
-    });
-
-    return () => {
+    };
+    let frame = requestAnimationFrame(paint);
+    // Syntax plugins, diagrams, folds and embeds can replace text nodes
+    // without changing the markdown prop. Rebuild ranges after those commits.
+    const observer = new MutationObserver(() => {
       cancelAnimationFrame(frame);
-      HL_COLORS.forEach((c) => CSSH.delete(hlGroup(c)));
+      frame = requestAnimationFrame(paint);
+    });
+    observer.observe(container, { childList: true, subtree: true, characterData: true });
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+      paintedHighlights.current = [];
+      painter.clear();
     };
   }, [
     highlights,
@@ -919,9 +832,31 @@ function MarkdownViewerImpl({
     onRepairHighlights,
   ]);
 
-  // The offset index outlives this component's containers; drop it on unmount
-  // so a stale document can't keep its text nodes (or its observer) alive.
-  useEffect(() => releaseTextIndex, []);
+  useEffect(() => {
+    const container = contentRef.current;
+    if (!container || editMode || !highlightQuery?.trim()) return;
+    const painter = createHighlightPainter();
+    if (!painter.supported) return;
+    const paint = () => painter.paint({ "dc-query": queryRanges(container, highlightQuery ?? "") });
+    let frame = requestAnimationFrame(paint);
+    const observer = new MutationObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(paint);
+    });
+    observer.observe(container, { childList: true, subtree: true, characterData: true });
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+      painter.clear();
+    };
+  }, [highlightQuery, activeChunk.id, singleMode, editMode, file.id]);
+
+  useEffect(() => {
+    const container = contentRef.current;
+    return () => {
+      if (container) releaseTextIndex(container);
+    };
+  }, [activeChunk.id, singleMode, editMode, file.id]);
 
   // Click inside the content: if the click lands on an existing highlight, open
   // its edit popover (CSS highlights aren't DOM nodes, so we hit-test offsets).
@@ -931,17 +866,22 @@ function MarkdownViewerImpl({
     if (!window.getSelection()?.isCollapsed) return; // a drag-select, not a click
     const off = offsetFromPoint(contentRef.current, e.clientX, e.clientY);
     if (off == null) return;
-    // In single mode only whole-doc highlights carry offsets valid for this
-    // container; section highlights are painted by text and aren't hit-testable.
-    const hit = highlights.find(
-      (h) =>
-        (singleMode ? !h.subtopicId : !h.subtopicId || h.subtopicId === activeChunk.id) &&
-        typeof h.start === "number" &&
-        typeof h.end === "number" &&
-        off >= h.start &&
-        off < h.end,
-    );
-    if (hit) openEditMenu(hit, e.clientX, e.clientY);
+    // Use the ranges actually painted in this pane, including re-anchored
+    // section highlights shown in whole-document mode and legacy highlights.
+    const point = buildRange(contentRef.current, off, off + 1);
+    if (!point) return;
+    const hit = paintedHighlights.current.find(({ range }) => {
+      if (range.comparePoint(point.startContainer, point.startOffset) !== 0) return false;
+      const rects = range.getClientRects();
+      return Array.from(rects).some(
+        (rect) =>
+          e.clientX >= rect.left &&
+          e.clientX <= rect.right &&
+          e.clientY >= rect.top &&
+          e.clientY <= rect.bottom,
+      );
+    });
+    if (hit) openEditMenu(hit.hl, e.clientX, e.clientY);
   };
 
   // Close the menu on outside click / Escape (but keep it open while the reader
@@ -1101,37 +1041,6 @@ function MarkdownViewerImpl({
     return { words: wordCount(src), readingMin: readingMinutes(src) };
   }, [singleMode, file.content, activeChunk.content]);
 
-  // Search-query highlighting stays a lightweight React wrap. Persistent
-  // highlights are painted via the CSS Custom Highlight API instead (see the
-  // effect below) so they survive re-renders and span multiple elements.
-  const highlightText = (text: string): any => {
-    const q = highlightQuery?.trim();
-    if (!q || !text) return text;
-    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const parts = text.split(new RegExp(`(${escaped})`, "gi"));
-    return parts.map((p, i) =>
-      p.toLowerCase() === q.toLowerCase() ? (
-        <mark key={i} className="rounded bg-primary/25 px-0.5 text-foreground">
-          {p}
-        </mark>
-      ) : (
-        <span key={i}>{p}</span>
-      ),
-    );
-  };
-
-  const walkChildren = (children: any): any => {
-    // With no active search there is nothing to wrap. Returning children
-    // untouched avoids blanketing the document in <span>s — which bloated the
-    // DOM and, worse, split it into thousands of extra text nodes that every
-    // offset lookup then had to walk.
-    if (!highlightQuery?.trim()) return children;
-    if (typeof children === "string") return highlightText(children);
-    if (Array.isArray(children))
-      return children.map((c, i) => <span key={i}>{walkChildren(c)}</span>);
-    return children;
-  };
-
   /**
    * Whether the element currently being rendered sits under a collapsed
    * heading.
@@ -1182,7 +1091,7 @@ function MarkdownViewerImpl({
     const hidden = underCollapsed(rank);
     enterHeading(rank, id);
     if (hidden) return null;
-    return <HeadingLink as={as} {...p} highlight={highlightText} />;
+    return <HeadingLink as={as} {...p} />;
   };
 
   const components = useMemo(
@@ -1225,7 +1134,7 @@ function MarkdownViewerImpl({
               );
           }
         }
-        return <p {...p}>{walkChildren(p.children)}</p>;
+        return <p {...p}>{p.children}</p>;
       }),
       blockquote: foldable((p: any) => (
         <SavableBlock blockType="quote">
@@ -1251,7 +1160,7 @@ function MarkdownViewerImpl({
           </SavableBlock>
         );
       }),
-      div: foldable((p: any) => <div {...p}>{walkChildren(p.children)}</div>),
+      div: foldable((p: any) => <div {...p}>{p.children}</div>),
       img: foldable((p: any) => {
         if (file.derivedFrom) return <ConvertedRemoteImage src={p.src ?? ""} alt={p.alt} />;
         if (
@@ -1344,24 +1253,24 @@ function MarkdownViewerImpl({
                 });
               }}
             >
-              {walkChildren(p.children)}
+              {p.children}
             </a>
           );
         }
         return (
           <a {...p} target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer">
-            {walkChildren(p.children)}
+            {p.children}
           </a>
         );
       },
-      li: (p: any) => <li {...p}>{walkChildren(p.children)}</li>,
+      li: (p: any) => <li {...p}>{p.children}</li>,
       table: foldable((p: any) => (
         <SavableBlock blockType="table" className="docs-savable-table">
           <ResizableMarkdownTable {...p} />
         </SavableBlock>
       )),
-      td: (p: any) => <td {...p}>{walkChildren(p.children)}</td>,
-      th: (p: any) => <th {...p}>{walkChildren(p.children)}</th>,
+      td: (p: any) => <td {...p}>{p.children}</td>,
+      th: (p: any) => <th {...p}>{p.children}</th>,
     }),
     // `highlights` is deliberately absent: nothing here reads it, and including
     // it rebuilt every renderer on each highlight change, re-rendering the whole
@@ -1372,7 +1281,6 @@ function MarkdownViewerImpl({
     // and nothing moves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
-      highlightQuery,
       workspaceId,
       workspaceRevision,
       workspaceFiles,
@@ -1873,410 +1781,3 @@ function MarkdownViewerImpl({
  * stable identity in `DocsApp`, which is what makes the memo effective.
  */
 export const MarkdownViewer = memo(MarkdownViewerImpl);
-
-/**
- * Wraps a block (table, code fence, quote, image) with a hover star that saves
- * it. The block's own rendered text is the quote the saved item re-anchors by,
- * so a saved table is still findable after the document around it is edited.
- *
- * A block that already owns a row of overlay controls — a diagram — can render
- * the save action itself instead, as one more segment in that row. It reads the
- * action from {@link SaveActionContext}; see `renderOwnSaveAction`.
- */
-function SavableBlock({
-  blockType,
-  as: Wrapper = "div",
-  className = "",
-  identity,
-  renderOwnSaveAction,
-  children,
-}: {
-  blockType: SavedBlockType;
-  as?: "div" | "span";
-  className?: string;
-  /** Stands in for the text of blocks that have none — an image's src. */
-  identity?: string;
-  /**
-   * Suppress the floating star and publish the save action on context instead,
-   * for a block that places it among its own controls.
-   */
-  renderOwnSaveAction?: boolean;
-  children: React.ReactNode;
-}) {
-  const ctx = useContext(SavedContext);
-  const ref = useRef<HTMLDivElement & HTMLSpanElement>(null);
-  const [text, setText] = useState("");
-
-  // Re-read the block's own text when the document changes. This used to run
-  // with no dependency array at all, so every render of the page walked the
-  // subtree of every table, code fence, quote and image on it — O(document) of
-  // DOM traversal per render, plus a second render pass to settle. Keying it to
-  // the rendered source keeps the star pointing at the right text (the whole
-  // point of the original comment) at a fraction of the cost.
-  useEffect(() => {
-    const next = ref.current?.textContent?.trim() ?? "";
-    setText((prev) => (prev === next ? prev : next));
-  }, [ctx?.revision]);
-
-  if (!ctx?.enabled) return <>{children}</>;
-
-  // `identity` wins over the rendered text where it is given. A block whose DOM
-  // text is not its content — a diagram, whose textContent is the stylesheet
-  // Mermaid injects, complete with a per-render generated id — would otherwise
-  // be saved under a key that changes on every render and never matches itself
-  // again, so the star could never show as saved and never toggle back off.
-  const probe = identity || text || "";
-  const existing = ctx.isSaved({ kind: "block", text: probe });
-
-  const toggle = (e?: React.MouseEvent) => {
-    // Invoked from a menu item as well as a button, and a menu item has no
-    // event to give — the guards are what let one handler serve both.
-    e?.preventDefault();
-    e?.stopPropagation();
-    if (existing) {
-      ctx.remove(existing.id);
-      return;
-    }
-    const container = ctx.containerRef.current;
-    const el = ref.current;
-    const offsets = container && el ? nodeOffsets(container, el) : null;
-    const quote = identity || offsets?.text.trim() || probe;
-    ctx.toggle({
-      kind: "block",
-      blockType,
-      title: savedExcerpt(quote || identity || blockType, 90),
-      text: quote || undefined,
-      blockSrc: blockType === "image" ? identity : undefined,
-      subtopicId: ctx.subtopicId,
-      ...(offsets && container
-        ? {
-            start: offsets.start,
-            end: offsets.end,
-            ...contextAround(container, offsets.start, offsets.end),
-          }
-        : null),
-    });
-  };
-
-  if (renderOwnSaveAction) {
-    return (
-      <Wrapper ref={ref} className={`docs-savable ${className}`.trim()}>
-        <SaveActionContext.Provider
-          value={{
-            saved: Boolean(existing),
-            toggle,
-            label: existing ? `Remove saved ${blockType}` : `Save ${blockType}`,
-            title: existing ? "Saved — click to remove" : `Save this ${blockType}`,
-          }}
-        >
-          {children}
-        </SaveActionContext.Provider>
-      </Wrapper>
-    );
-  }
-
-  // No floating star. A star pinned to the corner of every table, quote, image
-  // and code fence turned the document into a field of controls competing with
-  // the prose — and it only ever offered to save whole blocks, never the
-  // paragraph or the half-table the reader actually cared about. Saving now
-  // lives on the selection popover, which can save any range at all, so the
-  // block wrapper keeps its identity and offsets and draws nothing.
-  return (
-    <Wrapper ref={ref} className={`docs-savable ${className}`.trim()}>
-      {children}
-    </Wrapper>
-  );
-}
-
-function HeadingLink({ as: Tag, children, id, highlight, ...rest }: any) {
-  const ctx = useContext(SavedContext);
-  const collapse = useContext(CollapseContext);
-  const text = Array.isArray(children)
-    ? children.map((c) => (typeof c === "string" ? c : "")).join("")
-    : String(children ?? "");
-  const finalId = id || slugify(text);
-  const savedSection = ctx?.enabled
-    ? ctx.isSaved({ kind: "section", headingId: finalId })
-    : undefined;
-  const collapsed = collapse?.isCollapsed(finalId) ?? false;
-  return (
-    <Tag id={finalId} {...rest} className="group relative scroll-mt-24">
-      {/* Out in the margin, not in the text.
-          This used to sit inline before the heading, which put a control in the
-          middle of the prose on every single heading — permanent chrome the
-          reader had to read past. It lives to the left of the reading column
-          now and only appears when the heading is hovered or focused, so an
-          untouched page is just the document. A collapsed section keeps its
-          chevron visible regardless: that is the only way back. */}
-      {collapse && (
-        <button
-          onClick={() => collapse.toggle(finalId)}
-          /* The hover-reveal above assumes a pointer that can hover. On a touch
-             tablet — where this is shown, being >=md — there is none, so an
-             expanded section's chevron never appeared and a reader could not
-             collapse anything; only re-expanding worked, because a collapsed
-             one is pinned visible. `coarse:opacity-100` gives touch the same
-             affordance a mouse gets. The ::before pads the 24px target out to
-             44px without moving it: the margin it sits in is narrower than 44px
-             at this breakpoint, so growing the box itself would push it off the
-             side of the screen. */
-          className={`absolute -left-7 top-1/2 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 coarse:before:absolute coarse:before:-inset-2.5 coarse:before:content-[''] md:flex ${
-            collapsed
-              ? "opacity-100"
-              : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 coarse:opacity-100"
-          }`}
-          aria-expanded={!collapsed}
-          aria-controls={`${finalId}-section`}
-          title={collapsed ? "Expand section" : "Collapse section"}
-          aria-label={collapsed ? "Expand section" : "Collapse section"}
-        >
-          <ChevronDown
-            className={`h-4 w-4 transition-transform ${collapsed ? "-rotate-90" : ""}`}
-          />
-        </button>
-      )}
-      {typeof children === "string" ? (highlight?.(children) ?? children) : children}
-      {/* A saved section still marks its heading, but only once it *is* saved:
-          an always-present star on every heading was chrome the reader had to
-          look past on the way down the page. Saving a section is done from the
-          selection popover now; this is the receipt, not the button. */}
-      {ctx?.enabled && savedSection && (
-        <button
-          onClick={() => ctx.remove(savedSection.id)}
-          className="ml-1 inline-flex h-9 w-9 items-center justify-center align-middle"
-          title="Saved — click to remove"
-          aria-label="Remove saved section"
-        >
-          <Star className="h-4 w-4 fill-gold text-gold" />
-        </button>
-      )}
-    </Tag>
-  );
-}
-
-function CodeBlock({ children, ...rest }: any) {
-  const ref = useRef<HTMLPreElement>(null);
-  const [copied, setCopied] = useState(false);
-
-  // Detect Mermaid
-  const codeEl: any = Array.isArray(children) ? children[0] : children;
-  const cls = codeEl?.props?.className ?? "";
-  if (typeof cls === "string" && /language-mermaid/.test(cls)) {
-    const raw = extractText(codeEl?.props?.children);
-    return <MermaidBlock code={raw} />;
-  }
-
-  const encodedLang = /language-([\w+-]+)/.exec(cls)?.[1];
-  const [lang, encodedMeta] = encodedLang?.split("--") ?? [];
-  const meta =
-    codeEl?.props?.node?.data?.meta ??
-    codeEl?.props?.node?.meta ??
-    encodedMeta?.replaceAll("-", " ") ??
-    "";
-
-  // ```mindmap fences hold JSON and draw as an interactive map, the same way
-  // ```mermaid fences hold diagram source. Any fence meta becomes the root's
-  // name when the JSON does not carry one.
-  if (lang === "mindmap") {
-    return <MindMapBlock code={extractText(codeEl?.props?.children)} title={meta} />;
-  }
-
-  if (lang === "interactive-html" || lang === "interactive-react") {
-    return (
-      <InteractiveBlock
-        kind={lang === "interactive-html" ? "html" : "react"}
-        code={extractText(codeEl?.props?.children)}
-        meta={meta}
-      />
-    );
-  }
-
-  // A ```json fence renders as a browsable tree rather than a wall of text.
-  // Malformed JSON falls through to the plain code block below, so a typo
-  // still shows the author what they wrote instead of an error.
-  if (lang === "json") {
-    const raw = extractText(codeEl?.props?.children);
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed !== null && typeof parsed === "object") {
-        return <JsonFigure value={parsed} />;
-      }
-    } catch {
-      // Not valid JSON — fall through.
-    }
-  }
-
-  return (
-    <div className="group relative my-6">
-      {/* {lang && (
-        <div className="absolute left-3 top-2 z-10 rounded bg-background/60 px-1.5 py-0.5 text-xs font-mono uppercase tracking-wider text-muted-foreground backdrop-blur">
-          {lang}
-        </div>
-      )} */}
-      <button
-        onClick={() => {
-          const code = ref.current?.innerText ?? "";
-          navigator.clipboard.writeText(code);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        }}
-        aria-label={copied ? "Copied" : "Copy code"}
-        /* A hover-only reveal leaves this button unreachable on touch, so
-           `hover-none:opacity-100` pins it there. Being permanently visible is
-           also why it loses its label on a touch device: the word doubled the
-           button's width, and parked over the first line of a code block on a
-           phone that was the difference between covering the end of a line and
-           covering half of it. The tick that replaces the icon still reports
-           the copy, and `aria-label` carries the name either way. */
-        className="absolute right-2 top-2 z-10 inline-flex min-h-9 items-center gap-1 rounded-md border border-border/50 bg-background/80 px-2.5 py-1.5 text-xs text-muted-foreground opacity-0 backdrop-blur transition-opacity hover:text-foreground group-hover:opacity-100 coarse:min-h-11 coarse:min-w-11 coarse:justify-center coarse:px-0 [@media(hover:none)]:opacity-100"
-      >
-        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-        <span className="coarse:hidden">{copied ? "Copied" : "Copy"}</span>
-      </button>
-      <pre ref={ref} {...rest}>
-        {children}
-      </pre>
-    </div>
-  );
-}
-
-/**
- * A ```json fence, rendered as a browsable tree with a full-screen control.
- *
- * Structured data in a document has the same problem a diagram does: it gets
- * the width of a text column, which is the one place a deep tree is least
- * readable. Full screen is the element's own rather than an overlay, so the
- * branches the reader has opened survive going in and coming back out, and
- * Escape or the browser's own exit are followed like any other fullscreen.
- */
-function JsonFigure({ value }: { value: unknown }) {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const [full, setFull] = useState(false);
-
-  useEffect(() => {
-    const sync = () => setFull(document.fullscreenElement === hostRef.current);
-    document.addEventListener("fullscreenchange", sync);
-    return () => document.removeEventListener("fullscreenchange", sync);
-  }, []);
-
-  const toggle = () => {
-    const el = hostRef.current;
-    if (!el) return;
-    if (document.fullscreenElement === el) void document.exitFullscreen();
-    else void el.requestFullscreen?.().catch(() => setFull(false));
-  };
-
-  return (
-    <div
-      ref={hostRef}
-      className={`overflow-hidden border-border bg-background ${
-        full ? "flex h-screen w-screen flex-col rounded-none border-0" : "my-6 rounded-xl border"
-      }`}
-    >
-      <div className="flex items-center justify-end border-b border-border/70 bg-background/40 px-2 py-1.5">
-        <button
-          onClick={toggle}
-          title={full ? "Exit full screen" : "Full screen"}
-          aria-label={full ? "Exit full screen" : "Full screen"}
-          className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          {full ? <Minimize2 className="h-3.5 w-3.5" /> : <Expand className="h-3.5 w-3.5" />}
-        </button>
-      </div>
-      <div className={full ? "min-h-0 flex-1 overflow-auto" : "max-h-128 overflow-auto"}>
-        <JsonTree value={value} />
-      </div>
-    </div>
-  );
-}
-
-function extractText(node: any): string {
-  if (typeof node === "string") return node;
-  if (Array.isArray(node)) return node.map(extractText).join("");
-  if (node?.props?.children) return extractText(node.props.children);
-  return "";
-}
-
-// react-markdown exposes the code language to component overrides but not the
-// fenced-code info string. Keep the interactive flags in the language token so
-// `interactive-react preview`, `split`, and `playground` all survive parsing.
-function remarkInteractiveBlockMeta() {
-  return (tree: any) => {
-    const walk = (node: any) => {
-      if (node?.type === "code" && /^(interactive-html|interactive-react)$/.test(node.lang ?? "")) {
-        const flags = String(node.meta ?? "")
-          .toLowerCase()
-          .split(/\s+/)
-          .map((flag) => flag.replace(/[^a-z0-9]/g, ""))
-          .filter(Boolean)
-          .join("-");
-        if (flags) node.lang = `${node.lang}--${flags}`;
-      }
-      node?.children?.forEach(walk);
-    };
-    walk(tree);
-  };
-}
-
-/**
- * The seven GitHub admonition types, collapsed onto four visual tones. Seven
- * distinct colours would be seven things to learn; the reader only ever needs
- * to know how loudly a box is speaking, so the tones are graded by urgency —
- * `info` for context, `success` for advice, `warn` for care, `danger` for
- * consequences — and the label carries the exact word. Tone is applied by
- * `data-tone` in `styles.css` rather than by utility classes, so the callout
- * is themed from the same tokens as the rest of the reader.
- */
-const CALLOUT_MAP: Record<string, { icon: any; label: string; tone: string }> = {
-  NOTE: { icon: StickyNote, label: "Note", tone: "info" },
-  INFO: { icon: Info, label: "Info", tone: "info" },
-  TIP: { icon: Lightbulb, label: "Tip", tone: "success" },
-  WARNING: { icon: AlertTriangle, label: "Warning", tone: "warn" },
-  CAUTION: { icon: AlertTriangle, label: "Caution", tone: "warn" },
-  DANGER: { icon: AlertOctagon, label: "Danger", tone: "danger" },
-  IMPORTANT: { icon: AlertOctagon, label: "Important", tone: "danger" },
-};
-
-const CALLOUT_RE = /^\s*\[!(NOTE|INFO|TIP|WARNING|CAUTION|DANGER|IMPORTANT)\]\s*(.*)/is;
-
-function Callout({ children, ...rest }: any) {
-  const kids = Array.isArray(children) ? [...children] : [children];
-  let type: string | null = null;
-
-  // The marker is on the blockquote's first *element* child. react-markdown
-  // keeps the newlines between block children as plain strings, so the first
-  // entry in this array is almost always "\n" rather than the paragraph — the
-  // scan used to look at that string, find no `props` on it, and give up
-  // immediately, which is why no callout in any document ever rendered and
-  // every one of them showed its raw `[!NOTE]` marker to the reader.
-  for (let i = 0; i < kids.length; i++) {
-    const c = kids[i];
-    if (typeof c === "string" && !c.trim()) continue;
-    if (!c?.props) break;
-    const m = CALLOUT_RE.exec(extractText(c.props.children));
-    if (!m) break;
-    type = m[1].toUpperCase();
-    // Drop the marker, keeping whatever followed it on the same line.
-    const remainder = m[2];
-    kids[i] = remainder ? { ...c, props: { ...c.props, children: remainder } } : null;
-    break;
-  }
-
-  if (!type) {
-    return <blockquote {...rest}>{children}</blockquote>;
-  }
-
-  const cfg = CALLOUT_MAP[type];
-  const Icon = cfg.icon;
-  return (
-    <aside className="docs-callout" data-tone={cfg.tone} role="note">
-      <span className="docs-callout-mark" aria-hidden>
-        <Icon className="h-4 w-4" />
-      </span>
-      <div className="docs-callout-body">
-        <p className="docs-callout-label">{cfg.label}</p>
-        {kids.filter(Boolean)}
-      </div>
-    </aside>
-  );
-}
