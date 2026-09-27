@@ -38,6 +38,7 @@ export function useSearchIndex({
   const [pending, setPending] = useState(false);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState<string[]>([]);
   const [fallback, setFallback] = useState(false);
+  const [indexVersion, setIndexVersion] = useState(0);
 
   const worker = useRef<Worker | null>(null);
   const fallbackIndex = useRef<DocumentIndex | null>(null);
@@ -114,12 +115,15 @@ export function useSearchIndex({
     (async () => {
       if (currentWorkspaceId) {
         syncedIds.current.add(currentWorkspaceId);
-        await post({
+        const response = await post({
           reqId: ++reqId.current,
           type: "sync",
           workspaceId: currentWorkspaceId,
           files: toSearchFiles(files),
         });
+        // The query may have already run against the previous index (or an
+        // empty one during startup). Refresh it only after the rows are ready.
+        if (!cancelled && response.type === "ack") setIndexVersion((version) => version + 1);
       }
       if (cancelled) return;
 
@@ -140,12 +144,13 @@ export function useSearchIndex({
           const record = await persistence.getWorkspace(summary.id);
           if (cancelled || !record) return;
           syncedIds.current.add(summary.id);
-          await post({
+          const response = await post({
             reqId: ++reqId.current,
             type: "sync",
             workspaceId: summary.id,
             files: toSearchFiles(record.files),
           });
+          if (!cancelled && response.type === "ack") setIndexVersion((version) => version + 1);
           if (!cancelled) setLoadingWorkspaces((prev) => prev.filter((id) => id !== summary.id));
         }),
       );
@@ -174,7 +179,7 @@ export function useSearchIndex({
       );
     }, 120);
     return () => clearTimeout(timer);
-  }, [query, active, currentWorkspaceId, otherWorkspaces, fallback]);
+  }, [query, active, currentWorkspaceId, otherWorkspaces, fallback, indexVersion]);
 
   return { hits, pending, loadingWorkspaces };
 }

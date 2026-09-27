@@ -57,6 +57,41 @@ test("dropWorkspace removes every row for that workspace", async () => {
   assert.equal((await index.search("hello", ["w2"])).length, 1);
 });
 
+test("a rename replaces filename matches and labels on every content row", async () => {
+  const index = new DocumentIndex();
+  const file = { id: "1", name: "alpha.md", content: "# Topic\nconstant content" };
+  await index.syncWorkspace("w1", [file]);
+  await index.syncWorkspace("w2", [file]);
+  await index.syncWorkspace("w1", [{ ...file, name: "renamed.md" }]);
+
+  assert.deepEqual(await index.search("alpha", ["w1"]), []);
+  const renamed = await index.search("renamed", ["w1"]);
+  assert.equal(renamed.length, 3, "filename, heading and body rows all use the new name");
+  assert.ok(renamed.every((hit) => hit.fileName === "renamed.md"));
+  assert.equal(renamed.find((hit) => hit.lineIndex === -1)?.snippet, "renamed.md");
+  const content = await index.search("constant", ["w1"]);
+  assert.equal(content.length, 1);
+  assert.equal(content[0].fileName, "renamed.md");
+  assert.equal(content[0].headingId, "topic");
+  assert.ok((await index.search("alpha", ["w2"])).every((hit) => hit.fileName === "alpha.md"));
+  assert.deepEqual(await index.search("renamed", ["w2"]), []);
+
+  await index.syncWorkspace("w1", [{ ...file, name: "renamed.md" }]);
+  assert.deepEqual(await index.search("renamed", ["w1"]), renamed, "no duplicate rows");
+});
+
+test("empty documents can be renamed repeatedly and removed without stale filename rows", async () => {
+  const index = new DocumentIndex();
+  for (const name of ["alpha.md", "renamed.md", "final.md"]) {
+    await index.syncWorkspace("w", [{ id: "1", name, content: "" }]);
+    assert.equal((await index.search(name, ["w"])).length, 1);
+  }
+  assert.deepEqual(await index.search("alpha", ["w"]), []);
+  assert.deepEqual(await index.search("renamed", ["w"]), []);
+  await index.syncWorkspace("w", []);
+  assert.deepEqual(await index.search("final", ["w"]), []);
+});
+
 test("search is scoped to the requested workspace ids", async () => {
   const index = new DocumentIndex();
   await index.syncWorkspace("w1", [{ id: "1", name: "a.md", content: "shared term" }]);

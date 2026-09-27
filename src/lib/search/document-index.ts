@@ -111,6 +111,7 @@ async function yieldToMainThread(): Promise<void> {
 const FILES_PER_INSERT_BATCH = 15;
 
 interface FileCacheEntry {
+  name: string;
   content: string;
   rowIds: string[];
 }
@@ -144,7 +145,10 @@ export class DocumentIndex {
     }
     if (staleIds.length) await removeMultiple(this.db, staleIds);
 
-    const changed = files.filter((file) => workspaceCache!.get(file.id)?.content !== file.content);
+    const changed = files.filter((file) => {
+      const cached = workspaceCache!.get(file.id);
+      return cached?.content !== file.content || cached?.name !== file.name;
+    });
     for (let i = 0; i < changed.length; i += FILES_PER_INSERT_BATCH) {
       const batch = changed.slice(i, i + FILES_PER_INSERT_BATCH);
       const toRemove = batch.flatMap((file) => workspaceCache!.get(file.id)?.rowIds ?? []);
@@ -161,6 +165,7 @@ export class DocumentIndex {
       for (let i = 0; i < batch.length; i++) {
         const rowCount = 1 + rowsByFile[i].length;
         workspaceCache.set(batch[i].id, {
+          name: batch[i].name,
           content: batch[i].content,
           rowIds: ids.slice(cursor, cursor + rowCount),
         });
