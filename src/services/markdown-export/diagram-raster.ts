@@ -15,7 +15,8 @@
  * feature — and it opens identically everywhere.
  */
 
-import { renderMermaid, readSvgViewBox } from "@/services/diagrams";
+import { renderMermaid } from "../diagrams/mermaid-render-cache.ts";
+import { readSvgViewBox } from "../diagrams/mermaid-performance.ts";
 
 export interface RasterDiagram {
   png: Uint8Array;

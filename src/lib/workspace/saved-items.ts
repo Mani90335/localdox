@@ -7,8 +7,8 @@
 // fields a highlight does (text + surrounding context) so it survives edits to
 // the document above it.
 
-import type { MdFile } from "../markdown/markdown-utils";
-import { fileSubtopics, stripExt } from "../markdown/markdown-utils";
+import type { MdFile } from "../markdown/markdown-utils.ts";
+import { fileSubtopics, stripExt } from "../markdown/markdown-utils.ts";
 
 // Text a reader drags over is a highlight, not a star — highlights already keep
 // passages, with colors and notes. Stars are for whole structures: a document, a

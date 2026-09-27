@@ -4,7 +4,7 @@ import {
   type ViewTarget,
   type ViewportOptions,
   type ViewportState,
-} from "@/lib/viewport";
+} from "../../lib/viewport.ts";
 
 const IDLE: ViewportState = { zoom: 1, manual: false };
 

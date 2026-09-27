@@ -27,10 +27,9 @@ import {
   remarkEquationReferences,
   remarkInlineMathRefs,
   remarkMathNodes,
-  isKatexLoaded,
-  loadKatex,
-} from "@/services/math";
-import { loadKatexStyles, loadMonoFont } from "../fonts/fonts";
+} from "../../services/math/remark-math-nodes.ts";
+import { isKatexLoaded, loadKatex } from "../../services/math/adapters/katex.ts";
+import { loadKatexStyles, loadMonoFont } from "../fonts/fonts.ts";
 
 type Plugin = unknown;
 
@@ -128,10 +127,9 @@ export function useMarkdownPlugins(source: string, extraRemark: readonly Plugin[
 
   const remarkPlugins = useMemo(
     () => [...BASE_REMARK, ...extraRemark],
-    // `extraRemark` is expected to be a stable module-level array; spreading it
-    // into the dep list keeps a caller that passes a literal from thrashing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [...extraRemark],
+    // Callers memoize this array; its length may change between a converted
+    // document and a normal note, so it must not be spread into dependencies.
+    [extraRemark],
   );
 
   const rehypePlugins = useMemo(() => {
