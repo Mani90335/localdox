@@ -24,6 +24,7 @@ export function EmptyWorkspace({
   shareDialog,
   settingsDialog,
   moveDialog,
+  statusBanner,
 }: {
   onHome: () => void;
   workspaces: { id: string; name: string }[];
@@ -38,6 +39,8 @@ export function EmptyWorkspace({
   shareDialog: ReactNode;
   settingsDialog: ReactNode;
   moveDialog: ReactNode;
+  /** Save / conflict state that must stay visible on every screen. */
+  statusBanner?: ReactNode;
 }) {
   return (
     <div className="min-h-dvh bg-background">
@@ -118,6 +121,7 @@ export function EmptyWorkspace({
       {shareDialog}
       {settingsDialog}
       {moveDialog}
+      {statusBanner}
     </div>
   );
 }

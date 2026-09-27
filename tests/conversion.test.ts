@@ -238,7 +238,6 @@ test("conversion commits reject another tab's revision instead of overwriting it
         ...workspace,
         files: [...workspace.files, { id: "derivative", name: "source.md", content: "Converted" }],
       },
-      { rejectStale: true },
     ),
     /another tab/,
   );

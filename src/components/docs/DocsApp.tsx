@@ -28,6 +28,8 @@ import {
 } from "./docs-app/use-sidebar-collapse-animation";
 import { toMdFile, uniqueFileName, findDuplicate } from "./docs-app/file-helpers";
 import { availableWorkspaceName, resolveWorkspaceName } from "./docs-app/workspace-naming";
+import { ConflictBanner } from "./docs-app/ConflictBanner";
+import { mergeWorkspaces } from "@/lib/workspace/merge";
 import {
   activeFileOf,
   closeFileEverywhere,
@@ -42,6 +44,7 @@ import {
 } from "@/lib/workspace/panes";
 import {
   applyToDestination,
+  removeFromSource,
   planTransfer,
   transferCounts,
 } from "@/lib/workspace/workspace-transfer";
@@ -89,7 +92,11 @@ import type { MdFile, MdChunk } from "@/lib/markdown/markdown-utils";
 // the OOXML builder is never on the path to the first paint.
 import type { ExportFormat } from "@/services/markdown-export";
 import type { Highlight } from "@/lib/markdown/dom-highlighter";
-import { isBinExpired, WorkspaceConflictError } from "@/lib/workspace/persistence";
+import {
+  isBinExpired,
+  WorkspaceConflictError,
+  type ConflictReason,
+} from "@/lib/workspace/persistence";
 import { fileSubtopics, readingMinutes } from "@/lib/markdown/markdown-utils";
 import {
   DISCARD_PROMPT,
@@ -494,10 +501,15 @@ export function DocsApp() {
 
   // ---- persistence core ----
 
+  // Storage revision the in-memory workspace is based on. Every write sends it
+  // and storage refuses the write if another tab has committed since, so a
+  // stale snapshot can never silently replace newer work (see persistence.ts).
+  const storageRevisionRef = useRef<string | undefined>(undefined);
   const buildRecord = useCallback((): WorkspaceRecord => {
     const s = snapshotRef.current;
     return {
       id: workspaceIdRef.current ?? crypto.randomUUID(),
+      revision: storageRevisionRef.current,
       name: workspaceNameRef.current,
       createdAt: createdAtRef.current,
       updatedAt: Date.now(),
@@ -540,45 +552,112 @@ export function DocsApp() {
   const mutationRef = useRef(0);
   const savedMutationRef = useRef(0);
   const workspaceConflictRef = useRef(false);
+  // `storedRecordRef` is what storage holds at `storageRevisionRef`;
+  // `baseRecordRef` is the snapshot this tab's state was last reconciled with.
+  // They are the same object until another tab commits, and the difference
+  // between them is exactly what that tab changed (see merge.ts).
+  const storedRecordRef = useRef<WorkspaceRecord | null>(null);
+  const baseRecordRef = useRef<WorkspaceRecord | null>(null);
+  // Set by `hydrateWorkspace`, which is declared after the writer.
+  const adoptRef = useRef<(ws: WorkspaceRecord) => void>(() => {});
+  // Why the last write was refused. While set, nothing is written; the banner
+  // offers to keep this tab's version as a copy or to load the saved one.
+  const [conflict, setConflict] = useState<ConflictReason | null>(null);
 
-  const persistNow = useCallback(
-    async (silent: boolean, rejectStale = false) => {
+  const enterConflict = useCallback((reason: ConflictReason) => {
+    workspaceConflictRef.current = true;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setConflict(reason);
+    setSaveStatus("conflict");
+  }, []);
+
+  /**
+   * Write the active workspace now. Only call from inside `persistence.serial`,
+   * so writes from this tab commit in the order they were made.
+   */
+  const writeActive = useCallback(
+    async (silent: boolean, force: boolean): Promise<boolean> => {
       if (workspaceConflictRef.current) return false;
       if (!workspaceIdRef.current) return true;
-      if (mutationRef.current === savedMutationRef.current) {
+      if (!force && mutationRef.current === savedMutationRef.current) {
         // Nothing changed since the last write. Still settle the indicator, so
         // a "Saving…" left over from a coalesced burst doesn't stick.
-        if (!silent) setSaveStatus("saved");
+        if (!silent) setSaveStatus((status) => (status === "saving" ? "saved" : status));
         return true;
       }
+      const id = workspaceIdRef.current;
       const pending = mutationRef.current;
-      const targetId = workspaceIdRef.current;
-      try {
-        await persistence.putWorkspace(buildRecord(), { rejectStale });
-        if (workspaceIdRef.current === targetId) {
-          savedMutationRef.current = Math.max(savedMutationRef.current, pending);
-          if (!silent && pending === mutationRef.current) setSaveStatus("saved");
-        }
-        return true;
-      } catch (error) {
-        if (workspaceIdRef.current !== targetId) return false;
-        if (error instanceof WorkspaceConflictError) {
-          workspaceConflictRef.current = true;
-          if (saveTimer.current) clearTimeout(saveTimer.current);
-          setSaveStatus("idle");
-          toast.error(error.message, { id: "workspace-save-error", duration: Infinity });
+      const mine = buildRecord();
+      // A refusal means another tab committed first. Re-read, merge this tab's
+      // changes onto theirs, and try again; only a real collision stops here.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const base = baseRecordRef.current;
+        const stored = storedRecordRef.current;
+        const merging = !!base && !!stored && base !== stored;
+        const record = merging ? mergeWorkspaces(base, mine, stored) : { ...mine };
+        if (!record) {
+          enterConflict("changed");
           return false;
         }
-        if (!silent) setSaveStatus("idle");
-        console.error("Could not save workspace", error);
-        toast.error(
-          "Changes could not be saved. Keep this tab open and export your workspace as a backup.",
-          { id: "workspace-save-error" },
-        );
-        return false;
+        record.revision = storageRevisionRef.current;
+        try {
+          await persistence.putWorkspace(record);
+        } catch (error) {
+          if (workspaceIdRef.current !== id) return false;
+          if (error instanceof WorkspaceConflictError && error.reason === "changed") {
+            const latest = await persistence.getWorkspace(id);
+            if (workspaceIdRef.current !== id) return false;
+            if (!latest) {
+              enterConflict("deleted");
+              return false;
+            }
+            storedRecordRef.current = latest;
+            storageRevisionRef.current = latest.revision;
+            continue;
+          }
+          if (error instanceof WorkspaceConflictError) {
+            enterConflict(error.reason);
+            return false;
+          }
+          setSaveStatus("error");
+          console.error("Could not save workspace", error);
+          toast.error(
+            "Changes could not be saved. Keep this tab open and export your workspace as a backup.",
+            { id: "workspace-save-error", duration: Infinity },
+          );
+          return false;
+        }
+        if (workspaceIdRef.current !== id) return true;
+        storageRevisionRef.current = record.revision;
+        storedRecordRef.current = record;
+        baseRecordRef.current = merging ? mine : record;
+        savedMutationRef.current = Math.max(savedMutationRef.current, pending);
+        if (pending === mutationRef.current) setSaveStatus("saved");
+        // Show the other tab's changes here too, unless the reader has changed
+        // something since this snapshot was taken; the next save merges again.
+        if (
+          merging &&
+          mutationRef.current === pending &&
+          !editorDirtyRef.current &&
+          !officeDirtyPanes.current.size
+        )
+          adoptRef.current(record);
+        return true;
       }
+      enterConflict("changed");
+      return false;
     },
-    [buildRecord],
+    [buildRecord, enterConflict],
+  );
+
+  /**
+   * Save the active workspace, queued behind every earlier write from this
+   * tab. `force` writes even when no mutation was counted — used right after a
+   * caller has put new state into `snapshotRef` itself.
+   */
+  const persistNow = useCallback(
+    (silent: boolean, force = false) => persistence.serial(() => writeActive(silent, force)),
+    [writeActive],
   );
 
   // Called by every user mutation. Shows "Saving…", then writes after a pause.
@@ -594,8 +673,14 @@ export function DocsApp() {
   markDirtyRef.current = markDirty;
 
   const hydrateWorkspace = useCallback(
-    (ws: WorkspaceRecord) => {
+    // `background`: another tab saved this workspace while this one was idle.
+    // Adopt its data without moving the reader's scroll or flashing a status.
+    (ws: WorkspaceRecord, { background = false }: { background?: boolean } = {}) => {
+      storageRevisionRef.current = ws.revision;
+      storedRecordRef.current = ws;
+      baseRecordRef.current = ws;
       workspaceConflictRef.current = false;
+      setConflict(null);
       if (saveTimer.current) clearTimeout(saveTimer.current);
       const wsFolders = ws.folders ?? [];
       const folderIds = new Set(wsFolders.map((f) => f.id));
@@ -645,11 +730,16 @@ export function DocsApp() {
       // The live position is tracked in localStorage (see `saveScrollTop`); the
       // record's own value is the fallback for an imported or shared workspace
       // that has never been scrolled on this device.
-      const st = loadScrollTop(ws.id) ?? ws.ui?.scrollTop ?? 0;
+      const st = background ? scrollRef.current : (loadScrollTop(ws.id) ?? ws.ui?.scrollTop ?? 0);
       scrollRef.current = st;
-      // A freshly hydrated workspace is exactly what is on disk.
-      mutationRef.current = 0;
+      // A freshly hydrated workspace is exactly what is on disk — unless the
+      // Bin sweep just dropped expired files. That removal is written straight
+      // back, so the expired bytes are actually reclaimed rather than lingering
+      // until the reader happens to change something else.
+      mutationRef.current = swept.length === parsed.length ? 0 : 1;
       savedMutationRef.current = 0;
+      if (mutationRef.current) saveTimer.current = setTimeout(() => void persistNow(true), 0);
+      if (background) return;
       // Restore the exact scroll after the document has painted. Runs after the
       // viewer's own mount effects, so it wins.
       setTimeout(() => window.scrollTo({ top: st }), 350);
@@ -660,8 +750,9 @@ export function DocsApp() {
         2500,
       );
     },
-    [resetHighlights],
+    [resetHighlights, persistNow],
   );
+  adoptRef.current = (ws) => hydrateWorkspace(ws, { background: true });
 
   const refreshWorkspaceList = useCallback(async () => {
     const list = await persistence.listWorkspaceSummaries();
@@ -689,7 +780,7 @@ export function DocsApp() {
             // reader would meet before the app has even drawn.
             const already = await persistence.listWorkspaceSummaries();
             ws.name = availableWorkspaceName(`${ws.name} (Shared)`, already);
-            await persistence.putWorkspace(ws);
+            await persistence.serial(() => persistence.putWorkspace(ws));
             hashSharedWs = ws;
             window.history.replaceState(
               null,
@@ -703,7 +794,14 @@ export function DocsApp() {
           }
         }
 
-        const list = await persistence.listWorkspaceSummaries();
+        // Queued behind any write still in flight — including the final save of
+        // the route this instance replaced — so it reads what that route saw.
+        const { list, ws } = await persistence.serial(async () => {
+          const list = await persistence.listWorkspaceSummaries();
+          if (list.length === 0 && !hashSharedWs) return { list, ws: undefined };
+          const selected = list.find((w) => w.id === prefs.lastWorkspaceId) ?? list[0];
+          return { list, ws: hashSharedWs ?? (await persistence.getWorkspace(selected.id)) };
+        });
         if (list.length === 0 && !hashSharedWs) {
           if (!alive) return;
           setWorkspaces([]);
@@ -711,8 +809,6 @@ export function DocsApp() {
           workspaceIdRef.current = null;
           setSaveStatus("idle");
         } else {
-          const selected = list.find((w) => w.id === prefs.lastWorkspaceId) ?? list[0];
-          const ws = hashSharedWs ?? (await persistence.getWorkspace(selected.id));
           if (!alive) return;
           if (!ws) throw new Error("The selected workspace could not be loaded");
           list.sort((a, b) => a.createdAt - b.createdAt);
@@ -780,6 +876,11 @@ export function DocsApp() {
       window.removeEventListener("scroll", onScroll);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("beforeunload", flush);
+      // Every route mounts its own instance of this component. A save still
+      // waiting on its debounce is queued now, ahead of the next route's read,
+      // instead of firing later from an instance nobody is looking at.
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      flush();
     };
   }, [persistNow]);
 
@@ -894,6 +995,7 @@ export function DocsApp() {
         if (!workspaceIdRef.current) {
           const id = crypto.randomUUID();
           workspaceIdRef.current = id;
+          storageRevisionRef.current = undefined;
           workspaceNameRef.current = "My workspace";
           createdAtRef.current = Date.now();
           setWorkspaceId(id);
@@ -913,8 +1015,14 @@ export function DocsApp() {
         setFolders(nextFolders);
         setActiveFileId(nextActiveFileId);
         setSaveStatus("saving");
-        await persistence.putWorkspace(buildRecord());
-        setSaveStatus("saved");
+        if (!(await persistNow(false, true))) {
+          // The files are open in this tab but not on disk. Stay here: another
+          // route would hydrate from storage and they would be gone.
+          toast.error("The files are open but could not be saved to this device yet.", {
+            id: toastId,
+          });
+          return [...kept, ...existing];
+        }
 
         toast.success(`Successfully uploaded ${kept.length} file${kept.length > 1 ? "s" : ""}!`, {
           id: toastId,
@@ -922,12 +1030,12 @@ export function DocsApp() {
         if (!attachments) navigate({ to: "/" }); // Attachments keep the editor open.
         return [...kept, ...existing];
       } catch {
-        setSaveStatus("idle");
+        setSaveStatus((status) => (status === "saving" ? "idle" : status));
         toast.error("Could not upload the selected file(s). Please try again.", { id: toastId });
         return [];
       }
     },
-    [buildRecord, navigate],
+    [navigate, persistNow],
   );
 
   const importAttachments = useCallback((files: File[]) => addFiles(files, true), [addFiles]);
@@ -1742,17 +1850,12 @@ flowchart LR
 
       if (workspaceIdRef.current) {
         setSaveStatus("saving");
-        try {
-          await persistence.putWorkspace(buildRecord());
-          setSaveStatus("saved");
-        } catch {
-          setSaveStatus("idle");
-        }
+        await persistNow(false, true);
       }
 
       navigate({ to: "/" });
     },
-    [buildRecord, navigate],
+    [navigate, persistNow],
   );
 
   const handleDocumentSave = useCallback(
@@ -1822,13 +1925,146 @@ flowchart LR
     async (id: string) => {
       if (id === workspaceIdRef.current) return;
       if (!(await persistNow(true))) return;
-      const ws = await persistence.getWorkspace(id);
+      const ws = await persistence.serial(() => persistence.getWorkspace(id));
       if (!ws) return;
       hydrateWorkspace(ws);
       savePrefs({ lastWorkspaceId: id });
     },
     [persistNow, hydrateWorkspace],
   );
+
+  // ---- other tabs ----
+  //
+  // A commit in another tab is announced here. It is only a hint: the revision
+  // check inside every write is what actually prevents a stale overwrite. An
+  // idle tab quietly adopts the other tab's data; a tab holding unsaved work
+  // goes straight to the conflict banner instead of waiting to fail a save.
+  const hasUnsavedWork = useCallback(
+    () =>
+      mutationRef.current !== savedMutationRef.current ||
+      editorDirtyRef.current ||
+      officeDirtyPanes.current.size > 0,
+    [],
+  );
+
+  useEffect(
+    () =>
+      persistence.subscribe((change) => {
+        const id = workspaceIdRef.current;
+        if (!hydratedRef.current) return;
+        void refreshWorkspaceList();
+        if (!id || workspaceConflictRef.current) return;
+        if (change.type === "cleared" || (change.type === "deleted" && change.id === id)) {
+          enterConflict("deleted");
+          return;
+        }
+        if (change.type !== "changed" || change.id !== id) return;
+        if (change.revision === storageRevisionRef.current) return;
+        void persistence.serial(async () => {
+          const latest = await persistence.getWorkspace(id);
+          if (workspaceIdRef.current !== id || workspaceConflictRef.current) return;
+          if (!latest) return enterConflict("deleted");
+          if (latest.revision === storageRevisionRef.current) return;
+          if (hasUnsavedWork()) {
+            // This tab's pending save will merge onto the other tab's commit
+            // (and only stop for the reader if both changed the same thing).
+            storedRecordRef.current = latest;
+            storageRevisionRef.current = latest.revision;
+            return;
+          }
+          // Keep this tab's own view — which documents are open, what is
+          // expanded — and take everything else from storage.
+          const view = buildRecord().ui;
+          hydrateWorkspace(
+            {
+              ...latest,
+              ui: { ...latest.ui, ...view, fileOrder: latest.ui.fileOrder },
+            },
+            { background: true },
+          );
+        });
+      }),
+    [buildRecord, enterConflict, hasUnsavedWork, hydrateWorkspace, refreshWorkspaceList],
+  );
+
+  const [resolvingConflict, setResolvingConflict] = useState(false);
+
+  /** Save this tab's version as a new workspace and carry on in it. */
+  const keepMyVersion = useCallback(async () => {
+    setResolvingConflict(true);
+    try {
+      const mine = buildRecord();
+      const existing = await persistence.listWorkspaceSummaries();
+      const copy: WorkspaceRecord = {
+        ...mine,
+        id: crypto.randomUUID(),
+        revision: undefined,
+        name: availableWorkspaceName(
+          conflict === "deleted" ? mine.name : `${mine.name} (my changes)`,
+          existing,
+        ),
+        createdAt: Date.now(),
+      };
+      await persistence.serial(() => persistence.putWorkspace(copy));
+      await refreshWorkspaceList();
+      hydrateWorkspace(copy, { background: true });
+      setSaveStatus("saved");
+      savePrefs({ lastWorkspaceId: copy.id });
+      toast.success(`Your version is saved as “${copy.name}”.`, {
+        description:
+          conflict === "deleted" ? undefined : "The other tab's version is unchanged.",
+      });
+    } catch (error) {
+      console.error("Could not keep this tab's version", error);
+      toast.error("Your version could not be saved. Export this workspace as a backup.", {
+        id: "workspace-save-error",
+      });
+    } finally {
+      setResolvingConflict(false);
+    }
+  }, [buildRecord, conflict, hydrateWorkspace, refreshWorkspaceList]);
+
+  /** Drop this tab's unsaved version and show what storage holds. */
+  const loadSavedVersion = useCallback(async () => {
+    setResolvingConflict(true);
+    try {
+      const id = workspaceIdRef.current;
+      const latest = id ? await persistence.serial(() => persistence.getWorkspace(id)) : undefined;
+      if (latest) {
+        hydrateWorkspace(latest);
+        return;
+      }
+      const list = await persistence.listWorkspaceSummaries();
+      await refreshWorkspaceList();
+      const next = list[0] ? await persistence.getWorkspace(list[0].id) : undefined;
+      if (next) {
+        hydrateWorkspace(next);
+        savePrefs({ lastWorkspaceId: next.id });
+        return;
+      }
+      // Nothing left anywhere: back to the empty first-run state.
+      workspaceConflictRef.current = false;
+      setConflict(null);
+      workspaceIdRef.current = null;
+      storageRevisionRef.current = undefined;
+      setWorkspaceId(null);
+      setFiles([]);
+      setFolders([]);
+      setSaved([]);
+      setSaveStatus("idle");
+    } finally {
+      setResolvingConflict(false);
+    }
+  }, [hydrateWorkspace, refreshWorkspaceList]);
+
+  const conflictBanner = conflict ? (
+    <ConflictBanner
+      reason={conflict}
+      busy={resolvingConflict}
+      onKeepBoth={() => void keepMyVersion()}
+      onUseSaved={() => void loadSavedVersion()}
+    />
+  ) : null;
 
   /**
    * What the sidebar asked to move, held while the reader picks a destination.
@@ -1863,12 +2099,11 @@ flowchart LR
   /**
    * Move documents and folders into another workspace.
    *
-   * The destination is written first and the source is only trimmed once that
-   * write has succeeded. Done the other way round, a failure between the two
-   * steps would take the documents out of this workspace without putting them
-   * in the other one — the one outcome a local-first app must never produce.
-   * The cost of this order is a possible duplicate rather than a loss, which is
-   * the right way for it to fail.
+   * Both workspaces are written in one transaction, each checked against the
+   * revision it was read at: either the documents are in the destination and
+   * gone from here, or nothing changed at all. It runs inside the write queue,
+   * so no save from this tab can land between reading the destination and
+   * committing the move.
    */
   const moveToWorkspace = useCallback(
     async (destinationId: string) => {
@@ -1878,26 +2113,50 @@ flowchart LR
       setMoving(true);
       const toastId = toast.loading("Moving…");
       try {
-        // Flush this workspace first: the plan is built from live state, and an
-        // unsaved edit would otherwise be written back over the move.
-        if (!(await persistNow(true))) throw new Error("Could not save this workspace first.");
+        const result = await persistence.serial(async () => {
+          if (workspaceConflictRef.current)
+            throw new Error("Resolve the conflict with another tab first.");
+          const destination = await persistence.getWorkspace(destinationId);
+          if (!destination) throw new Error("That workspace no longer exists.");
 
-        const destination = await persistence.getWorkspace(destinationId);
-        if (!destination) throw new Error("That workspace no longer exists.");
+          // The source is this tab's current snapshot, unsaved edits included,
+          // so the move also saves them — nothing is written back over it later.
+          const pending = mutationRef.current;
+          const current = buildRecord();
+          const plan = planTransfer(current, destination, selection);
+          if (!plan.files.length && !plan.folders.length) return null;
 
-        const plan = planTransfer(
-          { files: filesRef.current, folders, saved, highlights },
-          destination,
-          selection,
-        );
-        if (!plan.files.length && !plan.folders.length) {
+          const layout = closeFileEverywhere(snapshotRef.current.paneLayout, [
+            ...plan.removeFileIds,
+          ]);
+          const source = removeFromSource(current, plan);
+          source.ui = {
+            ...source.ui,
+            panes: toPersisted(layout),
+            focusedPaneId: layout.focusedPaneId,
+            activeFileId: activeFileOf(layout),
+            fileOrder: source.files.map((file) => file.id),
+          };
+          try {
+            await persistence.putWorkspaces([source, applyToDestination(destination, plan)]);
+          } catch (error) {
+            if (error instanceof WorkspaceConflictError && error.workspaceId === source.id)
+              enterConflict(error.reason);
+            throw error;
+          }
+          storageRevisionRef.current = source.revision;
+          storedRecordRef.current = source;
+          baseRecordRef.current = source;
+          savedMutationRef.current = Math.max(savedMutationRef.current, pending);
+          return { plan, destination };
+        });
+        if (!result) {
           toast.info("Nothing to move", { id: toastId });
           return;
         }
+        const { plan, destination } = result;
 
-        await persistence.putWorkspace(applyToDestination(destination, plan));
-
-        // Only now does anything leave this workspace.
+        // Storage already holds this state; bring the view in line with it.
         setFiles((prev) => prev.filter((file) => !plan.removeFileIds.has(file.id)));
         setFolders((prev) => prev.filter((folder) => !plan.removeFolderIds.has(folder.id)));
         setSaved((prev) => prev.filter((item) => !plan.removeFileIds.has(item.fileId)));
@@ -1905,8 +2164,6 @@ flowchart LR
         // A moved document must not stay open in a pane pointing at a file this
         // workspace no longer has.
         setPaneLayout((prev) => closeFileEverywhere(prev, [...plan.removeFileIds]));
-        markDirty();
-        await persistNow(true);
         await refreshWorkspaceList();
 
         const counts = transferCounts(plan);
@@ -1916,25 +2173,21 @@ flowchart LR
         ].filter(Boolean);
         toast.success(`Moved ${parts.join(" and ")} to ${destination.name}`, { id: toastId });
       } catch (error) {
-        toast.error("Move failed", {
+        toast.error("Move failed — nothing was moved", {
           id: toastId,
-          description: error instanceof Error ? error.message : undefined,
+          description:
+            error instanceof WorkspaceConflictError
+              ? "One of the workspaces changed in another tab."
+              : error instanceof Error
+                ? error.message
+                : undefined,
         });
       } finally {
         setMoving(false);
         setPendingMove(null);
       }
     },
-    [
-      pendingMove,
-      folders,
-      saved,
-      highlights,
-      persistNow,
-      markDirty,
-      refreshWorkspaceList,
-      setHighlights,
-    ],
+    [pendingMove, buildRecord, enterConflict, refreshWorkspaceList, setHighlights],
   );
 
   const openEmbeddedArtifact = useCallback(
@@ -1964,7 +2217,7 @@ flowchart LR
       if (!finalName) return;
       if (!(await persistNow(true))) return;
       const ws = newWorkspaceRecord(finalName);
-      await persistence.putWorkspace(ws);
+      await persistence.serial(() => persistence.putWorkspace(ws));
       await refreshWorkspaceList();
       hydrateWorkspace(ws);
       savePrefs({ lastWorkspaceId: ws.id });
@@ -2003,7 +2256,7 @@ flowchart LR
         ws.name = finalName;
 
         if (!(await persistNow(true))) return;
-        await persistence.putWorkspace(ws);
+        await persistence.serial(() => persistence.putWorkspace(ws));
         await refreshWorkspaceList();
         hydrateWorkspace(ws);
         savePrefs({ lastWorkspaceId: ws.id });
@@ -2154,7 +2407,7 @@ flowchart LR
           ws.files = stamped;
           ws.ui.activeFileId = stamped[0].id;
           ws.ui.fileOrder = stamped.map((f) => f.id);
-          await persistence.putWorkspace(ws);
+          await persistence.serial(() => persistence.putWorkspace(ws));
           await refreshWorkspaceList();
           hydrateWorkspace(ws);
           savePrefs({ lastWorkspaceId: ws.id });
@@ -2173,6 +2426,7 @@ flowchart LR
           if (!workspaceIdRef.current) {
             const id = crypto.randomUUID();
             workspaceIdRef.current = id;
+              storageRevisionRef.current = undefined;
             workspaceNameRef.current = payload.sourceName;
             createdAtRef.current = Date.now();
             setWorkspaceId(id);
@@ -2187,8 +2441,7 @@ flowchart LR
           setFiles(nextFiles);
           setActiveFileId(nextActiveFileId);
           setSaveStatus("saving");
-          await persistence.putWorkspace(buildRecord());
-          setSaveStatus("saved");
+          if (!(await persistNow(false, true))) throw new Error("Shared files could not be saved");
           await refreshWorkspaceList();
         }
 
@@ -2201,7 +2454,7 @@ flowchart LR
         if (location.pathname !== "/") navigate({ to: "/" });
       } catch (e) {
         console.error("Failed to import shared files", e);
-        setSaveStatus("idle");
+        setSaveStatus((status) => (status === "saving" ? "idle" : status));
         toast.error("Could not import the shared files. Please try again.");
       } finally {
         setImportingShare(false);
@@ -2220,28 +2473,29 @@ flowchart LR
 
   const deleteWorkspace = useCallback(
     async (id: string) => {
-      await persistence.deleteWorkspace(id);
-      let list: WorkspaceSummary[] = await persistence.listWorkspaceSummaries();
-      if (list.length === 0) {
-        const ws = newWorkspaceRecord("My workspace");
-        await persistence.putWorkspace(ws);
-        list = [
-          {
-            id: ws.id,
-            name: ws.name,
-            createdAt: ws.createdAt,
-            updatedAt: ws.updatedAt,
-            docCount: 0,
-          },
-        ];
+      const active = id === workspaceIdRef.current;
+      if (active) {
+        // Its pending save must not run after the delete and trip over the
+        // missing record.
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        savedMutationRef.current = mutationRef.current;
       }
-      list.sort((a, b) => a.createdAt - b.createdAt);
+      const { list, next } = await persistence.serial(async () => {
+        await persistence.deleteWorkspace(id);
+        let list: WorkspaceSummary[] = await persistence.listWorkspaceSummaries();
+        if (list.length === 0) {
+          const ws = newWorkspaceRecord("My workspace");
+          await persistence.putWorkspace(ws);
+          list = await persistence.listWorkspaceSummaries();
+        }
+        list.sort((a, b) => a.createdAt - b.createdAt);
+        return { list, next: active ? await persistence.getWorkspace(list[0].id) : undefined };
+      });
       setWorkspaces(list);
-      if (id === workspaceIdRef.current) {
-        const next = await persistence.getWorkspace(list[0].id);
+      if (active) {
         if (!next) throw new Error("Workspace could not be loaded");
         hydrateWorkspace(next);
-        savePrefs({ lastWorkspaceId: list[0].id });
+        savePrefs({ lastWorkspaceId: next.id });
       }
     },
     [hydrateWorkspace],
@@ -2249,18 +2503,35 @@ flowchart LR
 
   const renameWorkspace = useCallback(
     async (id: string, newName: string) => {
-      const ws = await persistence.getWorkspace(id);
-      if (!ws) return;
-      const finalName = resolveWorkspaceName(newName, await storedWorkspaces(), { excludeId: id });
-      if (!finalName || finalName === ws.name) return;
-      ws.name = finalName;
-      await persistence.putWorkspace(ws);
-      if (id === workspaceIdRef.current) {
-        workspaceNameRef.current = finalName;
+      const existing = await storedWorkspaces();
+      const current = existing.find((w) => w.id === id);
+      if (!current) return;
+      const finalName = resolveWorkspaceName(newName, existing, { excludeId: id });
+      if (!finalName || finalName === current.name) return;
+      const active = id === workspaceIdRef.current;
+      try {
+        await persistence.serial(async () => {
+          if (!active) {
+            await persistence.renameWorkspace(id, finalName);
+            return;
+          }
+          // The open workspace is renamed through its own revision, so a tab
+          // holding an older copy cannot quietly write the old name back.
+          if (!(await writeActive(true, false))) throw new Error("Save pending changes first");
+          storageRevisionRef.current = await persistence.renameWorkspace(
+            id,
+            finalName,
+            storageRevisionRef.current,
+          );
+          workspaceNameRef.current = finalName;
+        });
+      } catch (error) {
+        if (error instanceof WorkspaceConflictError && active) enterConflict(error.reason);
+        toast.error("The workspace could not be renamed.");
       }
       await refreshWorkspaceList();
     },
-    [refreshWorkspaceList, storedWorkspaces],
+    [enterConflict, refreshWorkspaceList, storedWorkspaces, writeActive],
   );
 
   const clearAllStorage = useCallback(async () => {
@@ -2812,7 +3083,7 @@ flowchart LR
   ) : null;
 
   if (booting) {
-    return <div className="min-h-dvh bg-background" />;
+    return <div className="min-h-dvh bg-background">{conflictBanner}</div>;
   }
 
   if (files.length === 0) {
@@ -2831,6 +3102,7 @@ flowchart LR
         shareDialog={shareDialog}
         settingsDialog={settingsDialog}
         moveDialog={moveDialog}
+        statusBanner={conflictBanner}
       />
     );
   }
@@ -3345,6 +3617,7 @@ flowchart LR
 
         {dragOverlay}
         {shareDialog}
+        {conflictBanner}
       </div>
     </NavHistoryContext.Provider>
   );
