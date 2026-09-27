@@ -10,8 +10,10 @@
 // touch the database directly.
 
 import type { MathRendererType } from "@/services/math";
+import { parseDerivation } from "../../services/doc-conversion/types.ts";
 
 export interface PersistedFile {
+  derivedFrom?: import("@/services/doc-conversion").Derivation;
   id: string;
   name: string;
   content: string;
@@ -49,6 +51,8 @@ export function isBinExpired(deletedAt: number | null | undefined, now = Date.no
  * degrades to the flat list rather than losing documents.
  */
 export interface FolderRecord {
+  /** Managed attachment folder, independent of its display name. */
+  purpose?: "embed-media";
   id: string;
   name: string;
   createdAt: number;
@@ -119,6 +123,15 @@ export interface WorkspaceRecord {
 
 export type SaveStatus = "idle" | "saving" | "saved" | "restored";
 
+export class WorkspaceConflictError extends Error {
+  constructor() {
+    super(
+      "This workspace changed in another tab. Export any unsaved edits, then reload before continuing.",
+    );
+    this.name = "WorkspaceConflictError";
+  }
+}
+
 const DB_NAME = "localdox";
 const DB_VERSION = 2;
 const STORE = "workspaces";
@@ -149,6 +162,7 @@ function summaryOf(w: WorkspaceRecord): WorkspaceSummary {
 // Retain only the last workspace's file references, never a second copy of its
 // document bytes. The on-disk revision guards this optimization across tabs.
 let lastWrite: { id: string; revision: string; files: Map<string, PersistedFile> } | null = null;
+const knownRevisions = new Map<string, string>();
 
 function sameFile(a: PersistedFile | undefined, b: PersistedFile): boolean {
   return (
@@ -162,7 +176,8 @@ function sameFile(a: PersistedFile | undefined, b: PersistedFile): boolean {
     a.addedAt === b.addedAt &&
     a.kind === b.kind &&
     a.folderId === b.folderId &&
-    a.deletedAt === b.deletedAt
+    a.deletedAt === b.deletedAt &&
+    JSON.stringify(a.derivedFrom) === JSON.stringify(b.derivedFrom)
   );
 }
 
@@ -254,6 +269,7 @@ function request<T>(
 }
 
 async function deleteDatabase(): Promise<void> {
+  knownRevisions.clear();
   const openDatabase = dbPromise;
   dbPromise = null;
   lastWrite = null;
@@ -305,11 +321,12 @@ export const persistence = {
           revision,
           files: new Map([...byId].map(([key, file]) => [key, { ...file }])),
         };
+        knownRevisions.set(id, revision);
         resolve({ ...workspace, files: files as PersistedFile[] });
       };
     });
   },
-  async putWorkspace(w: WorkspaceRecord): Promise<void> {
+  async putWorkspace(w: WorkspaceRecord, options?: { rejectStale?: boolean }): Promise<void> {
     // Snapshot metadata before awaiting; callers may rename/move files in place.
     const files = w.files.map((file) => ({ ...file }));
     const { files: _files, ...metadata } = w;
@@ -321,6 +338,14 @@ export const persistence = {
       current.onsuccess = () => {
         try {
           const previous = current.result as StoredWorkspace | undefined;
+          // A conversion must not write an old UI snapshot over changes from
+          // another tab (or recreate a workspace that another tab deleted).
+          if (
+            options?.rejectStale &&
+            (!previous || knownRevisions.get(w.id) !== previous.revision)
+          ) {
+            throw new WorkspaceConflictError();
+          }
           const cached =
             lastWrite?.id === w.id && lastWrite.revision === previous?.revision
               ? lastWrite.files
@@ -348,6 +373,7 @@ export const persistence = {
       tx.onabort = () => reject(tx.error ?? new Error("Could not save workspace"));
       tx.oncomplete = () => {
         lastWrite = { id: w.id, revision, files: new Map(files.map((file) => [file.id, file])) };
+        knownRevisions.set(w.id, revision);
         resolve();
       };
     });
@@ -368,6 +394,7 @@ export const persistence = {
       tx.onabort = () => reject(tx.error ?? new Error("Could not delete workspace"));
       tx.oncomplete = () => {
         if (lastWrite?.id === id) lastWrite = null;
+        knownRevisions.delete(id);
         resolve();
       };
     });
@@ -381,6 +408,7 @@ export const persistence = {
     return workspaces.filter((w): w is WorkspaceRecord => !!w);
   },
   async clearAll(): Promise<void> {
+    knownRevisions.clear();
     const db = await openDb();
     return new Promise((resolve, reject) => {
       const tx = db.transaction([STORE, FILES, SUMMARIES], "readwrite");
@@ -542,6 +570,8 @@ export interface Prefs {
    * have to look at it.
    */
   aiEnabled: boolean;
+  /** Show uploaded attachment folders in the sidebar. Files remain available when hidden. */
+  showEmbedMedia: boolean;
   lastWorkspaceId: string | null;
   // The reader's name, asked once and remembered for personalized greetings.
   name: string | null;
@@ -585,6 +615,7 @@ const DEFAULT_PREFS: Prefs = {
   diagramFollowNumbers: true,
   diagramNumbers: true,
   aiEnabled: true,
+  showEmbedMedia: true,
   lastWorkspaceId: null,
   name: null,
   namePrompted: false,
@@ -606,6 +637,7 @@ export function loadPrefs(): Prefs {
     // mapped on read or it would set a `data-theme` no stylesheet answers.
     return {
       ...stored,
+      showEmbedMedia: stored.showEmbedMedia !== false,
       theme: migrateTheme(stored.theme),
       readingFont: migrateFont(stored.readingFont),
     };
@@ -653,12 +685,14 @@ export function parseWorkspaceImport(json: string): WorkspaceRecord {
         size: typeof f.size === "number" ? f.size : undefined,
         addedAt: typeof f.addedAt === "number" ? f.addedAt : undefined,
         kind: typeof f.kind === "string" ? f.kind : undefined,
+        derivedFrom: parseDerivation(f.derivedFrom),
         folderId: typeof f.folderId === "string" ? f.folderId : null,
       })),
     folders: Array.isArray(w.folders)
       ? (w.folders as Partial<FolderRecord & { parentId?: unknown }>[])
           .filter((f) => f && typeof f.id === "string" && typeof f.name === "string")
           .map((f) => ({
+            purpose: f.purpose === "embed-media" ? "embed-media" as const : undefined,
             id: f.id as string,
             name: f.name as string,
             createdAt: typeof f.createdAt === "number" ? f.createdAt : now,

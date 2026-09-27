@@ -8,6 +8,9 @@ const kindByExtension: Record<string, DocumentKind> = {
   mermaid: "mermaid",
   excalidraw: "board",
   txt: "text",
+  // RTF can contain legacy-encoded bytes and binary image runs; retain it as
+  // binary for optional conversion instead of decoding it as plain UTF-8.
+  rtf: "unknown",
   docx: "docx",
   pdf: "pdf",
   xlsx: "spreadsheet",
@@ -30,6 +33,17 @@ const kindByExtension: Record<string, DocumentKind> = {
   gif: "image",
   svg: "image",
   avif: "image",
+  bmp: "image",
+  ico: "image",
+  tif: "image",
+  tiff: "image",
+  ogv: "video",
+  avi: "video",
+  mkv: "video",
+  flac: "audio",
+  aac: "audio",
+  opus: "audio",
+  aiff: "audio",
   mp4: "video",
   webm: "video",
   mov: "video",
@@ -51,6 +65,9 @@ export function fileExtension(name: string) {
 export function getDocumentKind(name: string, mimeType = ""): DocumentKind {
   const extension = fileExtension(name);
   if (kindByExtension[extension]) return kindByExtension[extension];
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "audio";
   if (mimeType.includes("pdf")) return "pdf";
   if (mimeType.includes("spreadsheet") || mimeType.includes("excel")) return "spreadsheet";
   if (mimeType.includes("presentation") || mimeType.includes("powerpoint")) return "presentation";
@@ -73,20 +90,11 @@ export function isTextKind(kind: DocumentKind) {
   ].includes(kind);
 }
 
-/**
- * Kinds the app can actually open an editor for.
- *
- * Narrower than `isTextKind`, which also covers text the reader can only read:
- * a CSV is shown as a sheet and a Google link is a pointer at a document that
- * lives elsewhere, so neither has a source editor to enter. A board is absent
- * for the opposite reason — its editor is its canvas, not a text field.
- *
- * One list, because it was two: the sidebar's "Edit" item used to name the
- * editable kinds inline, and HTML — which has both a source view and, now, an
- * editor behind it — was left off that list and out of reach.
- */
+/** Kinds with a native editor; boards are edited directly on their canvas. */
 export function isEditableKind(kind: DocumentKind) {
-  return ["markdown", "mermaid", "text", "json", "html"].includes(kind);
+  return ["markdown", "mermaid", "text", "json", "html", "csv", "spreadsheet", "docx"].includes(
+    kind,
+  );
 }
 
 function dataUrl(file: File): Promise<string> {
@@ -121,7 +129,9 @@ export async function importDocumentFile(file: File): Promise<MdFile> {
   if (linkedGoogleFile && kind === "text") {
     kind = linkedGoogleFile.includes("/presentation/") ? "google-slide" : "google-doc";
   }
-  const data = isTextSourced(kind) ? undefined : await dataUrl(file);
+  // CSV is read as text for its preview, but keep its original encoding/BOM
+  // for downloads and conversion. Editing clears these original bytes.
+  const data = isTextSourced(kind) && kind !== "csv" ? undefined : await dataUrl(file);
   const id = `${file.name}-${crypto.randomUUID().slice(0, 8)}`;
   return {
     id,

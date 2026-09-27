@@ -9,6 +9,7 @@
 // still reads those.
 
 import type { PersistedFile } from "./persistence";
+import { parseDerivation, remapDerivation } from "../../services/doc-conversion/types.ts";
 
 const BYTEBIN_URL = "https://bytebin.lucko.me";
 
@@ -25,6 +26,7 @@ export interface SharedFilesPayload {
 }
 
 export function serializeSharedFiles(files: PersistedFile[], sourceName: string): string {
+  const includedIds = new Map(files.map((file) => [file.id, file.id]));
   const payload: SharedFilesPayload = {
     format: "localdox-files",
     version: 1,
@@ -39,6 +41,7 @@ export function serializeSharedFiles(files: PersistedFile[], sourceName: string)
       size: f.size,
       addedAt: f.addedAt,
       kind: f.kind,
+      derivedFrom: remapDerivation(f.derivedFrom, includedIds),
     })),
   };
   return JSON.stringify(payload);
@@ -59,6 +62,7 @@ export function parseSharedFiles(json: string): SharedFilesPayload {
       size: typeof f.size === "number" ? f.size : undefined,
       addedAt: typeof f.addedAt === "number" ? f.addedAt : undefined,
       kind: typeof f.kind === "string" ? f.kind : undefined,
+      derivedFrom: parseDerivation(f.derivedFrom),
     }));
   if (files.length === 0) throw new Error("Shared link contains no readable files");
   return {

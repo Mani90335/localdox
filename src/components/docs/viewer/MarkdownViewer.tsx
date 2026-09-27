@@ -1,3 +1,20 @@
+import { toast } from "sonner";
+import { MarkdownMedia } from "./MarkdownMedia";
+import {
+  remarkMedia,
+  mediaKind,
+  mediaUrlTransform,
+  parseMediaSpec,
+} from "@/lib/markdown/markdown-media";
+import { isLocalReference } from "@/lib/markdown/media-references";
+import type { FolderRecord } from "@/lib/workspace/persistence";
+import { ResizableMarkdownTable } from "./ResizableMarkdownTable";
+import {
+  remarkConvertedHtml,
+  convertedAnchorMap,
+  convertedFootnotes,
+  ConvertedRemoteImage,
+} from "@/services/doc-conversion";
 import {
   createContext,
   memo,
@@ -81,7 +98,12 @@ import {
 } from "@/lib/workspace/saved-items";
 import { locateInSource, sourceLinesForSelection } from "@/lib/markdown/source-locate";
 import { copyText } from "@/lib/workspace/share";
-import { fileSubtopics, headingChunkMap, readingMinutes, wordCount } from "@/lib/markdown/markdown-utils";
+import {
+  fileSubtopics,
+  headingChunkMap,
+  readingMinutes,
+  wordCount,
+} from "@/lib/markdown/markdown-utils";
 import { InlineArtifact } from "./InlineArtifact";
 import { InteractiveBlock } from "./InteractiveBlock";
 import {
@@ -170,6 +192,9 @@ interface Props {
   workspaceRevision?: string;
   workspaceFiles?: MdFile[];
   workspaceName?: string;
+  workspaceFolders?: FolderRecord[];
+  mathPreferences?: import("@/services/math").MathPreferences;
+  onImportAttachments?: (files: File[]) => Promise<MdFile[]>;
   onOpenArtifact?: (fileId: string, workspaceId: string) => void;
   /** Opens the workspace command palette from the header's search field. */
   onOpenPalette?: () => void;
@@ -239,7 +264,7 @@ function flashPassage(range: Range | null, target: HTMLElement | null) {
  * stable. Rebuilding it per render would make react-markdown re-parse the whole
  * document every time this component re-renders for any other reason.
  */
-const EXTRA_REMARK_PLUGINS = [remarkInteractiveBlockMeta];
+const EXTRA_REMARK_PLUGINS = [remarkInteractiveBlockMeta, remarkMedia];
 
 /**
  * Star affordances live deep inside the rendered markdown (a heading, a table,
@@ -317,6 +342,8 @@ function MarkdownViewerImpl({
   workspaceRevision,
   workspaceFiles,
   workspaceName,
+  workspaceFolders,
+  onImportAttachments,
   onOpenArtifact,
   onOpenPalette,
   onRemoveFile,
@@ -342,13 +369,15 @@ function MarkdownViewerImpl({
     [onContentChange],
   );
   const leaveEditMode = useCallback(
-    (cursorIndex?: number) => {
+    (cursorIndex?: number, content?: string) => {
       setEditMode(false);
       if (cursorIndex !== undefined) {
-        const chunks = fileSubtopics(file);
+        const chunks = fileSubtopics(
+          content === undefined ? file : { ...file, content, subtopics: undefined },
+        );
         if (chunks.length > 0) {
           let currentLength = 0;
-          let targetChunk = chunks[0];
+          let targetChunk = chunks[chunks.length - 1];
           for (const chunk of chunks) {
             if (
               cursorIndex >= currentLength &&
@@ -423,43 +452,25 @@ function MarkdownViewerImpl({
     if (editMode) originalContentRef.current = liveContentRef.current;
   }, [editMode]);
 
-  const exportPDF = useCallback(() => {
-    window.print();
-  }, []);
-
-  const exportHTML = useCallback(() => {
-    if (!containerRef.current) return;
-    const html = containerRef.current.innerHTML;
-    const blob = new Blob(
-      [
-        `<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>${file.name}</title>
-    <style>
-      body { font-family: system-ui, -apple-system, sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; line-height: 1.6; }
-      mark { background-color: rgba(250, 204, 21, 0.4); color: inherit; }
-      img { max-width: 100%; height: auto; }
-      pre { background: #f4f4f5; padding: 1rem; overflow-x: auto; border-radius: 0.5rem; }
-      code { font-family: monospace; }
-      .docs-prose { max-width: 100%; }
-    </style>
-  </head>
-  <body>
-    ${html}
-  </body>
-</html>`,
-      ],
-      { type: "text/html" },
-    );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = file.name.replace(/\.md$/, "") + ".html";
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [file.name]);
+  const [exporting, setExporting] = useState(false);
+  const exportHTML = useCallback(async () => {
+    setExporting(true);
+    try {
+      const { downloadMarkdownHTML } = await import("@/services/markdown-export/media-bundle");
+      await downloadMarkdownHTML(file, {
+        workspaceId,
+        workspaceRevision,
+        workspaceFiles,
+        workspaceFolders,
+        workspaceName,
+        sourceFile: file,
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not export this document.");
+    } finally {
+      setExporting(false);
+    }
+  }, [file, workspaceId, workspaceRevision, workspaceFiles, workspaceFolders, workspaceName]);
 
   // Back leaves the editor. Autosave has already written the draft, so this
   // drops nothing the reader typed.
@@ -469,7 +480,18 @@ function MarkdownViewerImpl({
 
   // A selected heading may be a nested ##/### that lives inside a # page rather
   // than being a page itself; resolve it to its parent # chunk id.
-  const chunkForHeading = useMemo(() => headingChunkMap(file.content), [file.content]);
+  const anchorPrefix = `localdox-converted-${encodeURIComponent(file.id)}-`;
+  const convertedAnchors = useMemo(
+    () =>
+      file.derivedFrom
+        ? convertedAnchorMap(allChunks, anchorPrefix)
+        : ({ owners: {}, targets: {} } as ReturnType<typeof convertedAnchorMap>),
+    [allChunks, anchorPrefix, file.derivedFrom],
+  );
+  const chunkForHeading = useMemo(
+    () => ({ ...headingChunkMap(file.content), ...convertedAnchors.owners }),
+    [file.content, convertedAnchors],
+  );
 
   const activeChunk = useMemo(() => {
     const targetId = (activeSubtopicId && chunkForHeading[activeSubtopicId]) || activeSubtopicId;
@@ -518,12 +540,25 @@ function MarkdownViewerImpl({
 
   // The markdown actually handed to the renderer. Resolved once here so the
   // plugin hook and the renderer never disagree about which text is on screen.
-  const markdownSource = singleMode ? fullRender : renderContent;
+  const footnoteDefinitions = useMemo(
+    () => (file.derivedFrom ? convertedFootnotes(file.content) : ""),
+    [file.derivedFrom, file.content],
+  );
+  const markdownSource = singleMode
+    ? fullRender
+    : renderContent + (footnoteDefinitions ? "\n\n" + footnoteDefinitions : "");
 
   // Syntax highlighting and math typesetting are fetched only for documents
   // that contain code or math — see `useMarkdownPlugins`. Both plugin arrays
   // are memoized, because a fresh array identity makes react-markdown re-parse.
-  const { remarkPlugins, rehypePlugins } = useMarkdownPlugins(markdownSource, EXTRA_REMARK_PLUGINS);
+  const extraPlugins = useMemo(
+    () =>
+      file.derivedFrom
+        ? [...EXTRA_REMARK_PLUGINS, [remarkConvertedHtml, { prefix: anchorPrefix }]]
+        : EXTRA_REMARK_PLUGINS,
+    [file.derivedFrom, anchorPrefix],
+  );
+  const { remarkPlugins, rehypePlugins } = useMarkdownPlugins(markdownSource, extraPlugins);
 
   const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null);
 
@@ -1163,18 +1198,6 @@ function MarkdownViewerImpl({
         const only = solo.length === 1 ? solo[0] : null;
         const href = only?.props?.href;
         const src = only?.props?.src;
-        if (isArtifactUrl(src)) {
-          return (
-            <InlineArtifact
-              reference={artifactReference(src)}
-              currentWorkspaceId={workspaceId}
-              workspaceRevision={workspaceRevision}
-              currentWorkspaceFiles={workspaceFiles}
-              currentWorkspaceName={workspaceName}
-              onOpenArtifact={onOpenArtifact}
-            />
-          );
-        }
         if (href) {
           const inner = only.props?.children;
           const text =
@@ -1182,7 +1205,20 @@ function MarkdownViewerImpl({
           if (text === href || text === "") {
             const embed = detectEmbed(href);
             if (embed) return <EmbedFrame embed={embed} />;
-            if (isVideoUrl(href)) return <VideoPlayer src={href} />;
+            if (mediaKind(href))
+              return (
+                <MarkdownMedia
+                  src={href}
+                  context={{
+                    workspaceId,
+                    workspaceRevision,
+                    workspaceFiles,
+                    workspaceFolders,
+                    workspaceName,
+                    sourceFile: file,
+                  }}
+                />
+              );
           }
         }
         return <p {...p}>{walkChildren(p.children)}</p>;
@@ -1211,27 +1247,29 @@ function MarkdownViewerImpl({
           </SavableBlock>
         );
       }),
+      div: foldable((p: any) => <div {...p}>{walkChildren(p.children)}</div>),
       img: foldable((p: any) => {
-        if (isArtifactUrl(p.src)) {
+        if (file.derivedFrom) return <ConvertedRemoteImage src={p.src ?? ""} alt={p.alt} />;
+        if (
+          isArtifactUrl(p.src) ||
+          isLocalReference(p.src ?? "") ||
+          mediaKind(p.src ?? "") !== "image"
+        ) {
           return (
-            <InlineArtifact
-              reference={artifactReference(p.src)}
-              currentWorkspaceId={workspaceId}
-              workspaceRevision={workspaceRevision}
-              currentWorkspaceFiles={workspaceFiles}
-              currentWorkspaceName={workspaceName}
-              onOpenArtifact={onOpenArtifact}
+            <MarkdownMedia
+              src={p.src ?? ""}
+              alt={p.alt}
+              spec={parseMediaSpec(p["data-media"])}
+              context={{
+                workspaceId,
+                workspaceRevision,
+                workspaceFiles,
+                workspaceFolders,
+                workspaceName,
+                sourceFile: file,
+              }}
             />
           );
-        }
-        // ![alt](clip.mp4) renders a player; a `title` that is an image URL
-        // (![alt](clip.mp4 "thumb.jpg")) becomes the preview poster.
-        if (p.src && isVideoUrl(p.src)) {
-          const poster =
-            typeof p.title === "string" && /\.(png|jpe?g|webp|gif|avif)(\?.*)?$/i.test(p.title)
-              ? p.title
-              : undefined;
-          return <VideoPlayer src={p.src} poster={poster} />;
         }
         return (
           <SavableBlock blockType="image" as="span" identity={p.src} className="inline-block">
@@ -1246,6 +1284,23 @@ function MarkdownViewerImpl({
       }),
       a: (p: any) => {
         const href = typeof p.href === "string" ? p.href : "";
+        if (isArtifactUrl(href) || isLocalReference(href))
+          return (
+            <MarkdownMedia
+              src={href}
+              linkOnly
+              context={{
+                workspaceId,
+                workspaceRevision,
+                workspaceFiles,
+                workspaceFolders,
+                workspaceName,
+                sourceFile: file,
+              }}
+            >
+              {p.children}
+            </MarkdownMedia>
+          );
         // An in-page reference (`[see](#recommended-controls)`) used to be left
         // to the browser, which looks for the element and finds nothing: in
         // paginated mode the target heading usually lives in a *different*
@@ -1253,17 +1308,31 @@ function MarkdownViewerImpl({
         // through the app's own navigation instead — switch to the chunk that
         // owns the heading, then scroll to it.
         if (href.startsWith("#")) {
-          const targetId = decodeURIComponent(href.slice(1));
+          let rawTarget = href.slice(1);
+          try {
+            rawTarget = decodeURIComponent(rawTarget);
+          } catch {
+            /* malformed fragment stays literal */
+          }
+          const targetId = convertedAnchors.targets[rawTarget] ?? rawTarget;
           return (
             <a
               {...p}
               onClick={(event: React.MouseEvent) => {
                 if (event.metaKey || event.ctrlKey || event.shiftKey) return;
                 event.preventDefault();
-                const owner = chunkForHeading[targetId] ?? targetId;
+                // Footnotes are appended to each converted page. Follow their
+                // local targets without changing the currently selected page.
+                if (file.derivedFrom && rawTarget.startsWith("user-content-fn")) {
+                  const note = contentRef.current?.querySelector(`#${CSS.escape(rawTarget)}`);
+                  if (note) {
+                    note.scrollIntoView({ behavior: "smooth", block: "start" });
+                    return;
+                  }
+                }
                 // Selecting the chunk mounts it; the effect that watches
                 // `activeSubtopicId` scrolls to the heading once it exists.
-                onNav(file.id, owner === targetId ? targetId : targetId);
+                onNav(file.id, targetId);
                 requestAnimationFrame(() => {
                   document
                     .getElementById(targetId)
@@ -1284,9 +1353,7 @@ function MarkdownViewerImpl({
       li: (p: any) => <li {...p}>{walkChildren(p.children)}</li>,
       table: foldable((p: any) => (
         <SavableBlock blockType="table" className="docs-savable-table">
-          <div className="docs-table-wrap">
-            <table {...p} />
-          </div>
+          <ResizableMarkdownTable {...p} />
         </SavableBlock>
       )),
       td: (p: any) => <td {...p}>{walkChildren(p.children)}</td>,
@@ -1306,10 +1373,14 @@ function MarkdownViewerImpl({
       workspaceRevision,
       workspaceFiles,
       workspaceName,
+      workspaceFolders,
+      file,
       onOpenArtifact,
       collapsedSections,
       file.id,
       chunkForHeading,
+      convertedAnchors,
+      file.derivedFrom,
       onNav,
     ],
   );
@@ -1380,7 +1451,17 @@ function MarkdownViewerImpl({
            to tell it is empty and reserves its height for nothing. */
         actions={
           !editMode ? (
-            <>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void exportHTML()}
+                disabled={exporting}
+                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+                title="Download a styled HTML page; uploaded attachments are bundled in a ZIP and web media stays online"
+              >
+                <Download className="h-4 w-4" />
+                {exporting ? "Exporting…" : "Download HTML + Media"}
+              </button>
               {onToggleReadingMode && (
                 <button
                   onClick={onToggleReadingMode}
@@ -1397,8 +1478,18 @@ function MarkdownViewerImpl({
               {/* Export sits with the document rather than only in the sidebar
                   row menu: while reading is when you want it, and on a phone
                   that panel is closed. */}
-              <ExportMenu file={file} />
-            </>
+              <ExportMenu
+                file={file}
+                mediaContext={{
+                  workspaceId,
+                  workspaceRevision,
+                  workspaceFiles,
+                  workspaceFolders,
+                  workspaceName,
+                  sourceFile: file,
+                }}
+              />
+            </div>
           ) : undefined
         }
       />
@@ -1696,6 +1787,15 @@ function MarkdownViewerImpl({
                 inspectMissed={inspectMissed}
                 fileName={file.name}
                 onRename={onRenameFile}
+                mediaContext={{
+                  workspaceId,
+                  workspaceRevision,
+                  workspaceFiles,
+                  workspaceFolders,
+                  workspaceName,
+                  sourceFile: file,
+                }}
+                onImportAttachments={onImportAttachments}
               />
             ) : (
               <div
@@ -1706,6 +1806,7 @@ function MarkdownViewerImpl({
                 <SavedContext.Provider value={savedCtx}>
                   <CollapseContext.Provider value={collapseCtx}>
                     <MarkdownContent
+                      urlTransform={mediaUrlTransform}
                       remarkPlugins={remarkPlugins}
                       rehypePlugins={rehypePlugins}
                       components={components}

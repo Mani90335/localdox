@@ -1,9 +1,10 @@
+import type { DocumentUpdate } from "@/services/office-editing";
 import { lazy, useCallback, useMemo } from "react";
 import { MarkdownViewer } from "./MarkdownViewer";
 import { getDocumentKind } from "@/lib/markdown/document-utils";
 import type { Highlight } from "@/lib/markdown/dom-highlighter";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
-import type { ReadingMode } from "@/lib/workspace/persistence";
+import type { FolderRecord, ReadingMode } from "@/lib/workspace/persistence";
 import type { MathPreferences } from "@/services/math";
 import type { SavedDraft, SavedItem } from "@/lib/workspace/saved-items";
 
@@ -38,7 +39,11 @@ export function PaneDocument({
   workspaceId,
   workspaceRevision,
   workspaceName,
+  workspaceFolders,
+  onImportAttachments,
   onContentChange,
+  onDocumentSave,
+  onEditorDirtyChange,
   onRenameFile,
   onAddHighlight,
   onUpdateHighlight,
@@ -63,7 +68,11 @@ export function PaneDocument({
   workspaceId: string | null;
   workspaceRevision: string;
   workspaceName: string;
+  workspaceFolders?: FolderRecord[];
+  onImportAttachments?: (files: File[]) => Promise<MdFile[]>;
   onContentChange: (fileId: string, content: string) => void;
+  onDocumentSave?: (fileId: string, update: DocumentUpdate) => void;
+  onEditorDirtyChange?: (dirty: boolean) => void;
   onRenameFile: (fileId: string, name: string) => void;
   onAddHighlight: (hl: Omit<Highlight, "id" | "fileId">, fileId: string) => void;
   onUpdateHighlight: (id: string, patch: Partial<Pick<Highlight, "color" | "label">>) => void;
@@ -131,6 +140,8 @@ export function PaneDocument({
         nextFile={null}
         onNavFile={() => {}}
         onContentChange={onContentChange}
+        onDocumentSave={onDocumentSave}
+        onEditorDirtyChange={onEditorDirtyChange}
         fillAvailableHeight
         startInEditFileId={startInEditFileId}
         onStartInEditConsumed={onStartInEditConsumed}
@@ -174,6 +185,8 @@ export function PaneDocument({
       workspaceRevision={workspaceRevision}
       workspaceFiles={files}
       workspaceName={workspaceName}
+      workspaceFolders={workspaceFolders}
+      onImportAttachments={onImportAttachments}
       onOpenArtifact={onOpenArtifact}
     />
   );
