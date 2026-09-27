@@ -2,21 +2,7 @@ import { ensureEmbedMediaFolder } from "@/lib/workspace/embed-media";
 import type { DocumentUpdate } from "@/services/office-editing";
 import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import {
-  BookOpen,
-  Menu,
-  X,
-  Search,
-  Monitor,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Undo2,
-  Home,
-  Upload,
-  Settings,
-  FilePlus,
-  PenTool,
-} from "lucide-react";
+import { Menu, X, Search, Undo2, Settings } from "lucide-react";
 
 import {
   ESCAPE_DEPTH,
@@ -29,6 +15,19 @@ import { MarkdownViewer } from "./viewer/MarkdownViewer";
 import { PaneDocument } from "./viewer/PaneDocument";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useSearchIndex } from "@/hooks/use-search-index";
+import type { SearchHit } from "@/lib/search/schema";
+import type { SearchPanelState } from "./workspace/sidebar/SearchPanel";
+import { Header } from "./docs-app/Header";
+import { EmptyWorkspace } from "./docs-app/EmptyWorkspace";
+import { DragDropOverlay } from "./docs-app/DragDropOverlay";
+import { useReaderPreferences } from "./docs-app/use-reader-preferences";
+import {
+  useSidebarCollapseAnimation,
+  SIDEBAR_WIDTH,
+} from "./docs-app/use-sidebar-collapse-animation";
+import { toMdFile, uniqueFileName, findDuplicate } from "./docs-app/file-helpers";
+import { availableWorkspaceName, resolveWorkspaceName } from "./docs-app/workspace-naming";
 import {
   activeFileOf,
   closeFileEverywhere,
@@ -59,9 +58,6 @@ import type { AskAiPrefill } from "@/services/ai";
 // interaction that triggered it.
 const DocumentViewer = lazy(() =>
   import("./viewer/DocumentViewer").then((m) => ({ default: m.DocumentViewer })),
-);
-const CommandPalette = lazy(() =>
-  import("./navigation/CommandPalette").then((m) => ({ default: m.CommandPalette })),
 );
 /**
  * How many columns the split view will go to.
@@ -102,9 +98,7 @@ import {
   SUPPORTED_ACCEPT,
 } from "@/lib/markdown/document-utils";
 import { clearArtifactResolutionCache } from "@/lib/workspace/workspace-artifacts";
-import { loadReadingFont, warmAppFonts } from "@/lib/fonts/fonts";
-import { restoreCustomFont } from "@/lib/fonts/custom-font";
-import { loadGoogleFont } from "@/lib/fonts/google-font";
+import { warmAppFonts } from "@/lib/fonts/fonts";
 import { toast } from "sonner";
 import { useHistory } from "@/hooks/use-history";
 import {
@@ -120,7 +114,6 @@ import {
   newWorkspaceRecord,
   serializeWorkspace,
   parseWorkspaceImport,
-  isDarkTheme,
   saveScrollTop,
   loadScrollTop,
   type PersistedFile,
@@ -129,11 +122,7 @@ import {
   type WorkspaceSummary,
   type SaveStatus,
   type ThemePref,
-  type ReadingMode,
-  type ReadingFont,
 } from "@/lib/workspace/persistence";
-import { clearMathCache } from "@/services/math";
-import type { MathPreferences, MathRendererType } from "@/services/math";
 import {
   findSaved,
   migrateBookmarks,
@@ -168,15 +157,6 @@ import {
 
 type Theme = ThemePref;
 
-/**
- * One sidebar width for everyone. It used to be drag-resizable and persisted
- * per browser, which bought very little — the panel holds a file list, not a
- * document — at the cost of a drag handle, a stored preference, and layouts
- * that differed between machines. Long names are truncated with an ellipsis and
- * carry their full text as a tooltip instead.
- */
-const SIDEBAR_WIDTH = 288;
-
 // Shared empties, so "this file has no highlights / nothing saved" is always the
 // same array. A fresh `[]` would be a new prop identity on every render.
 const EMPTY_HIGHLIGHTS: Highlight[] = [];
@@ -186,121 +166,6 @@ interface WorkspaceLite {
   id: string;
   name: string;
   docCount?: number;
-}
-
-/**
- * Stored file → in-memory file.
- *
- * Structure is deliberately not parsed here. This runs for every document in
- * the workspace during hydrate, before the first paint, and parsing each one
- * meant scanning the entire workspace's text up front — most of it for
- * documents the reader never opens. `fileSubtopics()` derives (and caches) a
- * document's sections the first time something actually asks.
- */
-function toMdFile(f: PersistedFile): MdFile {
-  return {
-    id: f.id,
-    name: f.name,
-    content: f.content,
-    data: f.data,
-    mimeType: f.mimeType,
-    size: f.size,
-    addedAt: f.addedAt,
-    kind: f.kind ?? getDocumentKind(f.name, f.mimeType),
-    folderId: f.folderId ?? null,
-    deletedAt: f.deletedAt,
-    derivedFrom: f.derivedFrom,
-  };
-}
-
-/** `report.md` → `report (2).md` when the workspace already holds that name. */
-function uniqueFileName(name: string, taken: Set<string>): string {
-  if (!taken.has(name)) return name;
-  const dot = name.lastIndexOf(".");
-  const stem = dot > 0 ? name.slice(0, dot) : name;
-  const ext = dot > 0 ? name.slice(dot) : "";
-  for (let n = 2; ; n++) {
-    const candidate = `${stem} (${n})${ext}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-}
-
-/**
- * Workspace names are how the reader tells one workspace from another in the
- * switcher, so two carrying the same name is a real ambiguity rather than a
- * cosmetic one. Compared case- and whitespace-insensitively: "Notes" and
- * "notes " are the same name to a person reading the list.
- */
-function normalizeWorkspaceName(name: string): string {
-  return name.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-/** `Notes` → `Notes (2)` when a workspace already carries that name. */
-function availableWorkspaceName(name: string, existing: { name: string }[]): string {
-  const taken = new Set(existing.map((w) => normalizeWorkspaceName(w.name)));
-  const base = name.trim() || "Workspace";
-  if (!taken.has(normalizeWorkspaceName(base))) return base;
-  for (let n = 2; ; n++) {
-    const candidate = `${base} (${n})`;
-    if (!taken.has(normalizeWorkspaceName(candidate))) return candidate;
-  }
-}
-
-/**
- * Asks for a different workspace name until one is free, or the reader cancels.
- *
- * `existing` holds the names already in use; `excludeId` lets a rename keep its
- * own current name. Returns the accepted name, or `null` when the reader backs
- * out of the prompt.
- */
-function resolveWorkspaceName(
-  proposed: string,
-  existing: { id: string; name: string }[],
-  opts: { excludeId?: string; whatIsIt?: string } = {},
-): string | null {
-  const { excludeId, whatIsIt = "A workspace" } = opts;
-  const taken = new Set(
-    existing.filter((w) => w.id !== excludeId).map((w) => normalizeWorkspaceName(w.name)),
-  );
-  let candidate = proposed.trim();
-  while (candidate && taken.has(normalizeWorkspaceName(candidate))) {
-    const next = window.prompt(
-      `${whatIsIt} named “${candidate}” already exists. Enter a different name:`,
-      candidate,
-    );
-    if (next == null) return null; // cancelled — leave everything untouched
-    candidate = next.trim();
-  }
-  return candidate || null;
-}
-
-/**
- * A file already in the workspace that the incoming one duplicates.
- *
- * Two kinds of duplicate matter, and they are not the same problem: the same
- * bytes arriving again (re-uploading a file that is already here, which is
- * simply redundant) and a different document arriving under a name that is
- * taken (which would leave two indistinguishable rows in the sidebar).
- */
-type DuplicateKind = "content" | "name";
-
-function fileFingerprint(f: { content?: string; data?: string }): string {
-  // Binary files carry their bytes in `data`; text ones in `content`. Either is
-  // a faithful identity for "the same file uploaded twice".
-  return f.data ?? f.content ?? "";
-}
-
-function findDuplicate(
-  incoming: { name: string; content?: string; data?: string },
-  existing: MdFile[],
-): { kind: DuplicateKind; file: MdFile } | null {
-  const print = fileFingerprint(incoming);
-  if (print) {
-    const same = existing.find((f) => fileFingerprint(f) === print);
-    if (same) return { kind: "content", file: same };
-  }
-  const clash = existing.find((f) => f.name === incoming.name);
-  return clash ? { kind: "name", file: clash } : null;
 }
 
 export function DocsApp() {
@@ -424,26 +289,41 @@ export function DocsApp() {
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
   const [scrollTarget, setScrollTarget] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [theme, setTheme] = useState<Theme>(() => loadPrefs().theme);
-  const [readingMode, setReadingMode] = useState<ReadingMode>(() => loadPrefs().readingMode);
-  const [readingFont, setReadingFont] = useState<ReadingFont>(() => loadPrefs().readingFont);
-  const [googleFont, setGoogleFont] = useState<string | null>(() => loadPrefs().googleFont);
-  const [diagramColors, setDiagramColors] = useState<boolean>(() => loadPrefs().diagramColors);
-  const [diagramCamera, setDiagramCamera] = useState<boolean>(() => loadPrefs().diagramCamera);
-  const [diagramFollowNumbers, setDiagramFollowNumbers] = useState<boolean>(
-    () => loadPrefs().diagramFollowNumbers,
-  );
-  const [diagramNumbers, setDiagramNumbers] = useState<boolean>(() => loadPrefs().diagramNumbers);
-  const [showEmbedMedia, setShowEmbedMedia] = useState(() => loadPrefs().showEmbedMedia);
-  useEffect(() => { savePrefs({ showEmbedMedia }); }, [showEmbedMedia]);
-  const [aiEnabled, setAiEnabled] = useState<boolean>(() => loadPrefs().aiEnabled);
-  const [mathRenderer, setMathRenderer] = useState<MathRendererType>(
-    () => loadPrefs().mathRenderer,
-  );
-  const [mathNumbering, setMathNumbering] = useState<boolean>(() => loadPrefs().mathNumbering);
-  const [mathExplorer, setMathExplorer] = useState<boolean>(() => loadPrefs().mathExplorer);
-  const [contentWidth, setContentWidth] = useState<number>(() => loadPrefs().contentWidth);
-  const [paletteOpen, setPaletteOpen] = useState(false);
+  const {
+    theme,
+    setTheme,
+    cycleTheme,
+    readingMode,
+    setReadingMode,
+    readingFont,
+    setReadingFont,
+    googleFont,
+    setGoogleFont,
+    diagramColors,
+    setDiagramColors,
+    diagramCamera,
+    setDiagramCamera,
+    diagramFollowNumbers,
+    setDiagramFollowNumbers,
+    diagramNumbers,
+    setDiagramNumbers,
+    showEmbedMedia,
+    setShowEmbedMedia,
+    aiEnabled,
+    setAiEnabled,
+    mathRenderer,
+    setMathRenderer,
+    mathNumbering,
+    setMathNumbering,
+    mathExplorer,
+    setMathExplorer,
+    contentWidth,
+    setContentWidth,
+    mathPreferences,
+  } = useReaderPreferences();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchCrossWorkspace, setSearchCrossWorkspace] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [highlightQuery, setHighlightQuery] = useState<string | null>(null);
   /**
@@ -454,6 +334,8 @@ export function DocsApp() {
     fileId: string;
     text: string;
     query: string;
+    /** Which occurrence of `query` within `text` to land on, when it repeats. */
+    occurrence: number;
   } | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   // File ids in most-recently-opened order — drives the "Recent" chip.
@@ -527,9 +409,6 @@ export function DocsApp() {
   const firstVisitRef = useRef(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const sidebarWrapRef = useRef<HTMLDivElement>(null);
-  const sidebarInnerRef = useRef<HTMLDivElement>(null);
-  const firstCollapseRun = useRef(true);
 
   // Refs the (async, debounced) save reads from, so it always writes the latest
   // state without being recreated on every render.
@@ -566,154 +445,7 @@ export function DocsApp() {
   const scrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoredFlash = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Resize the reading column once. Animating sidebar width reflows every
-  // paragraph, table and diagram on every frame; only the sidebar contents fade.
-  useEffect(() => {
-    const wrap = sidebarWrapRef.current;
-    if (!wrap) return;
-    const inner = sidebarInnerRef.current;
-    const width = sidebarCollapsed ? 56 : SIDEBAR_WIDTH;
-    const opacity = sidebarCollapsed ? 0 : 1;
-    const shift = sidebarCollapsed ? -16 : 0;
-
-    // First run positions without animating: the restored state shouldn't play
-    // an entrance every time the app boots.
-    if (firstCollapseRun.current) {
-      firstCollapseRun.current = false;
-      wrap.style.width = `${width}px`;
-      if (inner) {
-        inner.style.opacity = String(opacity);
-        inner.style.visibility = sidebarCollapsed ? "hidden" : "visible";
-        inner.style.transform = `translateX(${shift}px)`;
-      }
-      return;
-    }
-
-    const animations: Animation[] = [];
-    wrap.style.width = `${width}px`;
-
-    if (inner) {
-      // Expanding: become visible up front so the fade-in is actually seen.
-      // Collapsing: stay visible until the fade finishes, then drop out of
-      // hit-testing — a transparent-but-visible sidebar would swallow clicks
-      // meant for the collapsed icon rail underneath it.
-      if (!sidebarCollapsed) inner.style.visibility = "visible";
-
-      const fade = inner.animate?.(
-        [
-          { opacity: inner.style.opacity || "1", transform: inner.style.transform || "none" },
-          { opacity: String(opacity), transform: `translateX(${shift}px)` },
-        ],
-        {
-          duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 160,
-          easing: "cubic-bezier(0.16, 1, 0.3, 1)",
-          fill: "forwards",
-        },
-      );
-      inner.style.opacity = String(opacity);
-      inner.style.transform = `translateX(${shift}px)`;
-
-      if (sidebarCollapsed) {
-        if (fade) {
-          animations.push(fade);
-          void fade.finished
-            .then(() => {
-              // Guard against a re-expand landing while the fade was running.
-              if (inner.style.opacity === "0") inner.style.visibility = "hidden";
-            })
-            .catch(() => {
-              /* cancelled by a state change — the next run sets visibility */
-            });
-        } else {
-          inner.style.visibility = "hidden";
-        }
-      } else if (fade) {
-        animations.push(fade);
-      }
-    }
-
-    return () => animations.forEach((a) => a.cancel());
-  }, [sidebarCollapsed]);
-
-  // Theme: apply to <html> and persist as a lightweight preference.
-  // Apply the selected reader theme. All five themes are keyed by the
-  // `data-theme` attribute; dark-based themes also carry the `.dark` class so
-  // dark-only rules (code highlighting, katex, mermaid) keep working.
-  useEffect(() => {
-    const root = document.documentElement;
-    root.setAttribute("data-theme", theme);
-    root.classList.toggle("dark", isDarkTheme(theme));
-  }, [theme]);
-
-  // Reading typeface is keyed by `data-font`. The webfont itself is fetched
-  // here rather than bundled into the app's stylesheet — the attribute applies
-  // immediately against the system fallback and the real face swaps in when it
-  // lands.
-  useEffect(() => {
-    document.documentElement.setAttribute("data-font", readingFont);
-    loadReadingFont(readingFont);
-  }, [readingFont]);
-
-  // Semantic diagram colouring rides the same channel: a diagram sits deep
-  // inside rendered markdown with no props reaching it, so it watches <html>.
-  // Written as "off" rather than removed, so the attribute's absence during
-  // first paint still means the default (on).
-  useEffect(() => {
-    document.documentElement.setAttribute("data-diagram-colors", diagramColors ? "on" : "off");
-    savePrefs({ diagramColors });
-  }, [diagramColors]);
-
-  // The explainer camera rides the same channel, for the same reason.
-  useEffect(() => {
-    document.documentElement.setAttribute("data-diagram-camera", diagramCamera ? "on" : "off");
-    savePrefs({ diagramCamera });
-  }, [diagramCamera]);
-
-  // Step order and step numbers ride the same channel.
-  useEffect(() => {
-    const root = document.documentElement;
-    root.setAttribute("data-diagram-order", diagramFollowNumbers ? "numbered" : "auto");
-    root.setAttribute("data-diagram-numbers", diagramNumbers ? "on" : "off");
-    savePrefs({ diagramFollowNumbers, diagramNumbers });
-  }, [diagramFollowNumbers, diagramNumbers]);
-
-  // Turning AI off removes its surfaces rather than disabling them, so the
-  // attribute is published for CSS as well as read through props.
-  useEffect(() => {
-    document.documentElement.setAttribute("data-ai", aiEnabled ? "on" : "off");
-    savePrefs({ aiEnabled });
-  }, [aiEnabled]);
-
-  // A custom face lives in IndexedDB, so it has to be re-registered with the
-  // FontFace API on every boot before `[data-font="custom"]` can resolve it.
-  // If the file is gone (cleared storage, another device), fall back rather
-  // than leaving the reader on a family that no longer exists.
-  useEffect(() => {
-    let cancelled = false;
-    void restoreCustomFont().then((record) => {
-      if (cancelled || record) return;
-      setReadingFont((current) => (current === "custom" ? "hyperlegible" : current));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // A Google family is only a stored *name*, so the stylesheet has to be
-  // re-requested on every boot before `[data-font="google"]` can resolve it.
-  // A family that no longer loads (offline, renamed upstream) falls back rather
-  // than leaving the reader on a face that never arrives.
-  useEffect(() => {
-    if (!googleFont) return;
-    let cancelled = false;
-    void loadGoogleFont(googleFont).catch(() => {
-      if (cancelled) return;
-      setReadingFont((current) => (current === "google" ? "hyperlegible" : current));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [googleFont]);
+  const { sidebarWrapRef, sidebarInnerRef } = useSidebarCollapseAnimation(sidebarCollapsed);
 
   // Warm the UI font after first contentful paint. Markdown plugins stay
   // demand-loaded; idle importing them still adds download and execution work
@@ -758,66 +490,6 @@ export function DocsApp() {
       cancelIdleCallbackSafe(idle);
     };
   }, []);
-
-  useEffect(() => {
-    savePrefs({ theme });
-  }, [theme]);
-
-  useEffect(() => {
-    savePrefs({ readingMode });
-  }, [readingMode]);
-
-  useEffect(() => {
-    savePrefs({ mathRenderer, mathNumbering, mathExplorer });
-  }, [mathRenderer, mathNumbering, mathExplorer]);
-
-  useEffect(() => {
-    savePrefs({ contentWidth });
-  }, [contentWidth]);
-
-  /**
-   * Switching engines invalidates every rendered equation: the cache is keyed
-   * by renderer preference, so the old entries are simply unreachable rather
-   * than wrong — but dropping them keeps memory from holding two full sets.
-   */
-  useEffect(() => {
-    clearMathCache();
-  }, [mathRenderer]);
-
-  /**
-   * MathJax's accessibility explorer, turned on for the page when the reader
-   * asks for it. It pulls in a speech-rule engine, which is why it is neither
-   * the default nor loaded alongside MathJax itself.
-   */
-  useEffect(() => {
-    if (!mathExplorer) return;
-    // Imported here rather than at module scope: a static import would pull
-    // MathJax's adapter — and with it the loader for a 1 MB engine — into the
-    // initial bundle of every reader, math or no math.
-    void import("@/services/math/adapters/mathjax")
-      .then((module) => module.enableExplorer())
-      .catch(() => {
-        // Nothing to recover: expressions stay readable, they just aren't
-        // keyboard-explorable. Surfacing a toast for it would be noise.
-      });
-  }, [mathExplorer]);
-
-  /**
-   * What the viewer passes to its math layer. Memoized because it crosses into
-   * a memoized component — a fresh object here would re-render every document.
-   */
-  const mathPreferences = useMemo<MathPreferences>(
-    () => ({ renderer: mathRenderer, numberEquations: mathNumbering }),
-    [mathRenderer, mathNumbering],
-  );
-
-  useEffect(() => {
-    savePrefs({ readingFont });
-  }, [readingFont]);
-
-  useEffect(() => {
-    savePrefs({ googleFont });
-  }, [googleFont]);
 
   // ---- persistence core ----
 
@@ -1355,7 +1027,13 @@ export function DocsApp() {
   }, []);
 
   const handleSelect = useCallback(
-    (fileId: string, headingId?: string, query?: string, matchedLine?: string) => {
+    (
+      fileId: string,
+      headingId?: string,
+      query?: string,
+      matchedLine?: string,
+      occurrence?: number,
+    ) => {
       if (!confirmDiscardDraft(fileId)) return;
       setActiveFileId(fileId);
       if (query !== undefined) setHighlightQuery(query || null);
@@ -1363,7 +1041,9 @@ export function DocsApp() {
       // passage instead of to the heading above it. Always a fresh object, so
       // running the same search twice still moves the reader the second time.
       setPendingSearch(
-        matchedLine ? { fileId, text: matchedLine, query: query?.trim() || "" } : null,
+        matchedLine
+          ? { fileId, text: matchedLine, query: query?.trim() || "", occurrence: occurrence ?? 0 }
+          : null,
       );
 
       let targetHeadingId = headingId;
@@ -1650,7 +1330,9 @@ export function DocsApp() {
         selected,
         format,
         (done) => {
-          toast.loading(`Exporting ${done} of ${total} as ${FORMAT_LABEL[format]}…`, { id: toastId });
+          toast.loading(`Exporting ${done} of ${total} as ${FORMAT_LABEL[format]}…`, {
+            id: toastId,
+          });
         },
         {
           workspaceId: workspaceIdRef.current,
@@ -2130,8 +1812,6 @@ flowchart LR
     });
     markDirty();
   }, [activeFileId, markDirty]);
-
-  const cycleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
 
   const nextReadingMin = nextFile ? readingMinutes(nextFile.content) : null;
 
@@ -2866,13 +2546,13 @@ flowchart LR
     });
   }, [aiOpen, registerEscape]);
   useEffect(() => {
-    if (!paletteOpen) return;
+    if (!searchOpen) return;
     return registerEscape({
-      id: "palette",
-      depth: ESCAPE_DEPTH.overlay,
-      close: () => setPaletteOpen(false),
+      id: "search-panel",
+      depth: ESCAPE_DEPTH.panel,
+      close: () => setSearchOpen(false),
     });
-  }, [paletteOpen, registerEscape]);
+  }, [searchOpen, registerEscape]);
 
   // The browser's own back/gesture is the same intent as the header's back, so
   // it runs the same code — including closing an open mode first. `popstate`
@@ -2902,31 +2582,20 @@ flowchart LR
   }, []);
   const closeAskAi = useCallback(() => setAiOpen(false), []);
 
-  // Cmd/Ctrl+K. Owned here rather than inside <CommandPalette>, which is code
-  // split and unmounted until the palette opens — a shortcut registered by that
-  // component could not open it the first time.
+  // Cmd/Ctrl+K. The search panel lives docked inside <Sidebar>, which on
+  // mobile is only mounted while the drawer is open — so there, opening
+  // search has to open the drawer too.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (hasModKey(e) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setPaletteOpen((open) => !open);
+        if (splitStacks) setDrawerOpen(true);
+        setSearchOpen((open) => !open);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // Fetch the palette's chunk as soon as the app is idle. It is the most likely
-  // of the split surfaces to be opened, and opening it is a keystroke away, so
-  // it should already be in cache by the time that keystroke arrives.
-  //
-  // Scheduled off the shared idle helper so it queues behind the same work the
-  // other warm-ups do, and is cancelled on unmount rather than firing into a
-  // torn-down tree.
-  useEffect(() => {
-    const handle = requestIdleCallbackSafe(() => void import("./navigation/CommandPalette"), 4000);
-    return () => cancelIdleCallbackSafe(handle);
-  }, []);
+  }, [splitStacks]);
 
   // Append AI output to the open document, or spin it out into a new one.
   const insertAiOutput = useCallback(
@@ -2975,19 +2644,7 @@ flowchart LR
     navigate({ to: "/" });
   }, [navigate, newWorkspace]);
 
-  const dragOverlay = globalDrag ? (
-    <div className="fixed inset-0 z-(--z-overlay) flex items-center justify-center bg-background/80 backdrop-blur-sm border-4 border-dashed border-primary transition-all duration-300">
-      <div className="rounded-3xl bg-card p-10 shadow-2xl flex flex-col items-center gap-6 animate-in fade-in zoom-in duration-300">
-        <Upload className="h-16 w-16 text-primary animate-bounce" />
-        <div className="text-center">
-          <h2 className="text-3xl font-bold text-foreground">Drop files to upload</h2>
-          <p className="mt-2 text-base text-muted-foreground">
-            Documents, spreadsheets, PDFs, and presentations are ready to preview.
-          </p>
-        </div>
-      </div>
-    </div>
-  ) : null;
+  const dragOverlay = <DragDropOverlay open={globalDrag} />;
 
   // Rendered from both the empty state and the reader — a shared link can land
   // on either.
@@ -3007,18 +2664,42 @@ flowchart LR
     </Suspense>
   ) : null;
 
-  // Search palette. Split out of the main bundle, so it is only in the tree
-  // while it is open; its chunk is warmed on idle above.
-  const commandPalette = paletteOpen ? (
-    <Suspense fallback={null}>
-      <CommandPalette
-        files={files}
-        open
-        onOpenChange={setPaletteOpen}
-        onSelect={showSettings ? openFromHome : handleSelect}
-      />
-    </Suspense>
-  ) : null;
+  const {
+    hits: searchHits,
+    pending: searchPending,
+    loadingWorkspaces,
+  } = useSearchIndex({
+    active: searchOpen,
+    currentWorkspaceId: workspaceId,
+    files,
+    workspaces,
+    query: searchQuery,
+    crossWorkspace: searchCrossWorkspace,
+  });
+  const handleSearchHitSelect = useCallback(
+    async (hit: SearchHit) => {
+      await switchWorkspace(hit.workspaceId);
+      if (showSettings) await openFromHome(hit.fileId, hit.headingId);
+      else handleSelect(hit.fileId, hit.headingId, searchQuery, hit.line, hit.occurrence);
+      // Clicking a result jumps the reader to it; the panel stays open so more
+      // results can be tried without reopening it, the way VS Code's does.
+    },
+    [switchWorkspace, showSettings, openFromHome, handleSelect, searchQuery],
+  );
+  const searchPanelState: SearchPanelState | null = searchOpen
+    ? {
+        query: searchQuery,
+        onQueryChange: setSearchQuery,
+        crossWorkspace: searchCrossWorkspace,
+        onCrossWorkspaceChange: setSearchCrossWorkspace,
+        hits: searchHits,
+        pending: searchPending,
+        loadingWorkspaces,
+        onSelectHit: (hit: SearchHit) => void handleSearchHitSelect(hit),
+        workspaceName: (id: string) => workspaces.find((w) => w.id === id)?.name ?? "Workspace",
+        onClose: () => setSearchOpen(false),
+      }
+    : null;
 
   const savedPage = showSaved ? (
     <Suspense fallback={null}>
@@ -3129,94 +2810,21 @@ flowchart LR
 
   if (files.length === 0) {
     return (
-      <div className="min-h-dvh bg-background">
-        <Header
-          theme={theme}
-          onCycleTheme={cycleTheme}
-          onMenu={null}
-          hideMenu
-          onOpenPalette={() => setPaletteOpen(true)}
-          hasFiles={false}
-          onAddFiles={() => inputRef.current?.click()}
-          saveStatus={saveStatus}
-          onHome={goHome}
-          workspaces={workspaces}
-          currentWorkspaceId={workspaceId}
-          onSwitchWorkspace={switchWorkspace}
-          onImportWorkspace={importWorkspace}
-          onExportWorkspace={exportWorkspace}
-          onShareWorkspace={shareWorkspace}
-          onDeleteWorkspace={deleteWorkspace}
-          onOpenSettings={openSettings}
-        />
-        {commandPalette}
-        <div className="flex min-h-[calc(100dvh-4rem)] flex-col items-center justify-center px-6 py-12">
-          <div className="w-full max-w-sm text-center">
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              className="group flex w-full flex-col items-center gap-4 rounded-3xl border-2 border-dashed border-border bg-card/40 px-8 py-14 shadow-sm transition-all duration-200 ease-out hover:border-primary/50 hover:bg-primary/5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-transform duration-200 ease-out group-hover:scale-105">
-                <Upload className="h-6 w-6" />
-              </span>
-              <span className="space-y-1">
-                <span className="block text-lg font-semibold text-foreground">
-                  Drop files here, or click to upload
-                </span>
-                <span className="block text-sm text-muted-foreground">
-                  Markdown, PDFs, spreadsheets, slides, images & more
-                </span>
-              </span>
-            </button>
-
-            <div className="mt-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <span className="h-px flex-1 bg-border" aria-hidden="true" />
-              or start something new
-              <span className="h-px flex-1 bg-border" aria-hidden="true" />
-            </div>
-
-            {/* Nothing to right-click yet, so the sidebar's New menu is out of
-                reach — a blank document has to be startable from here too. The
-                same applies to a board: without this the only way to reach one
-                is to first create some other file just to make the sidebar
-                appear. */}
-            <div className="mt-5 flex items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => createFile(null)}
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors duration-150 hover:border-primary/40 hover:bg-accent"
-              >
-                <FilePlus className="h-4 w-4 text-muted-foreground" />
-                New file
-              </button>
-              <button
-                type="button"
-                onClick={() => createBoardFile(null)}
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors duration-150 hover:border-primary/40 hover:bg-accent"
-              >
-                <PenTool className="h-4 w-4 text-muted-foreground" />
-                New board
-              </button>
-            </div>
-          </div>
-        </div>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept={SUPPORTED_ACCEPT}
-          className="hidden"
-          onChange={(e) => {
-            handleFileInput(e.target.files);
-            e.target.value = "";
-          }}
-        />
-        {dragOverlay}
-        {shareDialog}
-        {settingsDialog}
-        {moveDialog}
-      </div>
+      <EmptyWorkspace
+        onHome={goHome}
+        workspaces={workspaces}
+        currentWorkspaceId={workspaceId}
+        onSwitchWorkspace={switchWorkspace}
+        onOpenSettings={openSettings}
+        inputRef={inputRef}
+        onFileInputChange={handleFileInput}
+        onCreateFile={createFile}
+        onCreateBoardFile={createBoardFile}
+        dragOverlay={dragOverlay}
+        shareDialog={shareDialog}
+        settingsDialog={settingsDialog}
+        moveDialog={moveDialog}
+      />
     );
   }
 
@@ -3225,27 +2833,20 @@ flowchart LR
       <div className="min-h-dvh bg-background">
         <Header
           hideOnDesktop
-          theme={theme}
-          onCycleTheme={cycleTheme}
           onMenu={() => setDrawerOpen(true)}
-          onOpenPalette={() => setPaletteOpen(true)}
+          onOpenPalette={() => {
+            setDrawerOpen(true);
+            setSearchOpen(true);
+          }}
           hasFiles
-          onAddFiles={() => inputRef.current?.click()}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={toggleSidebar}
-          saveStatus={saveStatus}
           onHome={goHome}
           workspaces={workspaces}
           currentWorkspaceId={workspaceId}
           onSwitchWorkspace={switchWorkspace}
-          onImportWorkspace={importWorkspace}
-          onExportWorkspace={exportWorkspace}
-          onShareWorkspace={shareWorkspace}
-          onDeleteWorkspace={deleteWorkspace}
           onOpenSettings={openSettings}
         />
-
-        {commandPalette}
 
         <div className="flex">
           <div
@@ -3313,8 +2914,9 @@ flowchart LR
                 currentWorkspaceId={workspaceId}
                 onSwitchWorkspace={switchWorkspace}
                 docked
-                onOpenPalette={() => setPaletteOpen(true)}
+                onOpenSearch={() => setSearchOpen(true)}
                 onToggleSidebar={toggleSidebar}
+                search={searchPanelState}
               />
             </div>
 
@@ -3334,7 +2936,10 @@ flowchart LR
                 <Menu className="h-4 w-4" />
               </button>
               <button
-                onClick={() => setPaletteOpen(true)}
+                onClick={() => {
+                  setSidebarCollapsed(false);
+                  setSearchOpen(true);
+                }}
                 className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
                 aria-label="Search docs"
                 title="Search docs"
@@ -3395,7 +3000,7 @@ flowchart LR
                 </div>
                 <div className="min-h-0 flex-1">
                   <Sidebar
-                showEmbedMedia={showEmbedMedia}
+                    showEmbedMedia={showEmbedMedia}
                     files={files}
                     activeFileId={activeFileId}
                     activeHeadingId={activeHeadingId}
@@ -3463,6 +3068,7 @@ flowchart LR
                     onImportWorkspace={importWorkspace}
                     onExportWorkspace={exportWorkspace}
                     onShareWorkspace={shareWorkspace}
+                    search={searchPanelState}
                   />
                 </div>
               </div>
@@ -3671,7 +3277,6 @@ flowchart LR
                   onImportAttachments={importAttachments}
                   workspaceName={workspaceNameRef.current}
                   onOpenArtifact={openEmbeddedArtifact}
-                  onOpenPalette={() => setPaletteOpen(true)}
                 />
               ) : activeFile ? (
                 <DocumentViewer
@@ -3689,7 +3294,6 @@ flowchart LR
                   nextFile={nextFile}
                   onNavFile={navToFile}
                   onContentChange={handleContentChange}
-                  onOpenPalette={() => setPaletteOpen(true)}
                   startInEditFileId={autoEditFileId}
                   onStartInEditConsumed={consumeStartInEdit}
                 />
@@ -3736,153 +3340,5 @@ flowchart LR
         {shareDialog}
       </div>
     </NavHistoryContext.Provider>
-  );
-}
-
-function Header({
-  theme,
-  onCycleTheme,
-  onMenu,
-  hideMenu,
-  hideUpload,
-  hideOnDesktop,
-  onOpenPalette,
-  hasFiles,
-  onAddFiles,
-  sidebarCollapsed,
-  onToggleSidebar,
-  saveStatus,
-  onHome,
-  workspaces = [],
-  currentWorkspaceId,
-  onSwitchWorkspace,
-  onImportWorkspace,
-  onExportWorkspace,
-  onShareWorkspace,
-  onDeleteWorkspace,
-  onOpenSettings,
-}: {
-  theme: Theme;
-  onCycleTheme: () => void;
-  onMenu: (() => void) | null;
-  hideMenu?: boolean;
-  hideUpload?: boolean;
-  hideOnDesktop?: boolean;
-  onOpenPalette: () => void;
-  hasFiles: boolean;
-  onAddFiles: () => void;
-  sidebarCollapsed?: boolean;
-  onToggleSidebar?: () => void;
-  saveStatus?: SaveStatus;
-  onHome?: () => void;
-  workspaces?: { id: string; name: string }[];
-  currentWorkspaceId?: string | null;
-  onSwitchWorkspace?: (id: string) => void;
-  onImportWorkspace?: (file: File) => void;
-  onExportWorkspace?: () => void;
-  onShareWorkspace?: () => void;
-  onDeleteWorkspace?: (id: string) => void;
-  onOpenSettings?: (tab?: "workspace") => void;
-}) {
-  return (
-    <header
-      className={`app-surface z-(--z-nav) flex h-16 items-center justify-between border-b border-border px-4 md:px-6 relative pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] ${
-        hideOnDesktop ? "lg:hidden" : ""
-      }`}
-    >
-      <div className="flex items-center gap-3">
-        {!hideMenu && (
-          <button
-            onClick={() => onMenu?.()}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md transition-transform hover:bg-accent active:scale-90 coarse:h-11 coarse:w-11 lg:hidden"
-            aria-label="Menu"
-          >
-            <Menu className="h-4 w-4" />
-          </button>
-        )}
-        {onToggleSidebar && (
-          <button
-            onClick={onToggleSidebar}
-            className={`hidden h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-accent hover:text-foreground active:scale-90 ${sidebarCollapsed ? "lg:hidden" : "lg:inline-flex"}`}
-            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            <Menu className="h-4 w-4" />
-          </button>
-        )}
-        <button
-          onClick={onHome}
-          className="flex h-10 items-center gap-2 rounded-md px-2 text-muted-foreground transition-colors hover:text-foreground coarse:h-11"
-          aria-label="Home"
-          title="Home"
-        >
-          <span className="text-sm font-semibold tracking-tight text-foreground">Localdox</span>
-        </button>
-      </div>
-
-      {hasFiles && (
-        <div className="absolute left-1/2 -translate-x-1/2 hidden lg:flex items-center">
-          <button
-            onClick={onOpenPalette}
-            className="w-80 items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground flex"
-          >
-            <Search className="h-3.5 w-3.5" />
-            <span>Search...</span>
-            <span className="ml-auto flex items-center gap-1">
-              <kbd className="rounded border border-border bg-background px-1 py-0.5 font-mono text-xs">
-                ⌘
-              </kbd>
-              <kbd className="rounded border border-border bg-background px-1 py-0.5 font-mono text-xs">
-                K
-              </kbd>
-            </span>
-          </button>
-        </div>
-      )}
-
-      <div className="flex items-center gap-3">
-        {hasFiles && (
-          <button
-            onClick={onOpenPalette}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11 lg:hidden"
-            aria-label="Search"
-          >
-            <Search className="h-4 w-4" />
-          </button>
-        )}
-
-        {/* Workspace control lives in the header to the right of the search
-            icon: the avatar strip on desktop/landscape, the same strip inside
-            a bottom sheet on mobile/portrait. */}
-        {onSwitchWorkspace && (
-          <>
-            <div className="hidden items-center gap-2 lg:flex">
-              <WorkspaceMenu
-                workspaces={workspaces}
-                currentId={currentWorkspaceId ?? null}
-                onSwitch={onSwitchWorkspace}
-              />
-            </div>
-            <div className="flex items-center gap-2 lg:hidden">
-              <WorkspaceSheet
-                workspaces={workspaces}
-                currentId={currentWorkspaceId ?? null}
-                onSwitch={onSwitchWorkspace}
-              />
-            </div>
-          </>
-        )}
-        {onOpenSettings && (
-          <button
-            onClick={() => onOpenSettings()}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11"
-            aria-label="Settings"
-            title="Settings"
-          >
-            <Settings className="h-4 w-4" />
-          </button>
-        )}
-      </div>
-    </header>
   );
 }
