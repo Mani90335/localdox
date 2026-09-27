@@ -2,7 +2,7 @@
 @source "../src";
 @import "tw-animate-css";
 @import "highlight.js/styles/github.css";
-@import "./components/docs/diagram-colors.css";
+@import "./services/diagrams/diagram-colors.css";
 
 /* Fonts and KaTeX's stylesheet are deliberately NOT imported here.
  *
@@ -88,6 +88,11 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-gold: var(--gold);
+  /* Surfaces. `background` is the reading plane; these are the two planes that
+     sit above and below it, so a panel never has to invent its own grey. */
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-raised: var(--surface-raised);
+  --color-hairline: var(--hairline);
 }
 
 :root {
@@ -113,6 +118,16 @@
   --z-overlay: 100;
   --z-modal: 200;
   --z-menu: 300;
+  /*
+   * MathLive appends its on-screen keyboard panel straight to <body>, outside
+   * the Insert-equation dialog's own DOM — so it needs its own outranking of
+   * --z-modal, not inheritance from a dialog it isn't nested in. Its default
+   * (105, see MathLive's --keyboard-zindex) sits under our modal backdrop,
+   * which made the keyboard unreachable: visible but behind the overlay,
+   * swallowing every click. Kept under --z-menu so a torn-out app menu still
+   * wins if one is ever opened over the keyboard.
+   */
+  --keyboard-zindex: 220;
   /* Default reading font = the device's own system UI font. */
   --font-body:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans",
@@ -129,77 +144,181 @@
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans",
     sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --selection: color-mix(in oklab, var(--primary) 22%, transparent);
+  /*
+   * Palette — "Paper".
+   *
+   * The reading plane is the brightest thing on screen and everything else
+   * steps down from it, so the eye lands on the text without being told to.
+   * Hue is held at 265 (a cool blue-grey) across the whole neutral ramp: greys
+   * that share a hue read as one material rather than as a pile of separate
+   * greys, and a single hue is what lets `color-mix` between any two of them
+   * stay neutral.
+   *
+   * One accent, and only one. It was previously a near-black, which meant
+   * links, the active file, focus rings and primary buttons were all grey —
+   * nothing on any screen could be emphasised because everything already was.
+   * Indigo at 0.55L clears 4.5:1 on the reading plane, so it can carry body
+   * links as well as solid fills.
+   */
+  --selection: color-mix(in oklab, var(--primary) 18%, transparent);
   --background: oklch(1 0 0);
-  --foreground: oklch(0.129 0.042 264.695);
+  --foreground: oklch(0.21 0.02 265);
+  /* Sunken = the plane the reading surface sits on (sidebar, rails, wells).
+     Raised = the plane that sits above it (cards, popovers, sheets). */
+  --surface-sunken: oklch(0.975 0.004 265);
+  --surface-raised: oklch(1 0 0);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.129 0.042 264.695);
+  --card-foreground: oklch(0.21 0.02 265);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.129 0.042 264.695);
-  --primary: oklch(0.208 0.042 265.755);
-  --primary-foreground: oklch(0.984 0.003 247.858);
-  --secondary: oklch(0.968 0.007 247.896);
-  --secondary-foreground: oklch(0.208 0.042 265.755);
-  --muted: oklch(0.968 0.007 247.896);
-  --muted-foreground: oklch(0.554 0.046 257.417);
-  --accent: oklch(0.968 0.007 247.896);
-  --accent-foreground: oklch(0.208 0.042 265.755);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(0.929 0.013 255.508);
-  --input: oklch(0.929 0.013 255.508);
-  --ring: oklch(0.704 0.04 256.788);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.984 0.003 247.858);
-  --sidebar-foreground: oklch(0.129 0.042 264.695);
-  --sidebar-primary: oklch(0.208 0.042 265.755);
-  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-accent: oklch(0.968 0.007 247.896);
-  --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
-  --sidebar-border: oklch(0.929 0.013 255.508);
-  --sidebar-ring: oklch(0.704 0.04 256.788);
-  --gold: oklch(0.79 0.17 80);
+  --popover-foreground: oklch(0.21 0.02 265);
+  --primary: oklch(0.55 0.19 272);
+  --primary-foreground: oklch(0.99 0.002 265);
+  --secondary: oklch(0.965 0.005 265);
+  --secondary-foreground: oklch(0.27 0.022 265);
+  --muted: oklch(0.966 0.005 265);
+  --muted-foreground: oklch(0.525 0.025 265);
+  --accent: oklch(0.955 0.008 265);
+  --accent-foreground: oklch(0.27 0.022 265);
+  --destructive: oklch(0.575 0.21 25);
+  --destructive-foreground: oklch(0.99 0.002 265);
+  /* `border` is the structural line between regions; `hairline` is the lighter
+     one used inside a region, where a full-strength rule would over-divide. */
+  --border: oklch(0.915 0.006 265);
+  --hairline: oklch(0.945 0.005 265);
+  --input: oklch(0.905 0.007 265);
+  --ring: oklch(0.55 0.19 272);
+  --chart-1: oklch(0.55 0.19 272);
+  --chart-2: oklch(0.63 0.14 195);
+  --chart-3: oklch(0.68 0.16 145);
+  --chart-4: oklch(0.74 0.16 70);
+  --chart-5: oklch(0.63 0.2 17);
+  --sidebar: oklch(0.975 0.004 265);
+  --sidebar-foreground: oklch(0.21 0.02 265);
+  --sidebar-primary: oklch(0.55 0.19 272);
+  --sidebar-primary-foreground: oklch(0.99 0.002 265);
+  --sidebar-accent: oklch(0.94 0.008 265);
+  --sidebar-accent-foreground: oklch(0.21 0.02 265);
+  --sidebar-border: oklch(0.915 0.006 265);
+  --sidebar-ring: oklch(0.55 0.19 272);
+  --gold: oklch(0.76 0.15 78);
+
+  /*
+   * Elevation. Two-part shadows — a tight contact shadow that pins the element
+   * to its plane, and a wide soft one that gives it height. Tinted with the
+   * neutral hue rather than pure black, so a raised surface never looks smudged.
+   */
+  --shadow-1: 0 1px 2px oklch(0.21 0.02 265 / 0.05);
+  --shadow-2:
+    0 1px 2px oklch(0.21 0.02 265 / 0.06), 0 4px 12px -2px oklch(0.21 0.02 265 / 0.08);
+  --shadow-3:
+    0 1px 3px oklch(0.21 0.02 265 / 0.08), 0 12px 32px -8px oklch(0.21 0.02 265 / 0.14);
+  --shadow-4:
+    0 2px 6px oklch(0.21 0.02 265 / 0.1), 0 32px 64px -16px oklch(0.21 0.02 265 / 0.22);
+
+  /*
+   * Reading measure.
+   *
+   * This was `68ch`, which does not mean 68 characters: `ch` is the advance of
+   * the digit zero, and in a proportional face that is far wider than the
+   * average lowercase letter. 68ch resolved to ~732px, which at the reader's
+   * body size sets roughly 88 characters a line — well past the point where the
+   * eye loses its place on the return sweep. An explicit measure, expressed in
+   * the body size itself, holds the line at ~66 characters at every step of the
+   * fluid type scale.
+   */
+  --measure: 34em;
+
+  /*
+   * Syntax colours, shared by every place the app shows structured data — the
+   * JSON tree and, through the highlight.js overrides further down, fenced code
+   * in a document. The JSON tree used to paint itself in fixed Tailwind slate
+   * and a literal `#101722` panel, so in the light theme it appeared as a dark
+   * slab dropped into a white page, on its own colours, agreeing with nothing
+   * around it. Tokens mean one definition per theme and one look for data.
+   */
+  --code-key: oklch(0.5 0.16 255);
+  --code-string: oklch(0.48 0.14 155);
+  --code-number: oklch(0.52 0.15 60);
+  --code-punct: oklch(0.6 0.02 265);
+
+  /* Motion. Everything that moves uses one of these, so the app has a single
+     sense of weight. `--ease-out` for things entering or responding to a
+     pointer; `--ease-spring` for things that should feel physical. */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
 }
 
+/*
+ * Palette — "Ink".
+ *
+ * The light theme is not inverted to get here. Two things change on purpose:
+ *
+ * 1. The reading plane is lifted off the floor. It used to be the darkest
+ *    surface in the app, with the sidebar sitting at the same value beside it —
+ *    two regions separated by a single hairline and nothing else, so the layout
+ *    had no depth to read. Here the floor is darkest, the sidebar sits on it,
+ *    and the page the reader is looking at is the brightest plane, exactly as
+ *    in light.
+ * 2. Body text stops at 0.93L rather than pure white. Full-strength white on a
+ *    dark ground blooms — the letterforms thicken and long-form reading gets
+ *    tiring — while the difference is invisible on a headline.
+ */
 .dark {
-  --selection: color-mix(in oklab, var(--primary) 30%, transparent);
-  --background: oklch(0.129 0.042 264.695);
-  --foreground: oklch(0.984 0.003 247.858);
-  --card: oklch(0.208 0.042 265.755);
-  --card-foreground: oklch(0.984 0.003 247.858);
-  --popover: oklch(0.208 0.042 265.755);
-  --popover-foreground: oklch(0.984 0.003 247.858);
-  --primary: oklch(0.929 0.013 255.508);
-  --primary-foreground: oklch(0.208 0.042 265.755);
-  --secondary: oklch(0.279 0.041 260.031);
-  --secondary-foreground: oklch(0.984 0.003 247.858);
-  --muted: oklch(0.279 0.041 260.031);
-  --muted-foreground: oklch(0.704 0.04 256.788);
-  --accent: oklch(0.279 0.041 260.031);
-  --accent-foreground: oklch(0.984 0.003 247.858);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.551 0.027 264.364);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.208 0.042 265.755);
-  --sidebar-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-accent: oklch(0.279 0.041 260.031);
-  --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.551 0.027 264.364);
-  --gold: oklch(0.79 0.17 80);
+  --selection: color-mix(in oklab, var(--primary) 32%, transparent);
+  --background: oklch(0.185 0.014 265);
+  --foreground: oklch(0.93 0.008 265);
+  --surface-sunken: oklch(0.155 0.014 265);
+  --surface-raised: oklch(0.225 0.016 265);
+  --card: oklch(0.225 0.016 265);
+  --card-foreground: oklch(0.93 0.008 265);
+  --popover: oklch(0.235 0.016 265);
+  --popover-foreground: oklch(0.93 0.008 265);
+  /* Lifted and slightly desaturated against the light theme's indigo: the same
+     chroma on a dark ground reads as more saturated than it measures. */
+  --primary: oklch(0.7 0.155 270);
+  --primary-foreground: oklch(0.16 0.02 270);
+  --secondary: oklch(0.27 0.018 265);
+  --secondary-foreground: oklch(0.93 0.008 265);
+  --muted: oklch(0.262 0.017 265);
+  --muted-foreground: oklch(0.665 0.02 265);
+  --accent: oklch(0.285 0.02 265);
+  --accent-foreground: oklch(0.96 0.005 265);
+  --destructive: oklch(0.68 0.19 24);
+  --destructive-foreground: oklch(0.16 0.02 25);
+  --border: oklch(0.32 0.016 265);
+  --hairline: oklch(0.265 0.015 265);
+  --input: oklch(0.345 0.018 265);
+  --ring: oklch(0.7 0.155 270);
+  --chart-1: oklch(0.7 0.155 270);
+  --chart-2: oklch(0.72 0.13 195);
+  --chart-3: oklch(0.75 0.15 148);
+  --chart-4: oklch(0.79 0.15 72);
+  --chart-5: oklch(0.7 0.18 17);
+  --sidebar: oklch(0.155 0.014 265);
+  --sidebar-foreground: oklch(0.93 0.008 265);
+  --sidebar-primary: oklch(0.7 0.155 270);
+  --sidebar-primary-foreground: oklch(0.16 0.02 270);
+  --sidebar-accent: oklch(0.245 0.016 265);
+  --sidebar-accent-foreground: oklch(0.96 0.005 265);
+  --sidebar-border: oklch(0.28 0.015 265);
+  --sidebar-ring: oklch(0.7 0.155 270);
+  --gold: oklch(0.8 0.15 80);
+
+  --code-key: oklch(0.76 0.12 255);
+  --code-string: oklch(0.78 0.13 155);
+  --code-number: oklch(0.8 0.13 72);
+  --code-punct: oklch(0.6 0.02 265);
+
+  /* Shadow does almost no work on a dark ground — a dark blur on a dark plane
+     is invisible. Depth there comes from the surface values above; these stay
+     only to keep floating layers from sitting flat against what is behind. */
+  --shadow-1: 0 1px 2px oklch(0 0 0 / 0.3);
+  --shadow-2: 0 2px 4px oklch(0 0 0 / 0.34), 0 6px 16px -4px oklch(0 0 0 / 0.42);
+  --shadow-3: 0 4px 10px oklch(0 0 0 / 0.42), 0 16px 40px -10px oklch(0 0 0 / 0.55);
+  --shadow-4: 0 8px 20px oklch(0 0 0 / 0.5), 0 40px 80px -20px oklch(0 0 0 / 0.68);
 }
 
 /*
@@ -341,11 +460,25 @@
      fixed 1.15rem was set for desktop and left the smallest screens with only
      a handful of words per line. */
   font-size: clamp(1rem, 0.93rem + 0.35vw, 1.15rem);
-  line-height: 1.8;
+  /*
+   * 1.8 was too open. At this measure the leading is what binds a paragraph
+   * into a single object: past about 1.7 the lines stop reading as a block and
+   * start reading as a list of separate lines, and the reader's eye has to
+   * re-acquire the column on every sweep. 1.65 is the setting long-form reading
+   * settles on — open enough to be restful, tight enough to hold together.
+   */
+  line-height: 1.65;
   font-weight: 400;
   letter-spacing: 0.003em;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /*
+   * Inter ships a slashed zero in its default figures, which turned every
+   * number in a document into something that looked like a rendering fault —
+   * "-0.022em" came out as "-Ø.Ø22em". Switch it off wherever prose renders.
+   */
+  font-feature-settings: "zero" 0;
+  font-variant-numeric: normal;
 }
 /* Long unbroken tokens — URLs, hashes, identifiers — must fold rather than
    push the column wider than the viewport. `anywhere` only breaks when the
@@ -364,17 +497,90 @@
 .docs-prose th {
   overflow-wrap: anywhere;
 }
-/* Cap the reading measure (~68ch) so lines stay easy to track. */
+/*
+ * The reading column.
+ *
+ * The cap belongs on the column, not on each block inside it. The previous rule
+ * was `.docs-prose > * { max-width: 68ch }`, which failed twice over: it reached
+ * only the outermost wrapper — the renderer nests its content a level below
+ * that, so no paragraph in the app was ever constrained — and `ch` is the width
+ * of a zero, not of an average letter, so even where it did apply it set ~88
+ * characters rather than the ~68 it named.
+ *
+ * Capping each block individually does not work either, because `--measure` is
+ * in `em`: it would resolve against each element's own size, giving a heading a
+ * far wider limit than the paragraph beneath it and leaving the two with
+ * different left edges. Set on the column, the one `em` resolves once, against
+ * the body size, and every block shares the same edge by construction.
+ *
+ * Blocks that are scanned rather than read — tables, code, diagrams, embeds —
+ * break out of the column symmetrically into whatever slack the pane has, so
+ * they get the room they need without moving the text's edge.
+ */
+/* The pane the column sits in. Declared as a query container so a block can
+   size itself against the space the reader actually has, rather than against
+   the viewport — which on this layout includes the sidebar. */
+.docs-reading-pane {
+  container-type: inline-size;
+  container-name: reading;
+}
+.docs-prose {
+  max-width: var(--measure);
+  margin-inline: auto;
+  /* How far a wide block may reach past the column on each side: half the
+     slack in the pane, up to a limit. Zero until there is slack, so on a phone
+     nothing breaks out and nothing overflows. */
+  --bleed: 0rem;
+}
+@container reading (min-width: 0px) {
+  .docs-prose {
+    --bleed: clamp(0rem, (100cqi - var(--measure)) / 2, 5.5rem);
+  }
+}
+/*
+ * The reader's own width setting (Settings → Layout → Content width), a share
+ * of the pane rather than of the viewport, so it already tracks the sidebar
+ * collapsing or expanding on its own. Higher specificity than the rules above,
+ * so it wins outright rather than needing `!important`. The bleed a wide block
+ * gets is re-derived from the same width, so tables and diagrams keep reaching
+ * exactly to the column's own edge at every setting, not just the default one.
+ *
+ * Only from `md:` up: on a phone the pane is already the whole screen, and a
+ * column cut down to 40-50% of that would be unreadable. `--docs-content-width`
+ * is only ever set by <MarkdownViewer>, so this is inert everywhere else
+ * `.docs-prose` appears (converted documents, inline artifacts).
+ */
+@media (min-width: 768px) {
+  .docs-reading-pane .docs-prose {
+    max-width: var(--docs-content-width, var(--measure));
+  }
+  @container reading (min-width: 0px) {
+    .docs-reading-pane .docs-prose {
+      --bleed: clamp(0rem, (100cqi - var(--docs-content-width, var(--measure))) / 2, 5.5rem);
+    }
+  }
+}
 .docs-prose > * {
-  max-width: 68ch;
   min-width: 0;
 }
-.docs-prose > .docs-table-wrap,
-.docs-prose > pre,
-.docs-prose > .workspace-artifact,
-.docs-prose > .interactive-block {
-  max-width: 100%;
+.docs-prose :is(.docs-table-container, pre, .workspace-artifact, .interactive-block, .docs-mermaid) {
+  width: calc(100% + var(--bleed) * 2);
+  margin-inline: calc(var(--bleed) * -1);
 }
+/*
+ * Headings.
+ *
+ * Every H2 used to carry a full-width rule beneath it. On a document with
+ * eight sections that is eight hard horizontal lines cutting the page into
+ * slices, and the rules — not the words — became the thing the eye saw first.
+ * Hierarchy here is carried by size, weight and the space above a heading,
+ * which is what separates sections in a book. Space above is roughly three
+ * times the space below, so a heading belongs visibly to the text it
+ * introduces rather than floating between two blocks.
+ *
+ * Optical sizing: larger text needs tighter tracking to look evenly set, so
+ * tracking closes as the size goes up rather than being one value for all.
+ */
 .docs-prose h1,
 .docs-prose h2,
 .docs-prose h3,
@@ -382,48 +588,79 @@
 .docs-prose h5,
 .docs-prose h6 {
   font-family: var(--font-heading);
-  font-weight: 700;
-  letter-spacing: -0.02em;
   color: var(--foreground);
-  line-height: 1.25;
+  line-height: 1.2;
   position: relative;
+  text-wrap: balance;
 }
 /* Headings scale with the viewport too, so the hierarchy stays proportional to
    the body text instead of dominating a narrow screen. */
 .docs-prose h1 {
-  font-size: clamp(1.75rem, 1.35rem + 2vw, 2.25rem);
+  font-size: clamp(1.9rem, 1.4rem + 2.2vw, 2.6rem);
+  font-weight: 680;
+  letter-spacing: -0.028em;
   margin: 0 0 1.25rem;
 }
 .docs-prose h2 {
-  font-size: clamp(1.35rem, 1.15rem + 1vw, 1.6rem);
-  margin: 2.5rem 0 1rem;
-  padding-bottom: 0.4rem;
-  border-bottom: 1px solid var(--border);
+  font-size: clamp(1.4rem, 1.18rem + 1.1vw, 1.7rem);
+  font-weight: 640;
+  letter-spacing: -0.021em;
+  margin: 3rem 0 0.9rem;
 }
 .docs-prose h3 {
-  font-size: clamp(1.15rem, 1.05rem + 0.5vw, 1.25rem);
-  margin: 2rem 0 0.75rem;
+  font-size: clamp(1.14rem, 1.05rem + 0.45vw, 1.28rem);
+  font-weight: 640;
+  letter-spacing: -0.014em;
+  margin: 2.25rem 0 0.7rem;
 }
 .docs-prose h4 {
-  font-size: 1.05rem;
-  margin: 1.5rem 0 0.5rem;
+  font-size: 1.03rem;
+  font-weight: 650;
+  letter-spacing: -0.008em;
+  margin: 1.75rem 0 0.5rem;
 }
+/* Past H4 size has run out, so the step is made with case and tracking
+   instead — the eyebrow treatment, which reads as deeper without going
+   smaller than the body text it labels. */
 .docs-prose h5,
 .docs-prose h6 {
-  font-size: 0.95rem;
-  margin: 1.25rem 0 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 680;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  margin: 1.75rem 0 0.5rem;
 }
 .docs-prose p {
   margin: 0 0 1.15rem;
 }
+/* A heading never ends a page. */
+.docs-prose :is(h1, h2, h3, h4, h5, h6) {
+  break-after: avoid;
+}
+/* The first heading of a section carries the section's own top spacing, so it
+   must not add its own on top of it. */
+.docs-prose > *:first-child,
+.docs-prose > * > :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
+}
+/*
+ * Links. The underline is drawn thin and skips descenders, so a link inside a
+ * paragraph is unmistakable without the rule cutting through the letterforms.
+ * Hover deepens the colour rather than thickening the rule — the text does not
+ * shift weight under the pointer.
+ */
 .docs-prose a {
   color: var(--primary);
   text-decoration: underline;
-  text-underline-offset: 3px;
-  text-decoration-thickness: 1px;
+  text-decoration-skip-ink: auto;
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 0.06em;
+  text-decoration-color: color-mix(in oklab, var(--primary) 40%, transparent);
+  transition: text-decoration-color var(--duration-fast) var(--ease-out);
 }
 .docs-prose a:hover {
-  text-decoration-thickness: 2px;
+  text-decoration-color: currentColor;
 }
 .docs-prose ul,
 .docs-prose ol {
@@ -443,34 +680,48 @@
 .docs-prose li > ol {
   margin: 0.35rem 0;
 }
+/*
+ * A pull quote is a change of voice, not a boxed notice. The tinted panel made
+ * every quotation look like a system message and put it in direct competition
+ * with the callouts below, which are boxed for a reason. Here the quote keeps
+ * the page's ground and marks itself with a rule and a shift in style — the
+ * way a quotation is set in print.
+ */
 .docs-prose blockquote {
-  margin: 1.25rem 0;
-  padding: 0.5rem 1rem;
-  border-left: 3px solid var(--primary);
-  color: var(--muted-foreground);
-  background: color-mix(in oklab, var(--primary) 5%, transparent);
-  border-radius: 0 0.375rem 0.375rem 0;
+  margin: 1.75rem 0;
+  padding: 0.1rem 0 0.1rem 1.35rem;
+  border-left: 2px solid color-mix(in oklab, var(--primary) 55%, var(--border));
+  color: color-mix(in oklab, var(--foreground) 78%, var(--muted-foreground));
+  font-style: italic;
+  background: none;
+  border-radius: 0;
 }
 .docs-prose blockquote p:last-child {
   margin-bottom: 0;
 }
 .docs-prose code:not(pre code) {
   font-family: var(--font-mono);
+  /* Mono faces run large at a shared size; 0.85em is the ratio at which
+     JetBrains Mono's x-height matches the surrounding text. */
   font-size: 0.85em;
   padding: 0.15em 0.4em;
-  border-radius: 0.3rem;
-  background: var(--muted);
-  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: color-mix(in oklab, var(--primary) 8%, var(--muted));
+  border: 1px solid color-mix(in oklab, var(--primary) 10%, var(--hairline));
+  color: color-mix(in oklab, var(--foreground) 88%, var(--primary));
 }
 .docs-prose pre {
   font-family: var(--font-mono);
   font-size: 0.85rem;
   line-height: 1.6;
-  padding: 1rem 1.15rem;
-  border-radius: 0.65rem;
-  background: var(--muted);
-  border: 1px solid var(--border);
+  padding: 1.1rem 1.25rem;
+  border-radius: 0.75rem;
+  background: var(--surface-sunken);
+  border: 1px solid var(--hairline);
   overflow-x: auto;
+  /* Scrolls horizontally, so it gets its own contact shadow to signal that it
+     is a panel sitting on the page rather than part of the running text. */
+  box-shadow: var(--shadow-1);
 }
 .docs-prose pre code {
   background: transparent;
@@ -600,6 +851,85 @@
   border-bottom-width: 2px;
   border-radius: 0.3rem;
   background: var(--muted);
+}
+
+/*
+ * Callouts (GitHub admonitions).
+ *
+ * The one place in a document that is allowed to interrupt. It earns that with
+ * a raised surface and a tinted icon, not with coloured body text — tinting the
+ * prose itself is what made the old boxes hard to read, since the tone colours
+ * were chosen to be visible rather than to be read at length. The text stays
+ * the document's own colour; only the mark and the label carry the tone.
+ *
+ * The icon sits in the margin beside the text rather than above it, so the
+ * body keeps a single left edge with the paragraphs around it and the box does
+ * not push the reader's eye out and back again.
+ */
+.docs-callout {
+  --tone: var(--primary);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.85rem;
+  margin: 1.75rem auto;
+  padding: 1rem 1.15rem;
+  border: 1px solid color-mix(in oklab, var(--tone) 28%, var(--hairline));
+  border-radius: 0.85rem;
+  background: color-mix(in oklab, var(--tone) 6%, var(--background));
+  box-shadow: var(--shadow-1);
+}
+.docs-callout[data-tone="info"] {
+  --tone: oklch(0.58 0.15 245);
+}
+.docs-callout[data-tone="success"] {
+  --tone: oklch(0.58 0.14 155);
+}
+.docs-callout[data-tone="warn"] {
+  --tone: oklch(0.65 0.15 70);
+}
+.docs-callout[data-tone="danger"] {
+  --tone: oklch(0.58 0.19 22);
+}
+.dark .docs-callout[data-tone="info"] {
+  --tone: oklch(0.72 0.13 245);
+}
+.dark .docs-callout[data-tone="success"] {
+  --tone: oklch(0.74 0.13 155);
+}
+.dark .docs-callout[data-tone="warn"] {
+  --tone: oklch(0.79 0.14 72);
+}
+.dark .docs-callout[data-tone="danger"] {
+  --tone: oklch(0.7 0.17 22);
+}
+.docs-callout-mark {
+  display: inline-flex;
+  /* Pinned to the top of the cell, then nudged onto the label's cap height.
+     Left to stretch it centres against the whole box, which on a two-line
+     callout floats the icon between the label and the text belonging to
+     neither. */
+  align-self: start;
+  margin-top: 0.12rem;
+  color: var(--tone);
+}
+.docs-callout-body {
+  min-width: 0;
+}
+.docs-prose .docs-callout-label {
+  margin: 0 0 0.3rem;
+  color: var(--tone);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+.docs-prose .docs-callout :is(p, ul, ol) {
+  max-width: none;
+  margin-inline: 0;
+}
+.docs-prose .docs-callout > .docs-callout-body > :last-child {
+  margin-bottom: 0;
 }
 
 /* Imported office files keep their own typography, but live within the reader's rhythm. */
@@ -1546,3 +1876,71 @@ mjx-container[jax="CHTML"] {
 ::-webkit-scrollbar-thumb:hover {
   background-color: var(--color-muted-foreground);
 }
+
+/* Table widths are local to their scroll viewport. Never split words, URLs,
+   or inline code in the middle, even when the reading column is narrow. */
+.docs-prose .docs-table-container :is(th, td, th *, td *) {
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+.docs-table-container {
+  min-width: 0;
+  margin: 1.5rem 0;
+}
+.docs-table-container .docs-table-wrap {
+  position: relative;
+  margin: 0;
+  padding-bottom: 12px;
+}
+.docs-table-container[data-wrap="false"] :is(th, td, th *, td *) {
+  white-space: nowrap;
+}
+.docs-prose .docs-table-container[data-wrap="true"] :is(th, td) {
+  white-space: normal;
+}
+.docs-table-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+  font: 12px/1.5 var(--font-sans);
+  color: var(--muted-foreground);
+}
+.docs-table-controls label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.docs-table-controls button {
+  text-decoration: underline;
+}
+.docs-table-resize-controls {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.docs-column-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+  pointer-events: auto;
+  border-right: 2px solid transparent;
+}
+.docs-column-resizer:hover,
+.docs-column-resizer:focus-visible {
+  border-color: var(--primary);
+  background: color-mix(in oklab, var(--primary) 12%, transparent);
+}
+
+/* Markdown media shares the reader's width; native controls remain usable on touch. */
+.markdown-media-paragraph { margin: 1.25em 0; }
+.markdown-media-player { display: block; margin: 1.5em 0; }
+.markdown-media-player video { display: block; width: 100%; max-height: 75vh; border-radius: .75rem; background: #111; }
+.markdown-media-player audio { display: block; width: 100%; }
+.markdown-media-download { display: block; margin-top: .5rem; font-size: .8em; }
+.artifact-image { max-width: 100%; height: auto; }

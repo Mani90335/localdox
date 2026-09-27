@@ -18,7 +18,7 @@ import {
   scanMathNodes,
   scanProseReferences,
   slugLabel,
-} from "../src/lib/math/equation-registry.ts";
+} from "../src/services/math/equation-registry.ts";
 import {
   explicitTag,
   extractLabel,
@@ -28,7 +28,7 @@ import {
   katexCanAttempt,
   macrosFor,
   stripRegistryCommands,
-} from "../src/lib/math/latex.ts";
+} from "../src/services/math/latex.ts";
 import {
   clearMathCache,
   engineChain,
@@ -37,15 +37,15 @@ import {
   peekRenderedMath,
   renderMath,
   renderMathSync,
-} from "../src/lib/math/renderer.ts";
+} from "../src/services/math/renderer.ts";
 import {
   MATH_ELEMENT,
   MATH_REF_ELEMENT,
   remarkEquationReferences,
   remarkInlineMathRefs,
   remarkMathNodes,
-} from "../src/lib/math/remark-math-nodes.ts";
-import { extractMathml, loadKatex, renderKatexSync } from "../src/lib/math/adapters/katex.ts";
+} from "../src/services/math/remark-math-nodes.ts";
+import { extractMathml, loadKatex, renderKatexSync } from "../src/services/math/adapters/katex.ts";
 
 const CORPUS = readFileSync(
   path.join(import.meta.dirname, "fixtures", "math-physics-corpus.md"),
@@ -742,19 +742,19 @@ test("no engine is imported at module scope by the renderer", () => {
   // (or ~460 kB of Temml) into the reader's chunk, and nothing else would fail.
   const sources = {
     "renderer.ts": readFileSync(
-      path.join(import.meta.dirname, "..", "src", "lib", "math", "renderer.ts"),
+      path.join(import.meta.dirname, "..", "src", "services", "math", "renderer.ts"),
       "utf8",
     ),
     "adapters/katex.ts": readFileSync(
-      path.join(import.meta.dirname, "..", "src", "lib", "math", "adapters", "katex.ts"),
+      path.join(import.meta.dirname, "..", "src", "services", "math", "adapters", "katex.ts"),
       "utf8",
     ),
     "adapters/temml.ts": readFileSync(
-      path.join(import.meta.dirname, "..", "src", "lib", "math", "adapters", "temml.ts"),
+      path.join(import.meta.dirname, "..", "src", "services", "math", "adapters", "temml.ts"),
       "utf8",
     ),
     "adapters/mathjax.ts": readFileSync(
-      path.join(import.meta.dirname, "..", "src", "lib", "math", "adapters", "mathjax.ts"),
+      path.join(import.meta.dirname, "..", "src", "services", "math", "adapters", "mathjax.ts"),
       "utf8",
     ),
   };

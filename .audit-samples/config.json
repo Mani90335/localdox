@@ -1,0 +1,8 @@
+{
+  "name": "localdox",
+  "version": "2.0.0",
+  "theme": { "mode": "auto", "accent": "indigo", "radius": 12 },
+  "reader": { "font": "system", "layout": "paged", "measure": 68 },
+  "features": ["highlights", "boards", "ai", "embeds"],
+  "limits": { "maxFileSize": 52428800, "maxFiles": 500 }
+}

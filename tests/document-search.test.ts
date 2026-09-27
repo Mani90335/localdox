@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DocumentSearch, runSearch } from "../src/lib/document-search.ts";
+import { DocumentSearch, runSearch } from "../src/lib/search/document-search.ts";
 
 test("search ranks headings, resolves duplicates, and ignores fenced code", async () => {
   const files = [

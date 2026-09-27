@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { graphlib } from "dagre-d3-es";
 import { layout as dagreLayout } from "dagre-d3-es/src/dagre/index.js";
-import { instantiateLayout } from "../src/lib/diagram-engine/layout.ts";
+import { instantiateLayout } from "../src/services/diagrams/engine/layout.ts";
 import { syntheticGraph } from "./generate.ts";
 
 type Segment = [number, number, number, number, number]; // x1 y1 x2 y2 edge
@@ -92,7 +92,7 @@ const sizes = process.argv
   .map(Number);
 const forceDagre = process.argv.includes("--dagre");
 const engine = await instantiateLayout(
-  readFileSync(new URL("../src/lib/diagram-engine/diagram_layout.wasm", import.meta.url)),
+  readFileSync(new URL("../src/services/diagrams/engine/diagram_layout.wasm", import.meta.url)),
 );
 
 for (const n of sizes.length ? sizes : [500, 2000, 5000, 10000]) {

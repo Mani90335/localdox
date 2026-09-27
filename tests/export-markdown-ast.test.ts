@@ -21,7 +21,7 @@ import {
   parseMarkdownBlocks,
   runsToText,
   type ExportBlock,
-} from "../src/lib/export/markdown-ast.ts";
+} from "../src/services/markdown-export/markdown-ast.ts";
 
 function only<T extends ExportBlock["type"]>(
   source: string,

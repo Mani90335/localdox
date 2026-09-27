@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MdFile } from "@/lib/markdown-utils";
-import { DocumentSearch, runSearch, type SearchHit } from "@/lib/document-search";
+import type { MdFile } from "@/lib/markdown/markdown-utils";
+import { DocumentSearch, runSearch, type SearchHit } from "@/lib/search/document-search";
 
 export function useDocumentSearch(files: MdFile[], query: string, open: boolean) {
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -20,7 +20,7 @@ export function useDocumentSearch(files: MdFile[], query: string, open: boolean)
   useEffect(() => {
     if (!open || fallback) return;
     try {
-      const instance = new Worker(new URL("../lib/document-search.worker.ts", import.meta.url), {
+      const instance = new Worker(new URL("../lib/search/document-search.worker.ts", import.meta.url), {
         type: "module",
       });
       worker.current = instance;

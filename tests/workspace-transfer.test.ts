@@ -16,10 +16,10 @@ import {
   planTransfer,
   removeFromSource,
   transferCounts,
-} from "../src/lib/workspace-transfer.ts";
-import type { FolderRecord, PersistedFile, WorkspaceRecord } from "../src/lib/persistence.ts";
-import { closeFileEverywhere } from "../src/lib/panes.ts";
-import type { PaneLayout } from "../src/lib/panes.ts";
+} from "../src/lib/workspace/workspace-transfer.ts";
+import type { FolderRecord, PersistedFile, WorkspaceRecord } from "../src/lib/workspace/persistence.ts";
+import { closeFileEverywhere } from "../src/lib/workspace/panes.ts";
+import type { PaneLayout } from "../src/lib/workspace/panes.ts";
 
 const file = (id: string, folderId: string | null = null): PersistedFile => ({
   id,

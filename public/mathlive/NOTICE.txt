@@ -1,0 +1,4 @@
+Fonts vendored from the "mathlive" npm package (MIT License), copied here so
+the math keyboard's glyphs render without a network request. See
+node_modules/mathlive/fonts for the originals, and mathlive's own package for
+the license text.
