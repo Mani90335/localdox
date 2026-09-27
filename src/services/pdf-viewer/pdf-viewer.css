@@ -1,0 +1,32 @@
+/* Book-reader chrome for the PDF viewer. The page canvases themselves and
+   their text layers are styled inline/by pdf.js's own `pdf_viewer.css`
+   (imported alongside `pdfjs-dist` in `PdfReader.tsx`); this file covers only
+   what's specific to this app's reading experience. */
+
+@keyframes pdf-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pdf-page-canvas {
+  animation: pdf-page-enter 180ms ease-out;
+}
+
+/* Search-match highlights sit behind the (invisible) selectable text pdf.js's
+   TextLayer already renders in the exact right spot — see `PdfPageCanvas`. */
+.pdf-search-hit {
+  background-color: rgba(253, 224, 71, 0.45);
+  border-radius: 2px;
+}
+
+.pdf-search-hit-active {
+  background-color: rgba(245, 158, 11, 0.75);
+  border-radius: 2px;
+  outline: 1.5px solid rgb(217, 119, 6);
+}

@@ -1,3 +1,5 @@
+import { ensureEmbedMediaFolder } from "@/lib/workspace/embed-media";
+import type { DocumentUpdate } from "@/services/office-editing";
 import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
@@ -12,6 +14,8 @@ import {
   Home,
   Upload,
   Settings,
+  FilePlus,
+  PenTool,
 } from "lucide-react";
 
 import {
@@ -20,9 +24,9 @@ import {
   useNavHistoryState,
   type NavEntry,
 } from "@/hooks/use-nav-history";
-import { Sidebar, AddMenu, DEFAULT_VIEW, type SidebarView } from "./Sidebar";
-import { MarkdownViewer } from "./MarkdownViewer";
-import { PaneDocument } from "./PaneDocument";
+import { Sidebar, AddMenu, DEFAULT_VIEW, type SidebarView } from "./workspace/Sidebar";
+import { MarkdownViewer } from "./viewer/MarkdownViewer";
+import { PaneDocument } from "./viewer/PaneDocument";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import {
@@ -36,16 +40,16 @@ import {
   splitPane,
   toPersisted,
   type PaneLayout,
-} from "@/lib/panes";
+} from "@/lib/workspace/panes";
 import {
   applyToDestination,
   planTransfer,
   transferCounts,
-} from "@/lib/workspace-transfer";
-import { WorkspaceMenu } from "./WorkspaceMenu";
-import { WorkspaceSheet } from "./WorkspaceSheet";
-import { MoveToWorkspaceDialog } from "./MoveToWorkspaceDialog";
-import type { AskAiPrefill } from "./ai/AskAiPanel";
+} from "@/lib/workspace/workspace-transfer";
+import { WorkspaceMenu } from "./workspace/WorkspaceMenu";
+import { WorkspaceSheet } from "./workspace/WorkspaceSheet";
+import { MoveToWorkspaceDialog } from "./workspace/MoveToWorkspaceDialog";
+import type { AskAiPrefill } from "@/services/ai";
 
 // Code-split surfaces. None of these is on the path to reading a document — the
 // settings page, the search palette, the AI panel and the binary-document
@@ -54,10 +58,10 @@ import type { AskAiPrefill } from "./ai/AskAiPanel";
 // mounted only once it is actually asked for, so the fetch overlaps the
 // interaction that triggered it.
 const DocumentViewer = lazy(() =>
-  import("./DocumentViewer").then((m) => ({ default: m.DocumentViewer })),
+  import("./viewer/DocumentViewer").then((m) => ({ default: m.DocumentViewer })),
 );
 const CommandPalette = lazy(() =>
-  import("./CommandPalette").then((m) => ({ default: m.CommandPalette })),
+  import("./navigation/CommandPalette").then((m) => ({ default: m.CommandPalette })),
 );
 /**
  * How many columns the split view will go to.
@@ -68,37 +72,39 @@ const CommandPalette = lazy(() =>
  */
 const MAX_PANES = 4;
 
-const SavedPage = lazy(() => import("./SavedPage").then((m) => ({ default: m.SavedPage })));
+const SavedPage = lazy(() => import("./pages/SavedPage").then((m) => ({ default: m.SavedPage })));
 
 const SettingsPage = lazy(() =>
-  import("./SettingsPage").then((m) => ({ default: m.SettingsPage })),
+  import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
 
 /** The settings section a caller asked for, handed over the route change that
  *  opens the dialog. DocsApp is the route component, so it remounts on the way
  *  to /settings and nothing held inside it survives to be read at mount. */
 let pendingSettingsTab: "workspace" | undefined;
-const AskAiPanel = lazy(() => import("./ai/AskAiPanel").then((m) => ({ default: m.AskAiPanel })));
-const SharedFilesDialog = lazy(() =>
-  import("./SharedFilesDialog").then((m) => ({ default: m.SharedFilesDialog })),
+const AskAiPanel = lazy(() =>
+  import("@/services/ai/AskAiPanel").then((m) => ({ default: m.AskAiPanel })),
 );
-import type { MdFile, MdChunk } from "@/lib/markdown-utils";
+const SharedFilesDialog = lazy(() =>
+  import("./workspace/SharedFilesDialog").then((m) => ({ default: m.SharedFilesDialog })),
+);
+import type { MdFile, MdChunk } from "@/lib/markdown/markdown-utils";
 // Type only: the writers behind it are a dynamic import at the call site, so
 // the OOXML builder is never on the path to the first paint.
-import type { ExportFormat } from "@/lib/export";
-import type { Highlight } from "@/lib/dom-highlighter";
-import { isBinExpired } from "@/lib/persistence";
-import { fileSubtopics, readingMinutes } from "@/lib/markdown-utils";
+import type { ExportFormat } from "@/services/markdown-export";
+import type { Highlight } from "@/lib/markdown/dom-highlighter";
+import { isBinExpired, WorkspaceConflictError } from "@/lib/workspace/persistence";
+import { fileSubtopics, readingMinutes } from "@/lib/markdown/markdown-utils";
 import {
   DISCARD_PROMPT,
   getDocumentKind,
   importDocumentFile,
   SUPPORTED_ACCEPT,
-} from "@/lib/document-utils";
-import { clearArtifactResolutionCache } from "@/lib/workspace-artifacts";
-import { loadReadingFont, warmAppFonts } from "@/lib/fonts";
-import { restoreCustomFont } from "@/lib/custom-font";
-import { loadGoogleFont } from "@/lib/google-font";
+} from "@/lib/markdown/document-utils";
+import { clearArtifactResolutionCache } from "@/lib/workspace/workspace-artifacts";
+import { loadReadingFont, warmAppFonts } from "@/lib/fonts/fonts";
+import { restoreCustomFont } from "@/lib/fonts/custom-font";
+import { loadGoogleFont } from "@/lib/fonts/google-font";
 import { toast } from "sonner";
 import { useHistory } from "@/hooks/use-history";
 import {
@@ -106,7 +112,7 @@ import {
   hasModKey,
   requestIdleCallbackSafe,
   cancelIdleCallbackSafe,
-} from "@/lib/keyboard";
+} from "@/lib/platform/keyboard";
 import {
   persistence,
   loadPrefs,
@@ -125,9 +131,9 @@ import {
   type ThemePref,
   type ReadingMode,
   type ReadingFont,
-} from "@/lib/persistence";
-import { clearMathCache } from "@/lib/math/renderer";
-import type { MathPreferences, MathRendererType } from "@/lib/math/types";
+} from "@/lib/workspace/persistence";
+import { clearMathCache } from "@/services/math";
+import type { MathPreferences, MathRendererType } from "@/services/math";
 import {
   findSaved,
   migrateBookmarks,
@@ -137,7 +143,7 @@ import {
   type SavedDraft,
   type SavedEntry,
   type SavedItem,
-} from "@/lib/saved-items";
+} from "@/lib/workspace/saved-items";
 import {
   copyLink,
   fetchShare,
@@ -147,8 +153,18 @@ import {
   SHARE_HASH,
   SHARE_FILES_HASH,
   type SharedFilesPayload,
-} from "@/lib/share";
-import { MAX_UPLOAD_BYTES, getMaxStorageBytes, formatBytes } from "@/lib/storage-limits";
+} from "@/lib/workspace/share";
+import { MAX_UPLOAD_BYTES, getMaxStorageBytes, formatBytes } from "@/lib/workspace/storage-limits";
+import {
+  useDocumentConversion,
+  ConversionActions,
+  CONVERTER_VERSION,
+  markdownCopyName,
+  remapDerivation,
+  sameSource,
+  type ConversionResult,
+  type ConversionSource,
+} from "@/services/doc-conversion";
 
 type Theme = ThemePref;
 
@@ -193,6 +209,7 @@ function toMdFile(f: PersistedFile): MdFile {
     kind: f.kind ?? getDocumentKind(f.name, f.mimeType),
     folderId: f.folderId ?? null,
     deletedAt: f.deletedAt,
+    derivedFrom: f.derivedFrom,
   };
 }
 
@@ -288,6 +305,7 @@ function findDuplicate(
 
 export function DocsApp() {
   const [files, setFiles] = useState<MdFile[]>([]);
+  const officeDirtyPanes = useRef(new Set<string>());
   // Sidebar folders. Flat buckets over the file list — a file's `folderId` says
   // which one it sits in, so folders can appear and disappear without touching
   // the documents themselves.
@@ -352,6 +370,11 @@ export function DocsApp() {
 
   /** Put a document in a column beside the one being read. */
   const openBeside = useCallback((fileId: string) => {
+    if (
+      officeDirtyPanes.current.size &&
+      !window.confirm("There are unsaved document edits. Change the layout and discard them?")
+    )
+      return;
     setPaneLayout((layout) => {
       const from = layout.focusedPaneId ?? layout.panes[0]?.id;
       if (!from) return openInPane(layout, fileId);
@@ -379,6 +402,11 @@ export function DocsApp() {
    * owned by the pane — so closing a column is only ever about the layout.
    */
   const closePane = useCallback((paneId: string) => {
+    if (
+      officeDirtyPanes.current.size &&
+      !window.confirm("There are unsaved document edits. Close this pane and discard them?")
+    )
+      return;
     setPaneLayout((layout) => {
       if (layout.panes.length <= 1) return layout;
       const panes = layout.panes.filter((pane) => pane.id !== paneId);
@@ -406,12 +434,15 @@ export function DocsApp() {
     () => loadPrefs().diagramFollowNumbers,
   );
   const [diagramNumbers, setDiagramNumbers] = useState<boolean>(() => loadPrefs().diagramNumbers);
+  const [showEmbedMedia, setShowEmbedMedia] = useState(() => loadPrefs().showEmbedMedia);
+  useEffect(() => { savePrefs({ showEmbedMedia }); }, [showEmbedMedia]);
   const [aiEnabled, setAiEnabled] = useState<boolean>(() => loadPrefs().aiEnabled);
   const [mathRenderer, setMathRenderer] = useState<MathRendererType>(
     () => loadPrefs().mathRenderer,
   );
   const [mathNumbering, setMathNumbering] = useState<boolean>(() => loadPrefs().mathNumbering);
   const [mathExplorer, setMathExplorer] = useState<boolean>(() => loadPrefs().mathExplorer);
+  const [contentWidth, setContentWidth] = useState<number>(() => loadPrefs().contentWidth);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [highlightQuery, setHighlightQuery] = useState<string | null>(null);
@@ -740,6 +771,10 @@ export function DocsApp() {
     savePrefs({ mathRenderer, mathNumbering, mathExplorer });
   }, [mathRenderer, mathNumbering, mathExplorer]);
 
+  useEffect(() => {
+    savePrefs({ contentWidth });
+  }, [contentWidth]);
+
   /**
    * Switching engines invalidates every rendered equation: the cache is keyed
    * by renderer preference, so the old entries are simply unreachable rather
@@ -759,7 +794,7 @@ export function DocsApp() {
     // Imported here rather than at module scope: a static import would pull
     // MathJax's adapter — and with it the loader for a 1 MB engine — into the
     // initial bundle of every reader, math or no math.
-    void import("@/lib/math/adapters/mathjax")
+    void import("@/services/math/adapters/mathjax")
       .then((module) => module.enableExplorer())
       .catch(() => {
         // Nothing to recover: expressions stay readable, they just aren't
@@ -804,6 +839,7 @@ export function DocsApp() {
         kind: f.kind,
         folderId: f.folderId ?? null,
         deletedAt: f.deletedAt,
+        derivedFrom: f.derivedFrom,
       })),
       folders: s.folders,
       // `bookmarks` is the legacy projection of `saved`, still written so an
@@ -830,9 +866,11 @@ export function DocsApp() {
   // at the last successful write; a save with nothing new to say is skipped.
   const mutationRef = useRef(0);
   const savedMutationRef = useRef(0);
+  const workspaceConflictRef = useRef(false);
 
   const persistNow = useCallback(
-    async (silent: boolean) => {
+    async (silent: boolean, rejectStale = false) => {
+      if (workspaceConflictRef.current) return false;
       if (!workspaceIdRef.current) return true;
       if (mutationRef.current === savedMutationRef.current) {
         // Nothing changed since the last write. Still settle the indicator, so
@@ -843,13 +881,21 @@ export function DocsApp() {
       const pending = mutationRef.current;
       const targetId = workspaceIdRef.current;
       try {
-        await persistence.putWorkspace(buildRecord());
+        await persistence.putWorkspace(buildRecord(), { rejectStale });
         if (workspaceIdRef.current === targetId) {
           savedMutationRef.current = Math.max(savedMutationRef.current, pending);
           if (!silent && pending === mutationRef.current) setSaveStatus("saved");
         }
         return true;
       } catch (error) {
+        if (workspaceIdRef.current !== targetId) return false;
+        if (error instanceof WorkspaceConflictError) {
+          workspaceConflictRef.current = true;
+          if (saveTimer.current) clearTimeout(saveTimer.current);
+          setSaveStatus("idle");
+          toast.error(error.message, { id: "workspace-save-error", duration: Infinity });
+          return false;
+        }
         if (!silent) setSaveStatus("idle");
         console.error("Could not save workspace", error);
         toast.error(
@@ -864,7 +910,7 @@ export function DocsApp() {
 
   // Called by every user mutation. Shows "Saving…", then writes after a pause.
   const markDirty = useCallback(() => {
-    if (!hydratedRef.current || !workspaceIdRef.current) return;
+    if (!hydratedRef.current || !workspaceIdRef.current || workspaceConflictRef.current) return;
     mutationRef.current++;
     setSaveStatus("saving");
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -876,6 +922,7 @@ export function DocsApp() {
 
   const hydrateWorkspace = useCallback(
     (ws: WorkspaceRecord) => {
+      workspaceConflictRef.current = false;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       const wsFolders = ws.folders ?? [];
       const folderIds = new Set(wsFolders.map((f) => f.id));
@@ -1066,8 +1113,8 @@ export function DocsApp() {
   // ---- file + navigation actions (each marks the workspace dirty) ----
 
   const addFiles = useCallback(
-    async (fileList: File[]) => {
-      if (fileList.length === 0) return;
+    async (fileList: File[], attachments = false): Promise<MdFile[]> => {
+      if (fileList.length === 0) return [];
 
       // Reject any single file over the per-file cap before touching disk.
       const oversize = fileList.filter((f) => f.size > MAX_UPLOAD_BYTES);
@@ -1078,7 +1125,7 @@ export function DocsApp() {
         );
       }
       const accepted = fileList.filter((f) => f.size <= MAX_UPLOAD_BYTES);
-      if (accepted.length === 0) return;
+      if (accepted.length === 0) return [];
 
       // Enforce the hard total-storage ceiling (5% of the browser quota).
       const maxStorage = await getMaxStorageBytes();
@@ -1089,7 +1136,7 @@ export function DocsApp() {
           toast.error(
             `Storage full — this application is strictly capped at ${formatBytes(maxStorage)}. Remove some files before uploading more.`,
           );
-          return;
+          return [];
         }
       }
 
@@ -1116,6 +1163,7 @@ export function DocsApp() {
         // taken name is kept, under a name the reader chooses.
         const kept: MdFile[] = [];
         const skipped: string[] = [];
+        const existing: MdFile[] = [];
         // Grows as the batch is processed, so two identical files picked in one
         // go are caught against each other, not just against what is stored.
         const pool = [...snapshotRef.current.files];
@@ -1124,6 +1172,9 @@ export function DocsApp() {
           const dup = findDuplicate(file, pool);
           if (dup?.kind === "content") {
             skipped.push(file.name);
+            if (attachments) {
+              if (!dup.file.deletedAt) existing.push(dup.file);
+            }
             continue;
           }
           if (dup?.kind === "name") {
@@ -1153,9 +1204,15 @@ export function DocsApp() {
         }
         if (kept.length === 0) {
           toast.dismiss(toastId);
-          return;
+          return existing;
         }
 
+        let nextFolders = snapshotRef.current.folders;
+        if (attachments) {
+          const organized = ensureEmbedMediaFolder(nextFolders);
+          nextFolders = organized.folders;
+          for (const file of kept) file.folderId = organized.folder.id;
+        }
         const nextFiles = [...snapshotRef.current.files, ...kept];
         // Keep the currently open file if one is open; otherwise open the first
         // of the just-uploaded batch.
@@ -1176,9 +1233,11 @@ export function DocsApp() {
         snapshotRef.current = {
           ...snapshotRef.current,
           files: nextFiles,
+          folders: nextFolders,
           activeFileId: nextActiveFileId,
         };
         setFiles(nextFiles);
+        setFolders(nextFolders);
         setActiveFileId(nextActiveFileId);
         setSaveStatus("saving");
         await persistence.putWorkspace(buildRecord());
@@ -1187,14 +1246,18 @@ export function DocsApp() {
         toast.success(`Successfully uploaded ${kept.length} file${kept.length > 1 ? "s" : ""}!`, {
           id: toastId,
         });
-        navigate({ to: "/" }); // Uploading takes you straight into reading.
+        if (!attachments) navigate({ to: "/" }); // Attachments keep the editor open.
+        return [...kept, ...existing];
       } catch {
         setSaveStatus("idle");
         toast.error("Could not upload the selected file(s). Please try again.", { id: toastId });
+        return [];
       }
     },
     [buildRecord, navigate],
   );
+
+  const importAttachments = useCallback((files: File[]) => addFiles(files, true), [addFiles]);
 
   const handleFileInput = useCallback(
     (list: FileList | null) => {
@@ -1286,7 +1349,7 @@ export function DocsApp() {
   const editorDirtyRef = useRef(false);
   const confirmDiscardDraft = useCallback((fileId?: string) => {
     // Re-opening the document already on screen is not leaving it.
-    if (!editorDirtyRef.current) return true;
+    if (!editorDirtyRef.current && !officeDirtyPanes.current.size) return true;
     if (fileId && fileId === activeFileIdRef.current) return true;
     return window.confirm(DISCARD_PROMPT);
   }, []);
@@ -1328,6 +1391,101 @@ export function DocsApp() {
       });
     },
     [navigate, markDirty],
+  );
+
+  const commitConversion = useCallback(
+    async (source: ConversionSource, result: ConversionResult, targetWorkspaceId: string) => {
+      const limit = await getMaxStorageBytes();
+      const current = snapshotRef.current;
+      if (
+        workspaceIdRef.current !== targetWorkspaceId ||
+        !sameSource(
+          current.files.find((f) => f.id === source.id),
+          source,
+        )
+      )
+        return;
+      const size = new TextEncoder().encode(result.markdown).byteLength;
+      // Account for decoded text and stored base64, rather than trusting stale
+      // import sizes after a document has been edited.
+      const used = current.files.reduce(
+        (sum, file) =>
+          sum + new TextEncoder().encode(file.content).byteLength + (file.data?.length ?? 0),
+        0,
+      );
+      if (limit !== null && used + size > limit)
+        throw new Error(
+          "Not enough local storage for the Markdown copy. Free some space and try again.",
+        );
+      const liveSource = current.files.find((f) => f.id === source.id)!;
+      const derivative: MdFile = {
+        id: crypto.randomUUID(),
+        name: markdownCopyName(
+          source.name,
+          current.files.map((f) => f.name),
+        ),
+        content: result.markdown,
+        mimeType: "text/markdown",
+        kind: "markdown",
+        size,
+        addedAt: Date.now(),
+        folderId: liveSource.folderId,
+        derivedFrom: {
+          sourceFileId: source.id,
+          sourceName: source.name,
+          inputHash: result.inputHash,
+          converter: "anydoc",
+          converterVersion: CONVERTER_VERSION,
+          convertedAt: Date.now(),
+        },
+      };
+      const nextFiles = [...current.files];
+      nextFiles.splice(nextFiles.findIndex((f) => f.id === source.id) + 1, 0, derivative);
+      snapshotRef.current = { ...current, files: nextFiles };
+      filesRef.current = nextFiles;
+      setFiles(nextFiles);
+      markDirty();
+      if (!(await persistNow(false, true))) {
+        if (workspaceIdRef.current === targetWorkspaceId) {
+          const remaining = snapshotRef.current.files.filter((f) => f.id !== derivative.id);
+          snapshotRef.current = { ...snapshotRef.current, files: remaining };
+          filesRef.current = remaining;
+          setFiles(remaining);
+          markDirty();
+        }
+        throw new Error("The Markdown copy could not be saved. The original is unchanged.");
+      }
+      if (workspaceIdRef.current !== targetWorkspaceId) return;
+      if (
+        activeFileIdRef.current === source.id &&
+        pathnameRef.current === "/" &&
+        !editorDirtyRef.current
+      )
+        handleSelect(derivative.id);
+      toast.success(`Created ${derivative.name}`, {
+        description: "Embedded images remain in the original.",
+        action: {
+          label: "Open Markdown",
+          onClick: () => {
+            if (workspaceIdRef.current === targetWorkspaceId) handleSelect(derivative.id);
+          },
+        },
+      });
+    },
+    [handleSelect, markDirty, persistNow],
+  );
+
+  const conversion = useDocumentConversion({ workspaceId, files, commit: commitConversion });
+  const conversionActions = (file: MdFile) => (
+    <ConversionActions
+      file={file}
+      files={files}
+      runningId={conversion.runningId}
+      onConvert={conversion.start}
+      onCancel={conversion.cancel}
+      onOpen={handleSelect}
+      onCompare={openBeside}
+    />
   );
 
   const removeFile = useCallback(
@@ -1419,7 +1577,7 @@ export function DocsApp() {
     const file = filesRef.current.find((f) => f.id === id);
     if (!file) return;
 
-    const { exportDocument, FORMAT_LABEL } = await import("@/lib/export");
+    const { exportDocument, FORMAT_LABEL } = await import("@/services/markdown-export");
     // Only the converting formats are slow enough to be worth a spinner;
     // handing back bytes the app already holds is instant and a toast for it
     // would be noise.
@@ -1431,7 +1589,13 @@ export function DocsApp() {
       : undefined;
 
     try {
-      const result = await exportDocument(file, format);
+      const result = await exportDocument(file, format, {
+        workspaceId: workspaceIdRef.current,
+        workspaceName: workspaceNameRef.current,
+        workspaceFiles: snapshotRef.current.files,
+        workspaceFolders: snapshotRef.current.folders,
+        sourceFile: file,
+      });
       if (toastId === undefined) return;
       // PDF hands off to the browser's print dialog rather than dropping a
       // file, so saying "downloaded" would be a lie the reader can see.
@@ -1466,7 +1630,8 @@ export function DocsApp() {
       .filter((file): file is MdFile => Boolean(file));
     if (!selected.length) return;
 
-    const { exportDocuments, FORMAT_LABEL, isBatchable } = await import("@/lib/export");
+    const { exportDocuments, FORMAT_LABEL, isBatchable } =
+      await import("@/services/markdown-export");
 
     // PDF goes through the browser's modal print dialog, so a batch would queue
     // one per file and make the reader name each by hand. Saying so is better
@@ -1481,11 +1646,19 @@ export function DocsApp() {
     const total = selected.length;
     const toastId = toast.loading(`Exporting 0 of ${total} as ${FORMAT_LABEL[format]}…`);
     try {
-      const result = await exportDocuments(selected, format, (done) => {
-        toast.loading(`Exporting ${done} of ${total} as ${FORMAT_LABEL[format]}…`, {
-          id: toastId,
-        });
-      });
+      const result = await exportDocuments(
+        selected,
+        format,
+        (done) => {
+          toast.loading(`Exporting ${done} of ${total} as ${FORMAT_LABEL[format]}…`, { id: toastId });
+        },
+        {
+          workspaceId: workspaceIdRef.current,
+          workspaceName: workspaceNameRef.current,
+          workspaceFiles: snapshotRef.current.files,
+          workspaceFolders: snapshotRef.current.folders,
+        },
+      );
 
       if (!result.failed.length) {
         toast.success(`Exported ${result.ok} document${result.ok === 1 ? "" : "s"}`, {
@@ -1899,6 +2072,20 @@ flowchart LR
     [buildRecord, navigate],
   );
 
+  const handleDocumentSave = useCallback(
+    (fileId: string, update: DocumentUpdate) => {
+      setFiles((previous) =>
+        previous.map((file) =>
+          file.id === fileId
+            ? { ...file, ...update, data: update.data, headings: undefined, subtopics: undefined }
+            : file,
+        ),
+      );
+      markDirty();
+    },
+    [markDirty],
+  );
+
   const handleContentChange = useCallback(
     (fileId: string, content: string) => {
       // Structure is dropped rather than recomputed. This fires on every pause
@@ -1907,7 +2094,16 @@ flowchart LR
       // them from the new content and caches the result.
       setFiles((prev) =>
         prev.map((f) =>
-          f.id === fileId ? { ...f, content, headings: undefined, subtopics: undefined } : f,
+          f.id === fileId
+            ? {
+                ...f,
+                content,
+                data: undefined,
+                size: new TextEncoder().encode(content).byteLength,
+                headings: undefined,
+                subtopics: undefined,
+              }
+            : f,
         ),
       );
       markDirty();
@@ -2242,9 +2438,11 @@ flowchart LR
       try {
         // The same file can arrive twice (re-shared, or shared back); fresh ids
         // keep both copies addressable.
+        const importedIds = new Map(picked.map((f) => [f.id, crypto.randomUUID()]));
         const stamped: PersistedFile[] = picked.map((f) => ({
           ...f,
-          id: crypto.randomUUID(),
+          id: importedIds.get(f.id)!,
+          derivedFrom: remapDerivation(f.derivedFrom, importedIds),
           addedAt: f.addedAt ?? Date.now(),
           // Folders don't travel with a share link; shared files land at the
           // top level rather than pointing at a folder that isn't here.
@@ -2726,7 +2924,7 @@ flowchart LR
   // other warm-ups do, and is cancelled on unmount rather than firing into a
   // torn-down tree.
   useEffect(() => {
-    const handle = requestIdleCallbackSafe(() => void import("./CommandPalette"), 4000);
+    const handle = requestIdleCallbackSafe(() => void import("./navigation/CommandPalette"), 4000);
     return () => cancelIdleCallbackSafe(handle);
   }, []);
 
@@ -2867,6 +3065,7 @@ flowchart LR
         currentWorkspaceId={workspaceId}
         onRenameWorkspace={renameWorkspace}
         onDeleteWorkspace={deleteWorkspace}
+        onNewWorkspace={newWorkspace}
         onClearStorage={clearAllStorage}
         saved={savedEntries}
         onOpenSaved={openSaved}
@@ -2888,6 +3087,8 @@ flowchart LR
         onSetTheme={setTheme}
         readingMode={readingMode}
         onSetReadingMode={setReadingMode}
+        contentWidth={contentWidth}
+        onSetContentWidth={setContentWidth}
         mathRenderer={mathRenderer}
         onSetMathRenderer={setMathRenderer}
         mathNumbering={mathNumbering}
@@ -2908,6 +3109,8 @@ flowchart LR
         onSetDiagramNumbers={setDiagramNumbers}
         aiEnabled={aiEnabled}
         onSetAiEnabled={setAiEnabled}
+        showEmbedMedia={showEmbedMedia}
+        onSetShowEmbedMedia={setShowEmbedMedia}
         onRestoreFromBin={restoreFromBin}
         onDeleteForever={deleteForever}
         onEmptyBin={emptyBin}
@@ -2940,7 +3143,6 @@ flowchart LR
           workspaces={workspaces}
           currentWorkspaceId={workspaceId}
           onSwitchWorkspace={switchWorkspace}
-          onNewWorkspace={newWorkspace}
           onImportWorkspace={importWorkspace}
           onExportWorkspace={exportWorkspace}
           onShareWorkspace={shareWorkspace}
@@ -2948,41 +3150,55 @@ flowchart LR
           onOpenSettings={openSettings}
         />
         {commandPalette}
-        <div className="flex min-h-[calc(100dvh-4rem)] flex-col items-center justify-center gap-6 px-6 text-center">
-          <Upload className="h-14 w-14 text-muted-foreground" />
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Drop files to view and edit</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              We support Markdown, Boards, PDFs, Spreadsheets, Presentations, Images, and more!
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center justify-center gap-3">
+        <div className="flex min-h-[calc(100dvh-4rem)] flex-col items-center justify-center px-6 py-12">
+          <div className="w-full max-w-sm text-center">
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
-              className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+              className="group flex w-full flex-col items-center gap-4 rounded-3xl border-2 border-dashed border-border bg-card/40 px-8 py-14 shadow-sm transition-all duration-200 ease-out hover:border-primary/50 hover:bg-primary/5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              Upload any file
+              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-transform duration-200 ease-out group-hover:scale-105">
+                <Upload className="h-6 w-6" />
+              </span>
+              <span className="space-y-1">
+                <span className="block text-lg font-semibold text-foreground">
+                  Drop files here, or click to upload
+                </span>
+                <span className="block text-sm text-muted-foreground">
+                  Markdown, PDFs, spreadsheets, slides, images & more
+                </span>
+              </span>
             </button>
+
+            <div className="mt-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <span className="h-px flex-1 bg-border" aria-hidden="true" />
+              or start something new
+              <span className="h-px flex-1 bg-border" aria-hidden="true" />
+            </div>
+
             {/* Nothing to right-click yet, so the sidebar's New menu is out of
                 reach — a blank document has to be startable from here too. The
                 same applies to a board: without this the only way to reach one
                 is to first create some other file just to make the sidebar
                 appear. */}
-            <button
-              type="button"
-              onClick={() => createFile(null)}
-              className="rounded-xl border border-border bg-card px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-accent"
-            >
-              New markdown file
-            </button>
-            <button
-              type="button"
-              onClick={() => createBoardFile(null)}
-              className="rounded-xl border border-border bg-card px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-accent"
-            >
-              New board
-            </button>
+            <div className="mt-5 flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => createFile(null)}
+                className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors duration-150 hover:border-primary/40 hover:bg-accent"
+              >
+                <FilePlus className="h-4 w-4 text-muted-foreground" />
+                New file
+              </button>
+              <button
+                type="button"
+                onClick={() => createBoardFile(null)}
+                className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors duration-150 hover:border-primary/40 hover:bg-accent"
+              >
+                <PenTool className="h-4 w-4 text-muted-foreground" />
+                New board
+              </button>
+            </div>
           </div>
         </div>
         <input
@@ -3022,11 +3238,11 @@ flowchart LR
           workspaces={workspaces}
           currentWorkspaceId={workspaceId}
           onSwitchWorkspace={switchWorkspace}
-          onNewWorkspace={newWorkspace}
           onImportWorkspace={importWorkspace}
           onExportWorkspace={exportWorkspace}
           onShareWorkspace={shareWorkspace}
           onDeleteWorkspace={deleteWorkspace}
+          onOpenSettings={openSettings}
         />
 
         {commandPalette}
@@ -3039,6 +3255,7 @@ flowchart LR
           >
             <div ref={sidebarInnerRef} className="h-full w-full">
               <Sidebar
+                showEmbedMedia={showEmbedMedia}
                 files={files}
                 activeFileId={activeFileId}
                 activeHeadingId={activeHeadingId}
@@ -3054,6 +3271,8 @@ flowchart LR
                 onShareFiles={(ids) => void shareFiles(ids)}
                 onRenameFile={renameFile}
                 onEditFile={editFile}
+                onConvertFile={conversion.start}
+                convertingFileId={conversion.runningId}
                 folders={folders}
                 onCreateFile={createFile}
                 onCreateMermaid={createMermaidFile}
@@ -3087,14 +3306,12 @@ flowchart LR
                 onAddToSplit={openBeside}
                 splitFileIds={splitFileIds}
                 onAskAi={aiEnabled ? openAskAi : undefined}
-                onNewWorkspace={newWorkspace}
                 onImportWorkspace={importWorkspace}
                 onExportWorkspace={exportWorkspace}
                 onShareWorkspace={shareWorkspace}
                 workspaces={workspaces}
                 currentWorkspaceId={workspaceId}
                 onSwitchWorkspace={switchWorkspace}
-                onDeleteWorkspace={deleteWorkspace}
                 docked
                 onOpenPalette={() => setPaletteOpen(true)}
                 onToggleSidebar={toggleSidebar}
@@ -3138,16 +3355,21 @@ flowchart LR
                 buttonClassName="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
               />
               <div className="flex-1" />
-              {/* The workspace monogram, not a settings gear: it opens the same
-                  workspace menu the expanded sidebar's footer row does, and
-                  Settings is one of the items inside it. */}
+              <button
+                onClick={() => openSettings()}
+                className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                aria-label="Settings"
+                title="Settings"
+              >
+                <Settings className="h-4 w-4" />
+              </button>
+              {/* The workspace monogram opens the same avatar-strip switcher
+                  the expanded sidebar's footer shows inline. */}
               <WorkspaceMenu
                 variant="icon"
                 workspaces={workspaces}
                 currentId={workspaceId}
-                onNew={(name) => void newWorkspace(name)}
-                onDelete={(id) => void deleteWorkspace(id)}
-                onSettings={openSettings}
+                onSwitch={(id) => void switchWorkspace(id)}
               />
             </div>
           </div>
@@ -3173,6 +3395,7 @@ flowchart LR
                 </div>
                 <div className="min-h-0 flex-1">
                   <Sidebar
+                showEmbedMedia={showEmbedMedia}
                     files={files}
                     activeFileId={activeFileId}
                     activeHeadingId={activeHeadingId}
@@ -3183,11 +3406,13 @@ flowchart LR
                     onRemoveFile={moveToBin}
                     onDownloadFile={downloadFile}
                     onDownloadFiles={downloadFiles}
-                onMoveToWorkspace={workspaces.length > 1 ? setPendingMove : undefined}
+                    onMoveToWorkspace={workspaces.length > 1 ? setPendingMove : undefined}
                     onShareFile={shareFile}
                     onShareFiles={(ids) => void shareFiles(ids)}
                     onRenameFile={renameFile}
                     onEditFile={editFile}
+                    onConvertFile={conversion.start}
+                    convertingFileId={conversion.runningId}
                     folders={folders}
                     onCreateFile={createFile}
                     onCreateMermaid={createMermaidFile}
@@ -3229,20 +3454,15 @@ flowchart LR
                           }
                         : undefined
                     }
-                    /* The workspace footer is what carries Settings, and with
-                       it the workspace switcher. Without these the drawer —
-                       the only navigation below `lg` — had no route to either. */
                     workspaces={workspaces}
                     currentWorkspaceId={workspaceId}
                     onSwitchWorkspace={(id) => {
                       setDrawerOpen(false);
                       switchWorkspace(id);
                     }}
-                    onNewWorkspace={newWorkspace}
                     onImportWorkspace={importWorkspace}
                     onExportWorkspace={exportWorkspace}
                     onShareWorkspace={shareWorkspace}
-                    onDeleteWorkspace={deleteWorkspace}
                   />
                 </div>
               </div>
@@ -3265,6 +3485,10 @@ flowchart LR
                   : "min-w-0 flex-1 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:pb-0"
               }
             >
+              {!showSaved &&
+                paneLayout.panes.length === 1 &&
+                activeFile &&
+                conversionActions(activeFile)}
               {/* Saved is a page, not an overlay: it takes the content column
                   instead of stacking on top of whatever document was open. */}
               {showSaved ? (
@@ -3334,16 +3558,24 @@ flowchart LR
                                   : "min-h-0 min-w-0 flex-1 overflow-y-auto px-4"
                               }
                             >
+                              {paneFile && conversionActions(paneFile)}
                               {paneFile ? (
                                 <PaneDocument
                                   file={paneFile}
                                   files={files}
                                   saved={saved}
                                   highlights={highlights}
+                                  workspaceFolders={folders}
+                                  onImportAttachments={importAttachments}
                                   workspaceId={workspaceId}
                                   workspaceRevision={workspaceRevision}
                                   workspaceName={workspaceNameRef.current}
                                   onContentChange={handleContentChange}
+                                  onDocumentSave={handleDocumentSave}
+                                  onEditorDirtyChange={(dirty) => {
+                                    if (dirty) officeDirtyPanes.current.add(pane.id);
+                                    else officeDirtyPanes.current.delete(pane.id);
+                                  }}
                                   onRenameFile={renameFile}
                                   onAddHighlight={addHighlight}
                                   onUpdateHighlight={updateHighlight}
@@ -3353,6 +3585,7 @@ flowchart LR
                                   onRemoveSaved={removeSaved}
                                   onOpenArtifact={openEmbeddedArtifact}
                                   readingMode={readingMode}
+                                  contentWidth={contentWidth}
                                   // An edit request belongs to the column the
                                   // reader is working in, not to every column
                                   // showing that document. `revealInPane` has
@@ -3365,14 +3598,6 @@ flowchart LR
                                     pane.id === paneLayout.focusedPaneId ? autoEditFileId : null
                                   }
                                   mathPreferences={mathPreferences}
-                                  // Only the focused pane may honour an edit
-                                  // request. `autoEditFileId` is a bare file id,
-                                  // and the same document can sit in more than
-                                  // one pane — every pane holding it would match
-                                  // and drop into its editor at once.
-                                  startInEditFileId={
-                                    pane.id === paneLayout.focusedPaneId ? autoEditFileId : null
-                                  }
                                   onStartInEditConsumed={consumeStartInEdit}
                                   // Only the pane showing the document a jump
                                   // names is told about it.
@@ -3437,16 +3662,26 @@ flowchart LR
                   onShareFile={shareActiveFile}
                   onAskAi={aiEnabled ? askAiFromSelection : undefined}
                   readingMode={readingMode}
+                  contentWidth={contentWidth}
                   mathPreferences={mathPreferences}
                   workspaceId={workspaceId}
                   workspaceRevision={workspaceRevision}
                   workspaceFiles={files}
+                  workspaceFolders={folders}
+                  onImportAttachments={importAttachments}
                   workspaceName={workspaceNameRef.current}
                   onOpenArtifact={openEmbeddedArtifact}
                   onOpenPalette={() => setPaletteOpen(true)}
                 />
               ) : activeFile ? (
                 <DocumentViewer
+                  key={activeFile.id}
+                  onDocumentSave={handleDocumentSave}
+                  onEditorDirtyChange={(dirty) => {
+                    editorDirtyRef.current = dirty;
+                    if (dirty) officeDirtyPanes.current.add("main");
+                    else officeDirtyPanes.current.delete("main");
+                  }}
                   file={activeFile}
                   isBookmarked={!!findSaved(saved, { fileId: activeFile.id, kind: "file" })}
                   onToggleBookmark={toggleActiveDocumentSaved}
@@ -3521,7 +3756,6 @@ function Header({
   workspaces = [],
   currentWorkspaceId,
   onSwitchWorkspace,
-  onNewWorkspace,
   onImportWorkspace,
   onExportWorkspace,
   onShareWorkspace,
@@ -3544,7 +3778,6 @@ function Header({
   workspaces?: { id: string; name: string }[];
   currentWorkspaceId?: string | null;
   onSwitchWorkspace?: (id: string) => void;
-  onNewWorkspace?: (name?: string) => void;
   onImportWorkspace?: (file: File) => void;
   onExportWorkspace?: () => void;
   onShareWorkspace?: () => void;
@@ -3619,17 +3852,15 @@ function Header({
         )}
 
         {/* Workspace control lives in the header to the right of the search
-            icon. Desktop/landscape get the dropdown pill; mobile/portrait get
-            an icon that opens a bottom sheet with the same management options. */}
+            icon: the avatar strip on desktop/landscape, the same strip inside
+            a bottom sheet on mobile/portrait. */}
         {onSwitchWorkspace && (
           <>
             <div className="hidden items-center gap-2 lg:flex">
               <WorkspaceMenu
                 workspaces={workspaces}
                 currentId={currentWorkspaceId ?? null}
-                onNew={(name) => onNewWorkspace?.(name)}
-                onDelete={(id) => onDeleteWorkspace?.(id)}
-                onSettings={onOpenSettings}
+                onSwitch={onSwitchWorkspace}
               />
             </div>
             <div className="flex items-center gap-2 lg:hidden">
@@ -3637,9 +3868,6 @@ function Header({
                 workspaces={workspaces}
                 currentId={currentWorkspaceId ?? null}
                 onSwitch={onSwitchWorkspace}
-                onNew={(name) => onNewWorkspace?.(name)}
-                onDelete={(id) => onDeleteWorkspace?.(id)}
-                onSettings={onOpenSettings}
               />
             </div>
           </>

@@ -6,15 +6,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { groupBeats } from "../src/lib/explainer/beats.ts";
+import { groupBeats } from "../src/services/diagrams/explainer/beats.ts";
 import {
   clampInside,
   travelDuration,
   travelFrame,
   unionFrame,
   type Frame,
-} from "../src/lib/explainer/camera-path.ts";
-import { paceFor, type ExplainerStep } from "../src/lib/explainer/plan.ts";
+} from "../src/services/diagrams/explainer/camera-path.ts";
+import { paceFor, type ExplainerStep } from "../src/services/diagrams/explainer/plan.ts";
 import { isZoomWheel, wheelPixels, wheelZoomFactor } from "../src/lib/viewport.ts";
 
 const reveal = (nodeId: string): ExplainerStep => ({ type: "reveal-node", nodeId, label: nodeId });

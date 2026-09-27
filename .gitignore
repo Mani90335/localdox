@@ -24,6 +24,12 @@ graphify-out/
 .wrangler/
 .dev.vars
 
+# Playwright test output
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -42,5 +48,12 @@ graphify-out/
 !.env.example
 !.env.*.example
 
-# Rust build output (the shipped .wasm is copied into src/lib/diagram-engine)
+# Rust build output (the shipped .wasm is copied into src/services/diagrams/engine)
 engine/*/target/
+
+# This project uses Bun (bun.lock) — don't let other package managers' lockfiles creep back in
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+.claude

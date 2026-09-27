@@ -107,7 +107,7 @@ function sameFrame(a: ViewFrame | null, b: ViewFrame | null): boolean {
 
 /**
  * What the viewport frames: an `<svg>`, or anything that frames itself by a
- * viewBox the same way. The GPU diagram stage (lib/diagram-engine) implements
+ * viewBox the same way. The GPU diagram stage (services/diagrams/engine) implements
  * these three members over its canvas, so pan, zoom and the camera hand-off
  * behave identically whichever renderer is drawing.
  */
@@ -271,6 +271,17 @@ export class SvgViewport {
     this.user = null;
     this.apply();
     this.emit();
+  }
+
+  /**
+   * Jump the reader's own framing to an exact frame — a search result, say.
+   *
+   * Unlike `setBase`, this does not redefine what "fit" means: it is a manual
+   * move like `zoomBy`/`panBy`, just to a frame the caller already knows
+   * rather than a factor or a delta.
+   */
+  frameTo(frame: ViewFrame): void {
+    this.setUser(frame);
   }
 
   destroy(): void {

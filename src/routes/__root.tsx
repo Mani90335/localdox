@@ -10,7 +10,7 @@ import {
 import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { applyDeviceTier } from "@/lib/device-tier";
+import { applyDeviceTier } from "@/lib/platform/device-tier";
 
 // Mermaid loads each diagram type (flowchart, ERD, etc.) in a separate Vite
 // chunk. After a deployment, an already-open tab can still reference a chunk
