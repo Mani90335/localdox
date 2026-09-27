@@ -3,6 +3,21 @@
    (imported alongside `pdfjs-dist` in `PdfReader.tsx`); this file covers only
    what's specific to this app's reading experience. */
 
+/* Same amber family as `--diagram-match` in diagram-interaction.css — both
+   mark "the thing search just found" — but kept as its own token rather than
+   shared, since a PDF hit is drawn as a solid tint over rendered pixels while
+   the diagram mark is a stroke, and the two need independent alpha. */
+:root {
+  --pdf-search-hit: rgba(253, 224, 71, 0.45);
+  --pdf-search-hit-active: rgba(245, 158, 11, 0.75);
+  --pdf-search-hit-active-outline: rgb(217, 119, 6);
+}
+.dark {
+  --pdf-search-hit: rgba(251, 191, 36, 0.4);
+  --pdf-search-hit-active: rgba(252, 211, 77, 0.65);
+  --pdf-search-hit-active-outline: rgb(252, 211, 77);
+}
+
 @keyframes pdf-page-enter {
   from {
     opacity: 0;
@@ -20,13 +35,10 @@
 
 /* Search-match highlights sit behind the (invisible) selectable text pdf.js's
    TextLayer already renders in the exact right spot — see `PdfPageCanvas`. */
-.pdf-search-hit {
-  background-color: rgba(253, 224, 71, 0.45);
-  border-radius: 2px;
+::highlight(pdf-search-hit) {
+  background-color: var(--pdf-search-hit);
 }
 
-.pdf-search-hit-active {
-  background-color: rgba(245, 158, 11, 0.75);
-  border-radius: 2px;
-  outline: 1.5px solid rgb(217, 119, 6);
+::highlight(pdf-search-hit-active) {
+  background-color: var(--pdf-search-hit-active);
 }
