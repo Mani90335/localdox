@@ -60,3 +60,73 @@
 .docs-board-embed .excalidraw .layer-ui__wrapper__footer {
   display: none;
 }
+
+/*
+ * Reskin Excalidraw's own design tokens to the app's, so the toolbar, side
+ * panels, dialogs and buttons read as product chrome rather than an embedded
+ * third-party tool. This only touches the CSS custom properties Excalidraw's
+ * stylesheet exposes for exactly this purpose — never its class-level rules —
+ * so an Excalidraw upgrade keeps working as long as the variable names hold.
+ * The canvas's own drawing content (strokes, the hand-drawn text faces a user
+ * picks per element) is untouched; only the surrounding UI is reskinned.
+ *
+ * `.theme--dark` is repeated in the selector list, not as a separate rule with
+ * its own declarations, purely so this wins on specificity over Excalidraw's
+ * own same-named `.excalidraw.theme--dark` rule regardless of whether its
+ * stylesheet (loaded from a lazy chunk) lands before or after this one in the
+ * document — the values referenced are the app's own tokens, which already
+ * resolve differently under `.dark`, so nothing here needs to change per theme.
+ */
+.excalidraw-surface .excalidraw,
+.excalidraw-surface .excalidraw.theme--dark {
+  --ui-font: var(--font-ui);
+
+  --island-bg-color: var(--card);
+  --default-bg-color: var(--card);
+  --popup-bg-color: var(--popover);
+  --popup-secondary-bg-color: var(--muted);
+  --popup-text-color: var(--popover-foreground);
+
+  --input-bg-color: var(--background);
+  --input-border-color: var(--border);
+  --input-hover-bg-color: var(--accent);
+  --input-label-color: var(--muted-foreground);
+
+  --default-border-color: var(--border);
+  --dialog-border-color: var(--border);
+  --sidebar-bg-color: var(--card);
+  --sidebar-border-color: var(--border);
+
+  --text-primary-color: var(--foreground);
+  --color-on-surface: var(--foreground);
+  --color-surface-lowest: var(--background);
+  --color-surface-low: var(--muted);
+  --color-surface-mid: var(--accent);
+  --color-surface-high: var(--border);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: color-mix(in oklab, var(--primary) 88%, var(--foreground));
+  --color-primary-darker: color-mix(in oklab, var(--primary) 82%, var(--foreground));
+  --color-primary-darkest: color-mix(in oklab, var(--primary) 68%, var(--foreground));
+  --color-primary-light: color-mix(in oklab, var(--primary) 18%, var(--background));
+  --color-primary-light-darker: color-mix(in oklab, var(--primary) 28%, var(--background));
+  --color-selection: var(--primary);
+  --link-color: var(--primary);
+  --focus-highlight-color: var(--ring);
+
+  --color-danger: var(--destructive);
+  --color-danger-text: var(--destructive);
+
+  --keybinding-color: var(--muted-foreground);
+  --scrollbar-thumb: var(--border);
+  --scrollbar-thumb-hover: var(--muted-foreground);
+
+  --border-radius-md: calc(var(--radius) - 2px);
+  --border-radius-lg: var(--radius);
+
+  --overlay-bg-color: color-mix(in oklab, var(--background) 85%, transparent);
+  --modal-shadow: var(--shadow-3);
+  --shadow-island: var(--shadow-1);
+  --sidebar-shadow: var(--shadow-2);
+  --library-dropdown-shadow: var(--shadow-2);
+}
