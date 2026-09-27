@@ -1,0 +1,25 @@
+/*
+ * Colour tokens for search/selection marks on the Raw Mermaid stage.
+ *
+ * Separate from `diagram-colors.css`'s `data-role` palette on purpose: a role
+ * says what a node *means*, a mark says what the reader is doing with it right
+ * now, and the two need to stay visible together (a selected "failure" node
+ * must still look selected). `interaction/diagram-emphasis.ts` applies these
+ * as inline `!important` styles rather than through a stylesheet rule here —
+ * that is what lets a mark win regardless of a node's own role/neutral
+ * styling, which also claims `stroke` with `!important`.
+ */
+
+:root {
+  --diagram-select: #2563eb;
+  --diagram-select-tint: #2563eb40;
+  --diagram-match: #d97706;
+  --diagram-match-tint: #d9770640;
+}
+
+.dark {
+  --diagram-select: #60a5fa;
+  --diagram-select-tint: #60a5fa4d;
+  --diagram-match: #fbbf24;
+  --diagram-match-tint: #fbbf244d;
+}

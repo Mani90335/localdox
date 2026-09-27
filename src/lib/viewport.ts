@@ -273,6 +273,17 @@ export class SvgViewport {
     this.emit();
   }
 
+  /**
+   * Jump the reader's own framing to an exact frame — a search result, say.
+   *
+   * Unlike `setBase`, this does not redefine what "fit" means: it is a manual
+   * move like `zoomBy`/`panBy`, just to a frame the caller already knows
+   * rather than a factor or a delta.
+   */
+  frameTo(frame: ViewFrame): void {
+    this.setUser(frame);
+  }
+
   destroy(): void {
     this.destroyed = true;
     const { host } = this;

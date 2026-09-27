@@ -18,6 +18,9 @@ import { renderMermaid } from "./mermaid-render-cache";
 import { useSvgViewport } from "./use-svg-viewport";
 import { isZoomWheel, wheelZoomFactor } from "@/lib/viewport";
 import { DiagramNodeColorPopover } from "./DiagramNodeColorPopover";
+import { DiagramTopBar, SelectionActionTray } from "./DiagramInteractionBar";
+import { useDiagramInteraction } from "./interaction/use-diagram-interaction";
+import "./diagram-interaction.css";
 import {
   COLORABLE_NODES,
   applyOne,
@@ -959,7 +962,8 @@ function StaticStage({
   const [loading, setLoading] = useState(true);
   const [ratio, setRatio] = useState<number | null>(null);
   const [size, setSize] = useState<DiagramSize | null>(null);
-  const { state: view, attach, detach, zoomIn, zoomOut, reset } = useSvgViewport();
+  const { viewportRef, state: view, attach, detach, zoomIn, zoomOut, reset } = useSvgViewport();
+  const interaction = useDiagramInteraction(viewportRef);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const imageUrlRef = useRef<string | null>(null);
   /**
@@ -993,8 +997,14 @@ function StaticStage({
   /** The node whose colour is being picked, if any. */
   const [picker, setPicker] = useState<{ node: string; label: string; rect: DOMRect } | null>(null);
   // A re-render moves every node, so a picker still pointing at the old
-  // rectangle would float away from its box.
-  useEffect(() => setPicker(null), [code, dark, colored]);
+  // rectangle would float away from its box. The interaction state (search,
+  // selection, isolation) points at the same soon-to-be-replaced elements,
+  // so it is discarded here too, ahead of the next render's `onRendered`.
+  useEffect(() => {
+    setPicker(null);
+    interaction.discardGraph();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code, dark, colored]);
 
   const pickColor = useCallback(
     (color: string | null) => {
@@ -1018,22 +1028,34 @@ function StaticStage({
     [colored, diagram, picker],
   );
 
-  /** Open the picker on whichever node was clicked. */
-  const onHostClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    const target = event.target as Element | null;
-    const node = target?.closest?.(COLORABLE_NODES);
-    if (!node) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setPicker({
-      node: nodeKey(node),
-      // The node's own label, not its whole text content: the click-to-recolour
-      // tooltip is an SVG <title> living on the shape, and `textContent` would
-      // hand the reader "Click to change this block's colourOrdinary step".
-      label: (node.querySelector(".nodeLabel") ?? node).textContent?.trim() ?? "",
-      rect: node.getBoundingClientRect(),
-    });
-  }, []);
+  /** Open the picker on whichever node was clicked — or, in select mode,
+   *  toggle that node's selection instead. */
+  const onHostClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const target = event.target as Element | null;
+      if (interaction.selectMode) {
+        const nodeEl = target?.closest?.("g.node");
+        if (!nodeEl) return;
+        event.preventDefault();
+        event.stopPropagation();
+        interaction.toggleNode(nodeEl.id);
+        return;
+      }
+      const node = target?.closest?.(COLORABLE_NODES);
+      if (!node) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setPicker({
+        node: nodeKey(node),
+        // The node's own label, not its whole text content: the click-to-recolour
+        // tooltip is an SVG <title> living on the shape, and `textContent` would
+        // hand the reader "Click to change this block's colourOrdinary step".
+        label: (node.querySelector(".nodeLabel") ?? node).textContent?.trim() ?? "",
+        rect: node.getBoundingClientRect(),
+      });
+    },
+    [interaction],
+  );
 
   useEffect(() => {
     const host = hostRef.current;
@@ -1099,6 +1121,10 @@ function StaticStage({
           // cache hands back the same SVG string each time, so these have to be
           // re-applied to every fresh copy rather than living in the markup.
           applyOverrides(svgEl as SVGSVGElement, overridesRef.current);
+          // Must run before `markColorableNodes`: that appends an SVG <title>
+          // whose text would otherwise leak into a node's label and pollute
+          // search matching.
+          interaction.onRendered(svgEl as SVGSVGElement);
           markColorableNodes(svgEl as SVGSVGElement);
           svgEl.style.maxWidth = "100%";
           svgEl.style.width = "100%";
@@ -1162,6 +1188,18 @@ function StaticStage({
       className="group/stage relative h-full w-full"
       style={fill || !ratio ? undefined : { maxWidth: widthCap(ratio), marginInline: "auto" }}
     >
+      {/* Pinned rather than hover-gated, unlike the zoom tray below: search
+          and select are navigation the reader has to be able to find, and the
+          isolation banner is state feedback that must stay visible while it
+          applies. */}
+      <DiagramTopBar interaction={interaction} />
+      {interaction.selectMode && interaction.selectedIds.size > 0 && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-start gap-2 p-3">
+          <div className="pointer-events-auto">
+            <SelectionActionTray interaction={interaction} />
+          </div>
+        </div>
+      )}
       <div
         className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 p-3 ${
           fill

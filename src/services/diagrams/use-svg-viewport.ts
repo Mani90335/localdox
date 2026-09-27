@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   SvgViewport,
+  type ViewFrame,
   type ViewTarget,
   type ViewportOptions,
   type ViewportState,
@@ -42,6 +43,7 @@ export function useSvgViewport() {
   const zoomIn = useCallback(() => viewportRef.current?.zoomBy(1.3), []);
   const zoomOut = useCallback(() => viewportRef.current?.zoomBy(1 / 1.3), []);
   const reset = useCallback(() => viewportRef.current?.reset(), []);
+  const frameTo = useCallback((frame: ViewFrame) => viewportRef.current?.frameTo(frame), []);
 
-  return { viewportRef, state, attach, detach, zoomIn, zoomOut, reset };
+  return { viewportRef, state, attach, detach, zoomIn, zoomOut, reset, frameTo };
 }
