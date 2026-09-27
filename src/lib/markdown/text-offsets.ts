@@ -25,11 +25,9 @@ interface TextIndex {
   compact: { text: string; map: number[] } | null;
 }
 
-// One content container is live at a time, so a single slot beats a WeakMap
-// (a WeakMap whose value holds an observer on the key would pin the key alive).
-let cachedEl: HTMLElement | null = null;
-let cachedIndex: TextIndex | null = null;
-let observer: MutationObserver | null = null;
+// Each split pane owns its cache. Weak keys allow detached containers to be
+// collected; explicit release also disconnects observers when a viewer closes.
+const indexes = new WeakMap<HTMLElement, { index: TextIndex | null; observer: MutationObserver }>();
 
 function build(container: HTMLElement): TextIndex {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
@@ -82,27 +80,25 @@ function compactOf(idx: TextIndex): { text: string; map: number[] } {
 }
 
 function getIndex(container: HTMLElement): TextIndex {
-  if (cachedEl !== container) {
-    // New container (mode switch, section change, document swap). Re-arm the
-    // observer so async content — Mermaid, embeds — invalidates the index too.
-    observer?.disconnect();
-    observer = new MutationObserver(() => {
-      cachedIndex = null;
+  let entry = indexes.get(container);
+  if (!entry) {
+    const observer = new MutationObserver(() => {
+      entry!.index = null;
     });
+    entry = { index: null, observer };
     observer.observe(container, { childList: true, subtree: true, characterData: true });
-    cachedEl = container;
-    cachedIndex = null;
+    indexes.set(container, entry);
   }
-  if (!cachedIndex) cachedIndex = build(container);
-  return cachedIndex;
+  // React can replace nodes and ask for a range in the same task, before the
+  // observer callback runs. Never return ranges into the detached old tree.
+  if (entry.observer.takeRecords().length) entry.index = null;
+  return (entry.index ??= build(container));
 }
 
-/** Drop the cached index — call when the container is about to be torn down. */
-export function releaseTextIndex() {
-  observer?.disconnect();
-  observer = null;
-  cachedEl = null;
-  cachedIndex = null;
+/** Drop the cache and observer owned by a content container. */
+export function releaseTextIndex(container: HTMLElement) {
+  indexes.get(container)?.observer.disconnect();
+  indexes.delete(container);
 }
 
 /** Index of the last text node starting at or before `offset`. */
@@ -126,6 +122,7 @@ function nodeAt(idx: TextIndex, offset: number): { node: Text; local: number } |
 
 /** Offset of (node, nodeOffset) measured in characters from the start of container. */
 function pointToOffset(container: HTMLElement, node: Node, nodeOffset: number): number | null {
+  if (!container.contains(node)) return null;
   const idx = getIndex(container);
   const i = node.nodeType === Node.TEXT_NODE ? idx.order.get(node as Text) : undefined;
   if (i !== undefined) return idx.starts[i] + nodeOffset;
@@ -180,7 +177,14 @@ export function nodeOffsets(
 /** Rebuild a DOM Range for the given character offsets within container. */
 export function buildRange(container: HTMLElement, start: number, end: number): Range | null {
   const idx = getIndex(container);
-  if (start >= end || start < 0 || start > idx.total) return null;
+  if (
+    !Number.isFinite(start) ||
+    !Number.isFinite(end) ||
+    start >= end ||
+    start < 0 ||
+    end > idx.total
+  )
+    return null;
   const a = nodeAt(idx, start);
   const b = nodeAt(idx, Math.min(end, idx.total));
   if (!a || !b) return null;
@@ -220,9 +224,57 @@ export function firstTextRange(container: HTMLElement, text: string): Range | nu
   const idx = getIndex(container);
   // Cached with the index — legacy highlights would otherwise rebuild the
   // container's full text string once each, on every repaint.
-  const at = fullText(idx).toLowerCase().indexOf(needle.toLowerCase());
-  if (at === -1) return null;
-  return buildRange(container, at, at + needle.length);
+  const match = literalPattern(needle).exec(fullText(idx));
+  return match ? buildRange(container, match.index, match.index + match[0].length) : null;
+}
+
+/**
+ * Like `firstTextRange`, but narrowed to one `query` occurrence within a
+ * specific `line` of context.
+ *
+ * A search jump used to flash the whole matched line, because the line was
+ * the only thing guaranteed to appear once (the query word alone often
+ * recurs all over the document). Anchoring on the line first still picks the
+ * right paragraph; only the word itself is returned, so the reader lands on
+ * that word rather than the whole passage lighting up. `occurrence` picks
+ * which repeat of the word within that line, for the rare line containing it
+ * more than once.
+ */
+export function firstQueryRangeInLine(
+  container: HTMLElement,
+  line: string,
+  query: string,
+  occurrence = 0,
+): Range | null {
+  const lineNeedle = line.trim();
+  const q = query.trim();
+  if (!lineNeedle) return q ? firstTextRange(container, q) : null;
+  const idx = getIndex(container);
+  const lineMatch = literalPattern(lineNeedle).exec(fullText(idx));
+  if (!lineMatch) return q ? firstTextRange(container, q) : null;
+  if (!q) return buildRange(container, lineMatch.index, lineMatch.index + lineMatch[0].length);
+
+  const within = lineMatch[0];
+  const pattern = literalPattern(q);
+  let match: RegExpExecArray | null;
+  let first: RegExpExecArray | null = null;
+  let count = 0;
+  while ((match = pattern.exec(within))) {
+    first ??= match;
+    if (count === occurrence) {
+      const start = lineMatch.index + match.index;
+      return buildRange(container, start, start + match[0].length);
+    }
+    count++;
+    pattern.lastIndex = match.index + 1;
+  }
+  // The requested occurrence wasn't there (rendering collapsed something) —
+  // the line's first occurrence still beats flashing the whole paragraph.
+  if (first) {
+    const start = lineMatch.index + first.index;
+    return buildRange(container, start, start + first[0].length);
+  }
+  return buildRange(container, lineMatch.index, lineMatch.index + lineMatch[0].length);
 }
 
 // ---- quote anchoring ----------------------------------------------------
@@ -263,14 +315,38 @@ export function textBetween(container: HTMLElement, start: number, end: number):
 export const sameQuote = (a: string, b: string) =>
   collapse(a).toLowerCase() === collapse(b).toLowerCase();
 
-function occurrences(hay: string, needle: string, cap = 400): number[] {
-  const out: number[] = [];
-  let i = hay.indexOf(needle);
-  while (i !== -1 && out.length < cap) {
-    out.push(i);
-    i = hay.indexOf(needle, i + 1);
+/** Match directly in the original UTF-16 string: lowercasing can change its
+ * length (for example İ), corrupting every offset after that character. */
+function literalPattern(needle: string): RegExp {
+  return new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "giu");
+}
+
+function occurrences(hay: string, needle: string): TextAnchor[] {
+  const pattern = literalPattern(needle);
+  const out: TextAnchor[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(hay))) {
+    out.push({ start: match.index, end: match.index + match[0].length });
+    // Anchors may overlap; step by a code point so Unicode regexes never
+    // backtrack to the beginning of a surrogate pair.
+    pattern.lastIndex = match.index + (hay.codePointAt(match.index)! > 0xffff ? 2 : 1);
   }
   return out;
+}
+
+/** Search across inline elements without adding wrappers to React's DOM. */
+export function queryRanges(container: HTMLElement, query: string): Range[] {
+  const needle = query.trim();
+  if (!needle) return [];
+  const pattern = literalPattern(needle);
+  const text = fullText(getIndex(container));
+  const ranges: Range[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    const range = buildRange(container, match.index, match.index + match[0].length);
+    if (range) ranges.push(range);
+  }
+  return ranges;
 }
 
 /**
@@ -295,22 +371,18 @@ export function findAnchor(
   const idx = getIndex(container);
   const raw = fullText(idx);
   if (!raw) return null;
-  const lower = raw.toLowerCase();
 
   const candidates = (n: string): TextAnchor[] => {
-    const direct = occurrences(lower, n.toLowerCase()).map((s) => ({
-      start: s,
-      end: s + n.length,
-    }));
+    const direct = occurrences(raw, n);
     if (direct.length) return direct;
     // Re-rendering can change whitespace (a line rewrapped, a list reflowed)
     // without changing a word; match on the collapsed text before giving up.
     const c = compactOf(idx);
     const cn = collapse(n);
     if (!cn) return direct;
-    return occurrences(c.text.toLowerCase(), cn.toLowerCase()).map((s) => ({
-      start: c.map[s],
-      end: c.map[s + cn.length - 1] + 1,
+    return occurrences(c.text, cn).map((hit) => ({
+      start: c.map[hit.start],
+      end: c.map[hit.end - 1] + 1,
     }));
   };
 
@@ -334,11 +406,11 @@ export function findAnchor(
   for (const hit of hits) {
     let score = 0;
     for (let k = 1; k <= pre.length && hit.start - k >= 0; k++) {
-      if (lower[hit.start - k] !== pre[pre.length - k]) break;
+      if (raw[hit.start - k].toLowerCase() !== pre[pre.length - k]) break;
       score++;
     }
-    for (let k = 0; k < suf.length && hit.end + k < lower.length; k++) {
-      if (lower[hit.end + k] !== suf[k]) break;
+    for (let k = 0; k < suf.length && hit.end + k < raw.length; k++) {
+      if (raw[hit.end + k].toLowerCase() !== suf[k]) break;
       score++;
     }
     const dist = hint == null ? 0 : Math.abs(hit.start - hint);
