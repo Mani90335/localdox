@@ -10,7 +10,12 @@
 // touch the database directly.
 
 import type { MathRendererType } from "@/services/math";
-import { parseDerivation } from "../../services/doc-conversion/types.ts";
+import {
+  ImportValidationError,
+  parseImportJson,
+  validateWorkspaceImport,
+} from "./import-schema.ts";
+import { parseDerivation, remapDerivation } from "../../services/doc-conversion/types.ts";
 
 export interface PersistedFile {
   derivedFrom?: import("@/services/doc-conversion").Derivation;
@@ -104,6 +109,8 @@ import type { Highlight } from "../markdown/dom-highlighter";
 import type { SavedItem } from "./saved-items";
 
 export interface WorkspaceRecord {
+  /** Storage revision this snapshot was read at; never part of a backup. */
+  revision?: string;
   id: string;
   name: string;
   createdAt: number;
@@ -678,73 +685,87 @@ export function savePrefs(patch: Partial<Prefs>): void {
 
 // ---- import / export (JSON) ----
 
+export { ImportValidationError };
+
+/**
+ * Backup format version. v1 omitted `saved` and file `deletedAt` on import, so
+ * stars, notes and the Bin did not survive a restore; v2 carries every field of
+ * `WorkspaceRecord` except the storage revision. Both versions (and the older
+ * unwrapped record) remain readable.
+ */
+export const BACKUP_VERSION = 2;
+
+/** A complete, faithful backup — Bin, stars, notes and layout included. */
 export function serializeWorkspace(w: WorkspaceRecord): string {
-  return JSON.stringify({ format: "localdox-workspace", version: 1, workspace: w }, null, 2);
+  const { revision: _revision, ...workspace } = w;
+  return JSON.stringify(
+    { format: "localdox-workspace", version: BACKUP_VERSION, workspace },
+    null,
+    2,
+  );
 }
 
-/** Parse an exported workspace JSON into a fresh record (new id, no clobber). */
+/**
+ * Validate a backup completely before anything is written. Keeps the source
+ * workspace id so the caller can detect a second import of the same backup;
+ * the caller must give it a fresh id before storing it alongside the original.
+ */
 export function parseWorkspaceImport(json: string): WorkspaceRecord {
-  const data = JSON.parse(json);
-  const w = data?.workspace ?? data;
-  if (!w || !Array.isArray(w.files)) {
-    throw new Error("Not a valid workspace file");
+  const data = parseImportJson(json) as { format?: unknown; version?: unknown; workspace?: unknown };
+  if (data && typeof data === "object" && "format" in data) {
+    if (data.format !== "localdox-workspace")
+      throw new ImportValidationError("This file is not a Localdox workspace backup.");
+    if (typeof data.version !== "number" || data.version < 1 || data.version > BACKUP_VERSION)
+      throw new ImportValidationError(
+        "This backup was made by a newer version of Localdox. Update the app to open it.",
+      );
   }
+  const w = validateWorkspaceImport(
+    data && typeof data === "object" && "workspace" in data ? data.workspace : data,
+  );
   const now = Date.now();
+  const fileIds = new Map(w.files.map((file) => [file.id, file.id]));
   return {
-    id: crypto.randomUUID(),
-    name: typeof w.name === "string" && w.name.trim() ? w.name : "Imported workspace",
-    createdAt: typeof w.createdAt === "number" ? w.createdAt : now,
+    id: w.id ?? crypto.randomUUID(),
+    name: w.name,
+    createdAt: w.createdAt ?? now,
     updatedAt: now,
-    files: w.files
-      .filter((f: any) => f && typeof f.content === "string")
-      .map((f: any) => ({
-        id: typeof f.id === "string" ? f.id : crypto.randomUUID(),
-        name: typeof f.name === "string" ? f.name : "untitled.md",
-        content: f.content,
-        data: typeof f.data === "string" ? f.data : undefined,
-        mimeType: typeof f.mimeType === "string" ? f.mimeType : undefined,
-        size: typeof f.size === "number" ? f.size : undefined,
-        addedAt: typeof f.addedAt === "number" ? f.addedAt : undefined,
-        kind: typeof f.kind === "string" ? f.kind : undefined,
-        derivedFrom: parseDerivation(f.derivedFrom),
-        folderId: typeof f.folderId === "string" ? f.folderId : null,
-      })),
-    folders: Array.isArray(w.folders)
-      ? (w.folders as Partial<FolderRecord & { parentId?: unknown }>[])
-          .filter((f) => f && typeof f.id === "string" && typeof f.name === "string")
-          .map((f) => ({
-            purpose: f.purpose === "embed-media" ? "embed-media" as const : undefined,
-            id: f.id as string,
-            name: f.name as string,
-            createdAt: typeof f.createdAt === "number" ? f.createdAt : now,
-            // Nesting has to survive a share link or a re-import. Dropping this
-            // would silently flatten every subfolder into the top level.
-            parentId: typeof f.parentId === "string" ? f.parentId : null,
-          }))
-      : [],
-    bookmarks: Array.isArray(w.bookmarks)
-      ? w.bookmarks.filter((b: any) => typeof b === "string")
-      : [],
-    highlights: Array.isArray(w.highlights) ? w.highlights : [],
+    files: w.files.map((file) => {
+      const record: PersistedFile = {
+        id: file.id,
+        name: file.name,
+        content: file.content,
+        folderId: file.folderId ?? null,
+      };
+      if (file.data !== undefined) record.data = file.data;
+      if (file.mimeType !== undefined) record.mimeType = file.mimeType;
+      if (file.size !== undefined) record.size = file.size;
+      if (file.addedAt !== undefined) record.addedAt = file.addedAt;
+      if (file.kind !== undefined) record.kind = file.kind;
+      if (file.deletedAt != null) record.deletedAt = file.deletedAt;
+      const derivedFrom = remapDerivation(parseDerivation(file.derivedFrom), fileIds);
+      if (derivedFrom) record.derivedFrom = derivedFrom;
+      return record;
+    }),
+    folders: w.folders.map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      createdAt: folder.createdAt,
+      parentId: folder.parentId ?? null,
+      ...(folder.purpose ? { purpose: folder.purpose } : {}),
+    })),
+    bookmarks: w.bookmarks,
+    ...(w.saved ? { saved: w.saved } : {}),
+    highlights: w.highlights,
     ui: {
-      activeFileId: typeof w.ui?.activeFileId === "string" ? w.ui.activeFileId : null,
-      expanded: typeof w.ui?.expanded === "object" ? w.ui.expanded : {},
-      sidebarCollapsed: typeof w.ui?.sidebarCollapsed === "boolean" ? w.ui.sidebarCollapsed : false,
-      scrollTop: typeof w.ui?.scrollTop === "number" ? w.ui.scrollTop : 0,
-      fileOrder: Array.isArray(w.ui?.fileOrder) ? w.ui.fileOrder : [],
-      recentFileIds: Array.isArray(w.ui?.recentFileIds) ? w.ui.recentFileIds : [],
-      // The split layout has to survive a reload or a share link. Dropping it
-      // here would silently collapse every workspace back to one pane.
-      panes: Array.isArray(w.ui?.panes)
-        ? (w.ui.panes as Partial<PersistedPane>[])
-            .filter((pane) => pane && typeof pane.id === "string" && Array.isArray(pane.tabs))
-            .map((pane) => ({
-              id: pane.id as string,
-              tabs: (pane.tabs as unknown[]).filter((id): id is string => typeof id === "string"),
-              activeTabId: typeof pane.activeTabId === "string" ? pane.activeTabId : null,
-            }))
-        : [],
-      focusedPaneId: typeof w.ui?.focusedPaneId === "string" ? w.ui.focusedPaneId : null,
+      activeFileId: w.ui.activeFileId,
+      expanded: w.ui.expanded,
+      sidebarCollapsed: w.ui.sidebarCollapsed,
+      scrollTop: w.ui.scrollTop,
+      fileOrder: w.ui.fileOrder ?? [],
+      recentFileIds: w.ui.recentFileIds ?? [],
+      panes: w.ui.panes ?? [],
+      focusedPaneId: w.ui.focusedPaneId ?? null,
     },
   };
 }

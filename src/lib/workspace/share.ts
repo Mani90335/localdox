@@ -10,6 +10,7 @@
 
 import type { PersistedFile } from "./persistence";
 import { parseDerivation, remapDerivation } from "../../services/doc-conversion/types.ts";
+import { MAX_IMPORT_BYTES, parseImportJson, validateImportedFiles } from "./import-schema.ts";
 
 const BYTEBIN_URL = "https://bytebin.lucko.me";
 
@@ -49,21 +50,22 @@ export function serializeSharedFiles(files: PersistedFile[], sourceName: string)
 
 /** Parse a `#share-files=` payload. Throws when it isn't one. */
 export function parseSharedFiles(json: string): SharedFilesPayload {
-  const data = JSON.parse(json);
-  if (!data || !Array.isArray(data.files)) throw new Error("Not a shared file link");
-  const files: PersistedFile[] = data.files
-    .filter((f: any) => f && typeof f.content === "string")
-    .map((f: any) => ({
-      id: typeof f.id === "string" ? f.id : crypto.randomUUID(),
-      name: typeof f.name === "string" && f.name.trim() ? f.name : "untitled.md",
-      content: f.content,
-      data: typeof f.data === "string" ? f.data : undefined,
-      mimeType: typeof f.mimeType === "string" ? f.mimeType : undefined,
-      size: typeof f.size === "number" ? f.size : undefined,
-      addedAt: typeof f.addedAt === "number" ? f.addedAt : undefined,
-      kind: typeof f.kind === "string" ? f.kind : undefined,
-      derivedFrom: parseDerivation(f.derivedFrom),
-    }));
+  const data = parseImportJson(json) as Partial<SharedFilesPayload> | null;
+  if (!data || typeof data !== "object" || !Array.isArray(data.files))
+    throw new Error("Not a shared file link");
+  const validated = validateImportedFiles(data.files);
+  const ids = new Map(validated.map((file) => [file.id, file.id]));
+  const files: PersistedFile[] = validated.map((f) => ({
+    id: f.id,
+    name: f.name,
+    content: f.content,
+    data: f.data,
+    mimeType: f.mimeType,
+    size: f.size,
+    addedAt: f.addedAt,
+    kind: f.kind,
+    derivedFrom: remapDerivation(parseDerivation(f.derivedFrom), ids),
+  }));
   if (files.length === 0) throw new Error("Shared link contains no readable files");
   return {
     format: "localdox-files",
@@ -98,7 +100,7 @@ export async function fetchShare(keyOrData: string): Promise<string> {
   if (keyOrData.length < 50) {
     const res = await fetch(`${BYTEBIN_URL}/${keyOrData}`);
     if (!res.ok) throw new Error("Failed to fetch from bytebin");
-    return res.text();
+    return res.body ? readBounded(res.body) : res.text();
   }
   return decodeAndDecompress(keyOrData);
 }
@@ -175,13 +177,34 @@ export async function decodeAndDecompress(encodedStr: string): Promise<string> {
 
   const ds = new DecompressionStream("deflate-raw");
   const writer = ds.writable.getWriter();
-  writer.write(compressedData as any);
-  writer.close();
+  writer.write(compressedData as any).catch(() => {});
+  writer.close().catch(() => {});
 
-  const response = new Response(ds.readable);
-  const decompressedBuffer = await response.arrayBuffer();
+  return readBounded(ds.readable);
+}
 
+/**
+ * Read a byte stream as UTF-8, stopping at the import budget. A small
+ * compressed link can expand enormously; the budget has to apply while
+ * decompressing, not after the whole result is already in memory.
+ */
+export async function readBounded(
+  stream: ReadableStream<Uint8Array>,
+  limit = MAX_IMPORT_BYTES,
+): Promise<string> {
+  const reader = stream.getReader();
   const decoder = new TextDecoder();
-
-  return decoder.decode(decompressedBuffer);
+  let total = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      throw new Error(`This share is larger than the ${limit / 1024 / 1024} MiB import limit.`);
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
 }

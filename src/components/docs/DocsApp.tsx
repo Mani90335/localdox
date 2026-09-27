@@ -116,6 +116,7 @@ import {
   parseWorkspaceImport,
   saveScrollTop,
   loadScrollTop,
+  ImportValidationError,
   type PersistedFile,
   type FolderRecord,
   type WorkspaceRecord,
@@ -2006,9 +2007,15 @@ flowchart LR
         await refreshWorkspaceList();
         hydrateWorkspace(ws);
         savePrefs({ lastWorkspaceId: ws.id });
-      } catch {
+      } catch (error) {
         setSaveStatus("idle");
-        alert("That file isn't a valid workspace export.");
+        // Validation runs before anything is written, so nothing was imported.
+        toast.error(
+          error instanceof ImportValidationError
+            ? `Nothing was imported. ${error.message}`
+            : "Nothing was imported. That file isn't a valid workspace backup.",
+          { id: "workspace-import-error" },
+        );
       }
     },
     [persistNow, refreshWorkspaceList, hydrateWorkspace, storedWorkspaces, switchWorkspace],
