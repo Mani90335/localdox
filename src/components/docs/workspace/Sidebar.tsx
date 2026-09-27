@@ -1,3 +1,4 @@
+import { embedMediaFolderIds } from "@/lib/workspace/embed-media";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { isEditableTarget, hasModKey, modKeyLabel } from "@/lib/platform/keyboard";
@@ -54,8 +55,9 @@ import type { MdFile, DocumentKind } from "@/lib/markdown/markdown-utils";
 import { readingMinutes } from "@/lib/markdown/markdown-utils";
 import { fileLabel, getDocumentKind, isEditableKind } from "@/lib/markdown/document-utils";
 import { availableFormats, FORMAT_LABEL, type ExportFormat } from "@/services/markdown-export";
-import { WorkspaceMenu } from "./WorkspaceMenu";
+import { WorkspaceStrip, initials } from "./WorkspaceStrip";
 import { useNavHistory } from "@/hooks/use-nav-history";
+import { canConvertToMarkdown, latestMarkdownCopies } from "@/services/doc-conversion";
 
 /** A glyph per export format, so the flyout scans by shape like the file list. */
 const FORMAT_ICON: Record<ExportFormat, LucideIcon> = {
@@ -196,6 +198,8 @@ export interface SidebarFolder {
   name: string;
   /** Folder this one sits inside; null/undefined = top level. */
   parentId?: string | null;
+  /** Managed attachment folder, independent of its display name. */
+  purpose?: "embed-media";
 }
 
 /**
@@ -212,6 +216,7 @@ const FILE_DND = "application/x-localdox-file";
 const FOLDER_DND = "application/x-localdox-folder";
 
 interface Props {
+  showEmbedMedia?: boolean;
   files: MdFile[];
   activeFileId: string | null;
   activeHeadingId: string | null;
@@ -223,6 +228,8 @@ interface Props {
   onRenameFile: (id: string, newName: string) => void;
   /** Open a document in the editor. Only offered for editable text documents. */
   onEditFile?: (id: string) => void;
+  onConvertFile?: (id: string) => void;
+  convertingFileId?: string | null;
   /** Star / unstar a whole document from its row menu. */
   /**
    * Folders the workspace has, flat. Files point at one through `folderId`;
@@ -267,7 +274,6 @@ interface Props {
   onAddToSplit?: (fileId: string) => void;
   /** Open the Ask AI panel. When omitted, the Ask AI button is hidden. */
   onAskAi?: () => void;
-  onNewWorkspace?: (name?: string) => void;
   onImportWorkspace?: (file: File) => void;
   onExportWorkspace?: () => void;
   onShareWorkspace?: () => void;
@@ -276,8 +282,9 @@ interface Props {
   workspaces?: { id: string; name: string }[];
   currentWorkspaceId?: string | null;
   onSwitchWorkspace?: (id: string) => void;
-  onDeleteWorkspace?: (id: string) => void;
   onDownloadFile?: (id: string, format: ExportFormat) => void;
+  onDownloadFiles?: (ids: string[], format: ExportFormat) => void;
+  onMoveToWorkspace?: (selection: { fileIds: string[]; folderIds: string[] }) => void;
   /** Copy a link to one file. The recipient chooses where it lands. */
   onShareFile?: (id: string) => void;
   /** Copy a link to the multi-select batch. */
@@ -293,6 +300,7 @@ interface Props {
 }
 
 function SidebarImpl({
+  showEmbedMedia = true,
   files,
   activeFileId,
   activeHeadingId,
@@ -303,7 +311,9 @@ function SidebarImpl({
   onRemoveFile,
   onRenameFile,
   onEditFile,
-  folders = [],
+  onConvertFile,
+  convertingFileId,
+  folders: allFolders = [],
   onCreateFile,
   onCreateMermaid,
   onCreateBoard,
@@ -312,7 +322,7 @@ function SidebarImpl({
   onDeleteFolder,
   onMoveFileToFolder,
   onMoveFolderToFolder,
-  saved,
+  saved: allSaved,
   currentWorkspaceName,
   canDeleteWorkspace,
   onRenameCurrentWorkspace,
@@ -330,21 +340,34 @@ function SidebarImpl({
   splitFileIds = [],
   onAddToSplit,
   onAskAi,
-  onNewWorkspace,
   onImportWorkspace,
   onExportWorkspace,
   onShareWorkspace,
   workspaces = [],
   currentWorkspaceId,
   onSwitchWorkspace,
-  onDeleteWorkspace,
   onDownloadFile,
+  onDownloadFiles,
   onShareFile,
   onShareFiles,
   docked = false,
   onOpenPalette,
   onToggleSidebar,
 }: Props) {
+  const hiddenFolders = useMemo(() => showEmbedMedia ? new Set<string>() : embedMediaFolderIds(allFolders), [showEmbedMedia, allFolders]);
+  const folders = useMemo(() => allFolders.filter((folder) => !hiddenFolders.has(folder.id)), [allFolders, hiddenFolders]);
+  const hiddenFiles = useMemo(() => new Set(files.filter((file) => file.folderId && hiddenFolders.has(file.folderId)).map((file) => file.id)), [files, hiddenFolders]);
+  const saved = useMemo(() => allSaved.filter((entry) => !hiddenFiles.has(entry.fileId)), [allSaved, hiddenFiles]);
+
+  const currentWorkspace = useMemo(
+    () => workspaces.find((w) => w.id === currentWorkspaceId) ?? null,
+    [workspaces, currentWorkspaceId],
+  );
+  const otherWorkspaces = useMemo(
+    () => workspaces.filter((w) => w.id !== currentWorkspaceId),
+    [workspaces, currentWorkspaceId],
+  );
+
   // Back/forward over the workspace's own navigation trail, rendered next to
   // the sidebar toggle.
   const navHistory = useNavHistory();
@@ -365,6 +388,7 @@ function SidebarImpl({
   // Reorder mode: toggled from any file's three-dots menu. While on, rows in the
   // flat list become draggable and dropping calls onReorderFile. dragIndex is the
   // row being dragged; overIndex is the row currently hovered as a drop target.
+  const markdownCopies = useMemo(() => latestMarkdownCopies(files), [files]);
   const [reordering, setReordering] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
@@ -372,6 +396,12 @@ function SidebarImpl({
   // Multi-select mode
   const [selecting, setSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setSelectedIds((selected) => {
+      const visible = new Set([...selected].filter((id) => !hiddenFiles.has(id)));
+      return visible.size === selected.size ? selected : visible;
+    });
+  }, [hiddenFiles]);
 
   const toggleSelection = (id: string) => {
     const next = new Set(selectedIds);
@@ -434,11 +464,11 @@ function SidebarImpl({
     };
   }, [creatingOpen, viewMenuOpen]);
 
-  const total = files.length;
+  const total = files.length - hiddenFiles.size;
 
   // Binned documents are out of the list entirely — they wait in Settings ▸
   // Storage ▸ Bin until they are restored or purged.
-  const activeFiles = files.filter((f) => !f.isArchived && !f.deletedAt);
+  const activeFiles = files.filter((f) => !f.isArchived && !f.deletedAt && !hiddenFiles.has(f.id));
 
   // Multi-select shortcuts. Read through a ref so the listener isn't torn down
   // and rebuilt on every render just because `activeFiles` is a fresh array.
@@ -816,9 +846,7 @@ function SidebarImpl({
             className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-2 pl-2 pr-1.5 text-left coarse:min-h-11"
             aria-current={current ? "page" : undefined}
           >
-            {!selecting && (
-              <KindIcon className={`h-4 w-4 shrink-0 ${meta.tone}`} aria-hidden />
-            )}
+            {!selecting && <KindIcon className={`h-4 w-4 shrink-0 ${meta.tone}`} aria-hidden />}
             <span
               className={`min-w-0 flex-1 truncate text-sm ${
                 current ? "font-semibold text-foreground" : "font-medium text-foreground/80"
@@ -844,6 +872,17 @@ function SidebarImpl({
               // spreadsheet has no edit mode to enter, so the item is absent
               // rather than present and inert.
               onEdit={onEditFile && isEditableKind(kind) ? () => onEditFile(file.id) : undefined}
+              onConvert={
+                onConvertFile && canConvertToMarkdown(file)
+                  ? () => onConvertFile(file.id)
+                  : undefined
+              }
+              conversionDisabled={!!convertingFileId}
+              hasMarkdownCopy={markdownCopies.has(file.id)}
+              onOpenMarkdown={(() => {
+                const copy = markdownCopies.get(file.id);
+                return copy ? () => onSelect(copy.id) : undefined;
+              })()}
               onRename={() => {
                 const newName = window.prompt("Rename file to:", file.name);
                 if (newName && newName !== file.name) {
@@ -858,9 +897,7 @@ function SidebarImpl({
               }
               onAddToSplit={onAddToSplit ? () => onAddToSplit(file.id) : undefined}
               alreadyInSplit={splitFileIds.includes(file.id)}
-              onDownload={
-                onDownloadFile ? (format) => onDownloadFile(file.id, format) : undefined
-              }
+              onDownload={onDownloadFile ? (format) => onDownloadFile(file.id, format) : undefined}
               formats={availableFormats(file)}
               onShare={onShareFile ? () => onShareFile(file.id) : undefined}
               reordering={reordering}
@@ -894,7 +931,8 @@ function SidebarImpl({
                       // of PDFs would mean one print dialog per file, each
                       // waiting on the last, and the reader picking a format
                       // once for documents that may not all support it.
-                      selectedIds.forEach((id) => onDownloadFile(id, "original"));
+                      if (onDownloadFiles) onDownloadFiles([...selectedIds], "original");
+                      else selectedIds.forEach((id) => onDownloadFile(id, "original"));
                       setSelecting(false);
                       setSelectedIds(new Set());
                     }
@@ -1120,16 +1158,57 @@ function SidebarImpl({
         )}
       </nav>
 
-      <div className="flex flex-col gap-1 border-t border-sidebar-border p-2">
-        {onSwitchWorkspace && (
-          <WorkspaceMenu
-            variant="sidebar"
-            workspaces={workspaces}
-            currentId={currentWorkspaceId ?? null}
-            onNew={(name) => onNewWorkspace?.(name)}
-            onDelete={(id) => onDeleteWorkspace?.(id)}
-            onSettings={onOpenSettings}
-          />
+      <div className="flex items-center gap-2 border-t border-sidebar-border p-2">
+        {/* Settings apply to whichever workspace is open, so its trigger sits
+            fused to that workspace's own avatar rather than floating on its
+            own — the pairing reads as "settings for here". Everywhere else to
+            switch to lives in the strip beside it. */}
+        {currentWorkspace && (
+          // Same origin-bottom hover magnify as the strip's own avatars, so the
+          // current workspace doesn't sit dead while everything beside it
+          // responds to the pointer.
+          <div className="flex shrink-0 origin-bottom flex-col items-center gap-1.5 transition-transform duration-150 ease-out hover:scale-105">
+            <div className="flex items-center gap-0.5 rounded-full border border-primary/35 bg-sidebar-accent p-1">
+              <span
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-background text-xs font-semibold uppercase text-sidebar-foreground"
+                title={currentWorkspace.name}
+              >
+                {initials(currentWorkspace.name)}
+              </span>
+              <button
+                onClick={() => onOpenSettings()}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-sidebar-foreground"
+                aria-label={`Settings for ${currentWorkspace.name}`}
+                title="Settings"
+              >
+                <Settings className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <span className="max-w-[76px] truncate text-[11px] font-medium text-sidebar-foreground">
+              {currentWorkspace.name}
+            </span>
+          </div>
+        )}
+        {onSwitchWorkspace && otherWorkspaces.length > 0 && (
+          <>
+            <div className="h-8 w-[2px] shrink-0 rounded-full bg-border" />
+            <WorkspaceStrip
+              workspaces={otherWorkspaces}
+              currentId={null}
+              onSelect={onSwitchWorkspace}
+              className="min-w-0 flex-1"
+            />
+          </>
+        )}
+        {!currentWorkspace && (
+          <button
+            onClick={() => onOpenSettings()}
+            className="shrink-0 rounded-md p-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            aria-label="Settings"
+            title="Settings"
+          >
+            <Settings className="h-4 w-4" />
+          </button>
         )}
       </div>
     </aside>
@@ -1267,6 +1346,10 @@ function GroupActionMenu({
 
 function FileMenu({
   onEdit,
+  onConvert,
+  conversionDisabled,
+  hasMarkdownCopy,
+  onOpenMarkdown,
   onRename,
   onMoveToBin,
   folders = [],
@@ -1287,6 +1370,10 @@ function FileMenu({
   alreadyInSplit?: boolean;
   /** Open this document in the editor. Absent for non-editable file types. */
   onEdit?: () => void;
+  onConvert?: () => void;
+  conversionDisabled?: boolean;
+  hasMarkdownCopy?: boolean;
+  onOpenMarkdown?: () => void;
   onRename: () => void;
   /**
    * Send the document to the Bin. Recoverable for 30 days, which is why this
@@ -1367,6 +1454,29 @@ function FileMenu({
       {open && (
         <MenuPanel>
           {/* Working on the document itself. */}
+          {onOpenMarkdown && (
+            <MenuItem
+              icon={FileText}
+              label="Open Markdown copy"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                onOpenMarkdown();
+              }}
+            />
+          )}
+          {onConvert && (
+            <MenuItem
+              icon={FileText}
+              label={hasMarkdownCopy ? "Convert again" : "Convert to Markdown"}
+              disabled={conversionDisabled}
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                onConvert();
+              }}
+            />
+          )}
           {onEdit && (
             <MenuItem
               icon={SquarePen}
