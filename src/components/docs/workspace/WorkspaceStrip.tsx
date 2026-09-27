@@ -46,7 +46,7 @@ export function WorkspaceStrip({ workspaces, currentId, onSelect, className = ""
               {initials(ws.name)}
             </span>
             <span
-              className={`max-w-[56px] truncate text-[11px] ${
+              className={`max-w-14 truncate text-2xs ${
                 isCurrent ? "font-medium text-foreground" : "text-muted-foreground"
               }`}
             >

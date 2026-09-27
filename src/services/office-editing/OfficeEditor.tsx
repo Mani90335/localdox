@@ -343,7 +343,7 @@ function SheetEditor({ file, register, changed, onError }: EditorProps) {
                     <td key={column} className="border border-border p-0">
                       <input
                         aria-label={`Cell ${XLSX.utils.encode_cell({ r: row, c: column })}`}
-                        className="h-[35px] w-full min-w-0 bg-transparent px-2 outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+                        className="h-8.75 w-full min-w-0 bg-transparent px-2 outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
                         value={valueAt(row, column)}
                         onChange={(event) => change(row, column, event.target.value)}
                         onKeyDown={(event) => {

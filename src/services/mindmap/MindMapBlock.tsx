@@ -45,7 +45,7 @@ function RawFence({ code, reason }: { code: string; reason: string }) {
       <div className="border-b border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
         {reason}
       </div>
-      <pre className="overflow-auto bg-[#101722] p-4 text-sm leading-6 text-slate-200">
+      <pre className="overflow-auto bg-media-backdrop p-4 text-sm leading-6 text-media-backdrop-foreground">
         <code>{code}</code>
       </pre>
     </div>

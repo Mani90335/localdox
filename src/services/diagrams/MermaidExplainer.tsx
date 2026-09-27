@@ -338,7 +338,7 @@ export function MermaidExplainer({
                 looking at, and this is cheaper than a legend. */}
             <div
               aria-live="polite"
-              className="pointer-events-auto mr-auto flex min-w-0 max-w-[55%] items-center gap-2 overflow-hidden rounded-lg border border-border/70 bg-background/85 px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm backdrop-blur-md"
+              className="pointer-events-auto mr-auto flex min-w-0 max-w-[55%] items-center gap-2 overflow-hidden rounded-lg border border-border/70 bg-background/85 px-2.5 py-1 text-2xs text-muted-foreground shadow-sm backdrop-blur-md"
             >
               {state.beatCount > 1 && (
                 <span className="shrink-0 tabular-nums text-muted-foreground/70">
@@ -380,7 +380,7 @@ export function MermaidExplainer({
                 }}
                 aria-label={`Playback speed ${speed}×`}
                 title={`Playback speed ${speed}×`}
-                className="inline-flex h-8 min-w-10 items-center justify-center px-2 text-[11px] font-medium tabular-nums text-muted-foreground transition-colors duration-100 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                className="inline-flex h-8 min-w-10 items-center justify-center px-2 text-2xs font-medium tabular-nums text-muted-foreground transition-colors duration-100 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               >
                 {speed}×
               </button>
@@ -486,7 +486,7 @@ function Scrubber({
           <div className="h-full rounded-full bg-primary" style={{ width: `${share * 100}%` }} />
         </div>
       </div>
-      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+      <span className="shrink-0 text-3xs tabular-nums text-muted-foreground">
         {clock(time)} / {clock(duration)}
       </span>
     </div>

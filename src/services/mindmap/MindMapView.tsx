@@ -336,7 +336,7 @@ export function MindMapView({
       {/* A node count told the reader nothing they act on. A trimmed map is
           different: it warns that what is drawn is not the whole document. */}
       {tree.truncated && (
-        <div className="absolute left-4 top-4 rounded-md border border-border/80 bg-background/90 px-2.5 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground shadow-sm backdrop-blur">
+        <div className="absolute left-4 top-4 rounded-md border border-border/80 bg-background/90 px-2.5 py-1.5 text-2xs font-medium tracking-wide text-muted-foreground shadow-sm backdrop-blur">
           Trimmed for display
         </div>
       )}
@@ -392,7 +392,7 @@ export function Inspector({ node, onClose }: { node: MindMapNode; onClose: () =>
     >
       <div className="flex items-start justify-between gap-2 px-4 pb-3 pt-4">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+          <p className="text-3xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             Selected concept
           </p>
           <h3 className="mt-1 text-base font-semibold text-foreground">{node.label}</h3>
@@ -481,7 +481,7 @@ const MindMapNodeShape = memo(function MindMapNodeShape({
         x={11}
         y={height / 2}
         dominantBaseline="central"
-        className={`pointer-events-none ${root ? "fill-foreground text-[14px] font-semibold" : hasChildren ? "fill-foreground text-[12px] font-medium" : "fill-muted-foreground text-[11px] font-medium"}`}
+        className={`pointer-events-none ${root ? "fill-foreground text-sm font-semibold" : hasChildren ? "fill-foreground text-xs font-medium" : "fill-muted-foreground text-2xs font-medium"}`}
       >
         {label}
       </text>
