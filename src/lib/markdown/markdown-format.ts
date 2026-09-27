@@ -226,6 +226,26 @@ export const mermaidBlock: FormatAction = (state) => {
 };
 
 /**
+ * Replace the selection with a LaTeX expression from the math keyboard:
+ * `$...$` in place for inline math, or its own `$$...$$` block for display
+ * math. Unlike the toolbar's other actions this isn't a wrap or a toggle —
+ * the LaTeX already came from the reader composing it in the math field, so
+ * there is nothing to preserve from whatever was selected beforehand.
+ */
+export function mathExpression(latex: string, display: boolean): FormatAction {
+  const trimmed = latex.trim();
+  if (!display) {
+    return ({ text, start, end }) => {
+      const body = `$${trimmed}$`;
+      const caret = start + body.length;
+      return { text: text.slice(0, start) + body + text.slice(end), start: caret, end: caret };
+    };
+  }
+  const body = `$$\n${trimmed}\n$$`;
+  return insertBlock(body, body.length);
+}
+
+/**
  * Link and image share a shape: `[text](url)` and `![alt](url)`.
  *
  * A selection that looks like a URL becomes the target and the caret lands on

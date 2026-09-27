@@ -1,4 +1,5 @@
 import { AttachmentPicker } from "./AttachmentPicker";
+import { MathKeyboard } from "./MathKeyboard";
 import type { MediaContext } from "@/lib/markdown/media-context";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import {
@@ -12,9 +13,26 @@ import {
 } from "react";
 import { Eye } from "lucide-react";
 import { caretTop } from "@/lib/markdown/source-locate";
-import type { FormatAction } from "@/lib/markdown/markdown-format";
+import { mathExpression, type FormatAction } from "@/lib/markdown/markdown-format";
 import { TOOLBAR_ITEMS } from "@/lib/markdown/markdown-toolbar-items";
 import { MarkdownToolbar } from "./MarkdownToolbar";
+
+/**
+ * What the math keyboard should open showing, given the text the reader had
+ * selected: the LaTeX inside a `$...$` or `$$...$$` span if that's what was
+ * selected (so re-opening an equation to edit it doesn't hand the dialog the
+ * delimiters too), or the plain selection otherwise.
+ */
+function mathSeedFrom(selected: string): { latex: string; display: boolean } {
+  const trimmed = selected.trim();
+  if (trimmed.startsWith("$$") && trimmed.endsWith("$$") && trimmed.length >= 4) {
+    return { latex: trimmed.slice(2, -2).trim(), display: true };
+  }
+  if (trimmed.startsWith("$") && trimmed.endsWith("$") && trimmed.length >= 2) {
+    return { latex: trimmed.slice(1, -1), display: false };
+  }
+  return { latex: trimmed, display: false };
+}
 
 const AUTOSAVE_MS = 600;
 
@@ -300,6 +318,20 @@ function MarkdownEditorImpl(
       };
     });
 
+  const [mathOpen, setMathOpen] = useState(false);
+  const mathSelection = useRef({ start: 0, end: 0 });
+  const [mathSeed, setMathSeed] = useState({ latex: "", display: false });
+  const openMath = () => {
+    const textarea = textareaRef.current;
+    const start = textarea?.selectionStart ?? 0;
+    const end = textarea?.selectionEnd ?? 0;
+    mathSelection.current = { start, end };
+    setMathSeed(mathSeedFrom(textarea?.value.slice(start, end) ?? ""));
+    setMathOpen(true);
+  };
+  const insertMath = (latex: string, display: boolean) =>
+    applyFormat(({ text }) => mathExpression(latex, display)({ text, ...mathSelection.current }));
+
   // The name is edited locally and committed on blur or Enter, not on every
   // keystroke: renaming re-derives the document's kind from its extension, and
   // doing that mid-word would route the reader through a different viewer for
@@ -412,11 +444,19 @@ function MarkdownEditorImpl(
           onImport={onImportAttachments}
         />
       )}
+      <MathKeyboard
+        open={mathOpen}
+        onOpenChange={setMathOpen}
+        initialLatex={mathSeed.latex}
+        initialDisplay={mathSeed.display}
+        onInsert={insertMath}
+      />
       <div className="overflow-hidden rounded-lg border border-border bg-muted/30 focus-within:border-primary/50">
         <div className="border-b border-border bg-background/90">
           <MarkdownToolbar
             onAction={applyFormat}
             onAttach={mediaContext ? openAttachments : undefined}
+            onMath={openMath}
           />
         </div>
         <textarea

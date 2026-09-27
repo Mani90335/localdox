@@ -1,4 +1,4 @@
-import { Paperclip } from "lucide-react";
+import { Paperclip, Sigma } from "lucide-react";
 import type { FormatAction } from "@/lib/markdown/markdown-format";
 import { TOOLBAR_GROUPS } from "@/lib/markdown/markdown-toolbar-items";
 
@@ -27,9 +27,14 @@ function shortcutLabel(shortcut: string): string {
 export function MarkdownToolbar({
   onAction,
   onAttach,
+  onMath,
 }: {
   onAction: (action: FormatAction) => void;
   onAttach?: () => void;
+  /** Opens the math keyboard dialog. Separate from `onAction`: what it inserts
+   *  comes from composing an expression in a dialog, not from a pure transform
+   *  of the current selection. */
+  onMath?: () => void;
 }) {
   return (
     <div
@@ -51,6 +56,18 @@ export function MarkdownToolbar({
           className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent coarse:h-11 coarse:w-11"
         >
           <Paperclip className="h-3.5 w-3.5" />
+        </button>
+      )}
+      {onMath && (
+        <button
+          type="button"
+          aria-label="Insert equation"
+          title="Insert equation"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onMath}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent coarse:h-11 coarse:w-11"
+        >
+          <Sigma className="h-3.5 w-3.5" />
         </button>
       )}
       {TOOLBAR_GROUPS.map((group, index) => (

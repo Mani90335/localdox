@@ -118,6 +118,16 @@
   --z-overlay: 100;
   --z-modal: 200;
   --z-menu: 300;
+  /*
+   * MathLive appends its on-screen keyboard panel straight to <body>, outside
+   * the Insert-equation dialog's own DOM — so it needs its own outranking of
+   * --z-modal, not inheritance from a dialog it isn't nested in. Its default
+   * (105, see MathLive's --keyboard-zindex) sits under our modal backdrop,
+   * which made the keyboard unreachable: visible but behind the overlay,
+   * swallowing every click. Kept under --z-menu so a torn-out app menu still
+   * wins if one is ever opened over the keyboard.
+   */
+  --keyboard-zindex: 220;
   /* Default reading font = the device's own system UI font. */
   --font-body:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans",
