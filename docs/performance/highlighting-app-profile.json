@@ -1,0 +1,15 @@
+{
+  "browser": "153.0.8010.12",
+  "paragraphs": 1000,
+  "beforeElements": 2018,
+  "afterElements": 2018,
+  "marks": 0,
+  "errors": [],
+  "metricsDelta": {
+    "TaskDuration": 0.024761000000000005,
+    "ScriptDuration": 0.009729,
+    "LayoutDuration": 0.000137,
+    "RecalcStyleDuration": 0.000945,
+    "JSHeapUsedSize": 4482268
+  }
+}
