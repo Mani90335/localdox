@@ -1,4 +1,133 @@
-Latest update — 2026-09-28 (R01 diagram players: coarse React updates, stop when unseen, reduced motion)
+Latest update — 2026-09-29 (A05 long Markdown: bounded rendering)
+
+Completed A05 (Package 5). A long Markdown document no longer parses and
+commits in one task. The first screen renders straight away and the rest
+mounts in ~16 ms steps. The finished DOM is the same as before, including its
+text, character for character.
+
+Before (HEAD c93cc27, production build, 1280×800, the audit's 3,000-section
+document, 5 runs each):
+- One 1,370–1,393 ms task to open; first section at 1,568–1,603 ms.
+- Folding or unfolding one section was a 1,184–1,216 ms interaction.
+- At 4× CPU: a 5.6–5.9 s task, first section at 6.5–6.9 s, folding 4.9–5.4 s.
+- Root cause of half the open cost (CPU profile): 685 ms `removeChild` and
+  149 ms `insertBefore`. React deleted and rebuilt the whole document. The
+  viewer rebuilt its react-markdown `components` map whenever the file
+  object, workspace files or fold state changed. Every renderer became a new
+  component type, and React remounts on a type change. The file object is
+  replaced once an upload is persisted, so every document rendered twice on
+  open, and each fold rebuilt all ~18,000 elements.
+
+Fix:
+- The renderers are typed components in markdown-renderers.tsx, assembled
+  into a constant map (markdown-components.ts). File, media context and
+  navigation come from a new MarkdownRenderContext (contexts.ts).
+- Folding is a DOM pass (section-folds.ts). It sets `hidden` on the blocks
+  under a folded heading and re-applies through a MutationObserver as blocks
+  mount. Folded text stays in the DOM, so highlight offsets no longer shift
+  when a section above is folded. Lists now fold with their section; they
+  used to stay visible.
+- src/lib/markdown/markdown-segments.ts (pure) splits documents of 16,000+
+  characters.
+  - Cuts go before unindented ATX headings, or before an unindented,
+    non-list line after a blank line. Never inside fenced code, `$$` math or
+    HTML blocks. HTML types 1–7 are tracked, and fence markers inside HTML
+    are ignored.
+  - Link reference definitions are prepended to every segment. Footnotes, or
+    definitions that can't be copied by line, keep the document whole.
+  - rehypeSegmentSlug records the base slugs each segment claims and replays
+    the earlier ones, so heading ids match a whole-document render. That
+    includes duplicates, setext headings and headings in quotes.
+- ProgressiveMarkdown.tsx: the first ~8,000 characters render with the first
+  paint. Later steps run in setTimeout + flushSync, each sized from the
+  measured cost of the one before (16 ms target, 2,000–48,000 characters).
+  Source and plugin changes are deferred (useDeferredValue). A newline text
+  node follows each segment but the last, matching a single render's text.
+  Short documents render exactly as before.
+- MarkdownViewer: the content element is keyed by file and page and has
+  `aria-busy` while mounting. Highlight painting and re-anchoring, the query
+  highlight, saved passages, search hits and heading scrolls wait until the
+  whole source is mounted ("settled"). Headings asked for earlier are kept in
+  `pendingHeading`; this replaced two 100 ms setTimeouts on leaving the
+  editor.
+
+After (same script, fixtures and builds):
+- No task over 50 ms while opening (two of 5 runs had 53 and 55 ms). First
+  section at 73–88 ms; all 3,000 sections mounted at 504–1,065 ms.
+- Fold 192–200 ms. Selecting a paragraph 56–88 ms (was 64–88).
+- At 4× CPU: longest task 154–194 ms, first section at 282–299 ms, fold
+  792–840 ms.
+- Chrome via DevTools MCP (performance trace): first section at 71 ms, all
+  mounted at 672 ms, no long task, CLS 0, no console messages.
+- A 20 KB mixed document (code, tables, callouts, lists, math, 60 duplicate
+  "Example" headings, a reference definition at the end) gives the same
+  element structure, ids (`example` … `example-59`), links, highlighting and
+  textContent (13,479 characters, same hash) as HEAD.
+
+Validation:
+- Unit, tests/markdown-segments.test.ts (8 tests). Random documents rendered
+  whole and segment by segment give exactly the same HTML. That covers 24
+  mixed documents, 12 without headings, a loose 40-item list, the audit
+  document, duplicate ids, and setext and quoted headings. Also: the
+  fallback cases and source coverage.
+  - 300 further seeds were checked once: all identical.
+  - Mutations are caught: removing fence, math, HTML-marker, HTML-to-blank
+    or type-7 tracking, cutting before list items or without a blank line,
+    dropping the slug replay, or dropping shared definitions each fails a
+    test.
+- Browser, tests/e2e/long-markdown.spec.ts (5 tests, production preview):
+  - 3,000 sections open with no task over 150 ms, 3,000 unique ids, all text
+    present.
+  - A link to an unmounted heading lands on it.
+  - A highlight on "alpha" (repeated in every section) is repainted in its
+    own paragraph after two reloads.
+  - Folding while mounting hides blocks across segments, including blocks
+    that mount later.
+  - A search hit opening the long document lands on a passage 200
+    paragraphs below its heading.
+  - The mounting cases run at 4× CPU and assert the document was still
+    mounting when they acted.
+  - Against the HEAD build, the open test fails (1,339 ms task) and the jump
+    and fold cases fail their mounting precondition. Highlight and search
+    pass on HEAD, as they should: they guard the new mounting path.
+  - Removing each "settled" gate (highlight, heading, search) or the fold
+    observer makes its test fail. Checked on production builds, except the
+    highlight gate, which was checked on the dev server.
+  - 15/15 with --repeat-each=3. Also passes on the dev server (StrictMode).
+- npm test 388/388 and typecheck pass, rebased onto 164c4fc (B04 and R01).
+  Build passes. ESLint: MarkdownViewer went from 15 errors at HEAD to 0 (the
+  2 remaining warnings are old). New files have no errors or warnings.
+- Full production browser suite on 164c4fc plus this change: 120 passed,
+  1 skipped (dev-only), 3 failed. The 3 are the mobile-navigation drawer
+  close and both sharing.spec previews; they fail identically on the HEAD
+  build.
+
+Environment: all work in a detached worktree with its own node_modules,
+ports 4397 (this build), 4398 (HEAD build) and 4399 (dev). Peer sessions ran
+their own suites (R01, B04, A12) at the same time, so timings carry some CPU
+contention. This commit contains only the Markdown viewer files, their tests,
+documentation/long-markdown-rendering.md and this log.
+
+Limits:
+- Folding is still ~190 ms, over the 100 ms target. Script is ~30 ms. The
+  rest is Layerize (~220 ms in a trace): every heading is `position:
+  relative` with an absolutely positioned chevron, so there are thousands of
+  paint layers. Making headings static in a CSS experiment removed it.
+  Restyling the heading controls is a follow-up; hover and scroll don't pay
+  this cost.
+- At 4× CPU a few 100–190 ms tasks remain. The first is the app's own
+  file-open work (117–144 ms for a 40-section file on both builds); the
+  others weren't attributed.
+- The mounted element count isn't bounded (windowing would break find,
+  selection, printing and offset-based highlights); the per-task work is.
+- Documents with footnotes, uncopyable definitions, or one huge unsplittable
+  block still render in one task.
+- Jumps to a heading or search hit wait for the whole document to mount.
+- Math doesn't render in the reader on either build (`docs-math` elements
+  stay empty). Found while checking this change; it isn't caused by it.
+- Chromium only; no Safari, Firefox, phone or screen reader.
+
+Previous update — 2026-09-28 (R01 diagram players: coarse React updates, stop when unseen, reduced motion)
 
 Completed R01 (Package 5). The Stepped and Flow players no longer re-render
 React every frame, stop drawing when nobody can see them, and Stepped no
@@ -1604,7 +1733,7 @@ Pending (not started, or started but not committed)
 
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
-- Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04's spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) is done (latest update); its bounded mass-import queue in DocsApp.tsx remains. R01 (diagram players: coarse React updates, no frames while unseen, reduced motion) is done (latest update). A05 (3,000-section Markdown) and R02 (byte-budgeted diagram caches, serialized Mermaid configuration) remain pending.
+- Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04's spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) is done (latest update); its bounded mass-import queue in DocsApp.tsx remains. R01 (diagram players: coarse React updates, no frames while unseen, reduced motion) is done (latest update). A05 (3,000-section Markdown) is done (latest update; fold latency and the 4× CPU tasks are listed as limits there). R02 (byte-budgeted diagram caches, serialized Mermaid configuration) remains pending.
 - Package 6: B01 is done (latest update above); B02–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
