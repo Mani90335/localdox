@@ -110,7 +110,7 @@ function ReadingProgressImpl({ containerRef, contentRef, revision, hidden }: Pro
       // promotes the pill to its own layer so fading it in and out never
       // repaints the document scrolling behind it.
       style={{ opacity: 0, transform: "translateZ(0)" }}
-      className="pointer-events-none fixed bottom-6 right-6 z-50 flex h-8 min-w-[3rem] items-center justify-center rounded-full bg-muted/40 px-2.5 text-xs font-medium tabular-nums text-muted-foreground shadow-sm transition-opacity duration-300"
+      className="pointer-events-none fixed bottom-6 right-6 z-50 flex h-8 min-w-12 items-center justify-center rounded-full bg-muted/40 px-2.5 text-xs font-medium tabular-nums text-muted-foreground shadow-sm transition-opacity duration-300"
       aria-hidden
     >
       <span ref={labelRef}>0%</span>

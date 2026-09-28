@@ -10,7 +10,12 @@
 // touch the database directly.
 
 import type { MathRendererType } from "@/services/math";
-import { parseDerivation } from "../../services/doc-conversion/types.ts";
+import {
+  ImportValidationError,
+  parseImportJson,
+  validateWorkspaceImport,
+} from "./import-schema.ts";
+import { parseDerivation, remapDerivation } from "../../services/doc-conversion/types.ts";
 
 export interface PersistedFile {
   derivedFrom?: import("@/services/doc-conversion").Derivation;
@@ -104,6 +109,13 @@ import type { Highlight } from "../markdown/dom-highlighter";
 import type { SavedItem } from "./saved-items";
 
 export interface WorkspaceRecord {
+  /**
+   * Storage revision this snapshot was read at (or last written as). A write
+   * without one creates the workspace and fails if it already exists; a write
+   * with one updates it and fails if storage has moved on. Never part of a
+   * backup.
+   */
+  revision?: string;
   id: string;
   name: string;
   createdAt: number;
@@ -121,14 +133,30 @@ export interface WorkspaceRecord {
   ui: PersistedUI;
 }
 
-export type SaveStatus = "idle" | "saving" | "saved" | "restored";
+export type SaveStatus =
+  "idle" | "pending" | "saving" | "saved" | "restored" | "error" | "conflict";
 
+export type ConflictReason = "changed" | "deleted" | "exists";
+
+/**
+ * A write was refused because storage no longer holds the revision the caller
+ * read. Nothing was written; the caller still holds its snapshot and has to
+ * decide, with the reader, what to do with it.
+ */
 export class WorkspaceConflictError extends Error {
-  constructor() {
+  readonly workspaceId: string;
+  readonly reason: ConflictReason;
+  constructor(workspaceId: string, reason: ConflictReason = "changed") {
     super(
-      "This workspace changed in another tab. Export any unsaved edits, then reload before continuing.",
+      reason === "deleted"
+        ? "This workspace was deleted in another tab. Your copy is still open here."
+        : reason === "exists"
+          ? "A workspace with this identity already exists."
+          : "This workspace changed in another tab. Your changes have not been saved yet.",
     );
     this.name = "WorkspaceConflictError";
+    this.workspaceId = workspaceId;
+    this.reason = reason;
   }
 }
 
@@ -162,7 +190,40 @@ function summaryOf(w: WorkspaceRecord): WorkspaceSummary {
 // Retain only the last workspace's file references, never a second copy of its
 // document bytes. The on-disk revision guards this optimization across tabs.
 let lastWrite: { id: string; revision: string; files: Map<string, PersistedFile> } | null = null;
-const knownRevisions = new Map<string, string>();
+
+// Every write (and every read that must observe earlier writes) issued by this
+// tab runs through one FIFO. Route changes remount the app, and the outgoing
+// instance's final save has to land before the incoming one reads.
+let queue: Promise<unknown> = Promise.resolve();
+
+// Other tabs learn about commits here. A message is only a hint to reload;
+// the revision check inside each write transaction is what prevents loss.
+export type WorkspaceChange =
+  | { type: "changed"; id: string; revision: string }
+  | { type: "deleted"; id: string }
+  | { type: "cleared" };
+let channel: BroadcastChannel | null | undefined;
+const listeners = new Set<(change: WorkspaceChange) => void>();
+
+function getChannel(): BroadcastChannel | null {
+  if (channel !== undefined) return channel;
+  if (typeof BroadcastChannel === "undefined") return (channel = null);
+  channel = new BroadcastChannel("localdox:workspaces");
+  // Node's test runner would otherwise keep the process alive.
+  (channel as unknown as { unref?: () => void }).unref?.();
+  channel.onmessage = (event: MessageEvent<WorkspaceChange>) => {
+    for (const listener of listeners) listener(event.data);
+  };
+  return channel;
+}
+
+function announce(change: WorkspaceChange) {
+  try {
+    getChannel()?.postMessage(change);
+  } catch {
+    // A closed channel only costs other tabs an early warning.
+  }
+}
 
 function sameFile(a: PersistedFile | undefined, b: PersistedFile): boolean {
   return (
@@ -269,7 +330,6 @@ function request<T>(
 }
 
 async function deleteDatabase(): Promise<void> {
-  knownRevisions.clear();
   const openDatabase = dbPromise;
   dbPromise = null;
   lastWrite = null;
@@ -288,6 +348,7 @@ async function deleteDatabase(): Promise<void> {
     req.onerror = () => reject(req.error ?? new Error("Could not delete local database"));
     req.onblocked = () => reject(new Error("Close Localdox in other tabs before clearing storage"));
   });
+  announce({ type: "cleared" });
 }
 
 export const persistence = {
@@ -321,66 +382,120 @@ export const persistence = {
           revision,
           files: new Map([...byId].map(([key, file]) => [key, { ...file }])),
         };
-        knownRevisions.set(id, revision);
-        resolve({ ...workspace, files: files as PersistedFile[] });
+        resolve({ ...workspace, revision, files: files as PersistedFile[] });
       };
     });
   },
-  async putWorkspace(w: WorkspaceRecord, options?: { rejectStale?: boolean }): Promise<void> {
-    // Snapshot metadata before awaiting; callers may rename/move files in place.
-    const files = w.files.map((file) => ({ ...file }));
-    const { files: _files, ...metadata } = w;
-    const revision = crypto.randomUUID();
+  /**
+   * Create (no `revision`) or update (matching `revision`) one workspace.
+   * Resolves once the transaction has committed and stores the new revision
+   * on `w`, so the caller's next write is checked against it.
+   */
+  async putWorkspace(w: WorkspaceRecord): Promise<string> {
+    const [revision] = await persistence.putWorkspaces([w]);
+    return revision;
+  },
+  /**
+   * Write several workspaces in one transaction: all commit or none do. Each
+   * record is checked against its own expected revision, so a move can never
+   * report success after writing only one side.
+   */
+  async putWorkspaces(records: WorkspaceRecord[]): Promise<string[]> {
+    // Snapshot before awaiting; callers may keep editing their objects.
+    const snapshots = records.map((w) => ({ ...w, files: w.files.map((file) => ({ ...file })) }));
+    if (new Set(snapshots.map((w) => w.id)).size !== snapshots.length)
+      throw new Error("A workspace can only be written once per transaction");
     const db = await openDb();
-    return new Promise((resolve, reject) => {
+    const revisions = await new Promise<string[]>((resolve, reject) => {
       const tx = db.transaction([STORE, FILES, SUMMARIES], "readwrite");
-      const current = tx.objectStore(STORE).get(w.id);
-      current.onsuccess = () => {
-        try {
-          const previous = current.result as StoredWorkspace | undefined;
-          // A conversion must not write an old UI snapshot over changes from
-          // another tab (or recreate a workspace that another tab deleted).
-          if (
-            options?.rejectStale &&
-            (!previous || knownRevisions.get(w.id) !== previous.revision)
-          ) {
-            throw new WorkspaceConflictError();
+      const next = snapshots.map(() => crypto.randomUUID());
+      let failure: unknown;
+      snapshots.forEach((w, index) => {
+        const current = tx.objectStore(STORE).get(w.id);
+        current.onsuccess = () => {
+          if (failure) return;
+          try {
+            const previous = current.result as StoredWorkspace | undefined;
+            if (w.revision === undefined && previous)
+              throw new WorkspaceConflictError(w.id, "exists");
+            if (w.revision !== undefined && !previous)
+              throw new WorkspaceConflictError(w.id, "deleted");
+            if (previous && previous.revision !== w.revision)
+              throw new WorkspaceConflictError(w.id, "changed");
+            const cached =
+              lastWrite?.id === w.id && lastWrite.revision === previous?.revision
+                ? lastWrite.files
+                : undefined;
+            const fileStore = tx.objectStore(FILES);
+            const nextIds = new Set(w.files.map((file) => file.id));
+            for (const id of previous?.fileIds ?? []) {
+              if (!nextIds.has(id)) fileStore.delete([w.id, id]);
+            }
+            for (const file of w.files) {
+              if (!sameFile(cached?.get(file.id), file))
+                fileStore.put({ ...file, workspaceId: w.id });
+            }
+            const { files, revision: _expected, ...metadata } = w;
+            tx.objectStore(STORE).put({
+              ...metadata,
+              fileIds: files.map((file) => file.id),
+              revision: next[index],
+            });
+            tx.objectStore(SUMMARIES).put(summaryOf(w));
+          } catch (error) {
+            failure = error;
+            tx.abort();
           }
-          const cached =
-            lastWrite?.id === w.id && lastWrite.revision === previous?.revision
-              ? lastWrite.files
-              : undefined;
-          const fileStore = tx.objectStore(FILES);
-          const nextIds = new Set(files.map((file) => file.id));
-          for (const id of previous?.fileIds ?? []) {
-            if (!nextIds.has(id)) fileStore.delete([w.id, id]);
-          }
-          for (const file of files) {
-            if (!sameFile(cached?.get(file.id), file))
-              fileStore.put({ ...file, workspaceId: w.id });
-          }
-          tx.objectStore(STORE).put({
-            ...metadata,
-            fileIds: files.map((file) => file.id),
-            revision,
-          });
-          tx.objectStore(SUMMARIES).put(summaryOf({ ...w, files }));
-        } catch (error) {
-          tx.abort();
-          reject(error);
-        }
-      };
-      tx.onabort = () => reject(tx.error ?? new Error("Could not save workspace"));
-      tx.oncomplete = () => {
-        lastWrite = { id: w.id, revision, files: new Map(files.map((file) => [file.id, file])) };
-        knownRevisions.set(w.id, revision);
-        resolve();
-      };
+        };
+      });
+      tx.onabort = () => reject(failure ?? tx.error ?? new Error("Could not save workspace"));
+      tx.oncomplete = () => resolve(next);
     });
+    snapshots.forEach((w, index) => {
+      records[index].revision = revisions[index];
+      lastWrite = {
+        id: w.id,
+        revision: revisions[index],
+        files: new Map(w.files.map((file) => [file.id, file])),
+      };
+      announce({ type: "changed", id: w.id, revision: revisions[index] });
+    });
+    return revisions;
+  },
+  /**
+   * Rename without reading or rewriting any document. With `expectedRevision`
+   * the rename is refused if storage has moved on; returns the new revision.
+   */
+  async renameWorkspace(id: string, name: string, expectedRevision?: string): Promise<string> {
+    const db = await openDb();
+    const revision = crypto.randomUUID();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([STORE, SUMMARIES], "readwrite");
+      let failure: unknown;
+      const current = tx.objectStore(STORE).get(id);
+      current.onsuccess = () => {
+        const previous = current.result as StoredWorkspace | undefined;
+        if (!previous || (expectedRevision !== undefined && previous.revision !== expectedRevision)) {
+          failure = new WorkspaceConflictError(id, previous ? "changed" : "deleted");
+          tx.abort();
+          return;
+        }
+        tx.objectStore(STORE).put({ ...previous, name, revision });
+        const summary = tx.objectStore(SUMMARIES).get(id);
+        summary.onsuccess = () => {
+          if (summary.result) tx.objectStore(SUMMARIES).put({ ...summary.result, name });
+        };
+      };
+      tx.onabort = () => reject(failure ?? tx.error ?? new Error("Could not rename workspace"));
+      tx.oncomplete = () => resolve();
+    });
+    if (lastWrite?.id === id) lastWrite = { ...lastWrite, revision };
+    announce({ type: "changed", id, revision });
+    return revision;
   },
   async deleteWorkspace(id: string): Promise<void> {
     const db = await openDb();
-    return new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const tx = db.transaction([STORE, FILES, SUMMARIES], "readwrite");
       const cursor = tx.objectStore(FILES).index("workspaceId").openKeyCursor(id);
       cursor.onsuccess = () => {
@@ -392,12 +507,26 @@ export const persistence = {
       tx.objectStore(STORE).delete(id);
       tx.objectStore(SUMMARIES).delete(id);
       tx.onabort = () => reject(tx.error ?? new Error("Could not delete workspace"));
-      tx.oncomplete = () => {
-        if (lastWrite?.id === id) lastWrite = null;
-        knownRevisions.delete(id);
-        resolve();
-      };
+      tx.oncomplete = () => resolve();
     });
+    if (lastWrite?.id === id) lastWrite = null;
+    announce({ type: "deleted", id });
+  },
+  /**
+   * Run `task` after every earlier queued task has settled. Writes from this
+   * tab go through here so they commit in the order they were issued, and
+   * reads that must see them (a route's hydrate) queue behind them.
+   */
+  serial<T>(task: () => Promise<T>): Promise<T> {
+    const run = queue.then(task, task);
+    queue = run.catch(() => undefined);
+    return run;
+  },
+  /** Commits made by other tabs. Returns an unsubscribe function. */
+  subscribe(listener: (change: WorkspaceChange) => void): () => void {
+    getChannel();
+    listeners.add(listener);
+    return () => listeners.delete(listener);
   },
   listWorkspaceSummaries() {
     return request<WorkspaceSummary[]>("readonly", (s) => s.getAll(), SUMMARIES);
@@ -408,7 +537,6 @@ export const persistence = {
     return workspaces.filter((w): w is WorkspaceRecord => !!w);
   },
   async clearAll(): Promise<void> {
-    knownRevisions.clear();
     const db = await openDb();
     return new Promise((resolve, reject) => {
       const tx = db.transaction([STORE, FILES, SUMMARIES], "readwrite");
@@ -416,6 +544,7 @@ export const persistence = {
       tx.onabort = () => reject(tx.error ?? new Error("Could not clear storage"));
       tx.oncomplete = () => {
         lastWrite = null;
+        announce({ type: "cleared" });
         resolve();
       };
     });
@@ -678,73 +807,87 @@ export function savePrefs(patch: Partial<Prefs>): void {
 
 // ---- import / export (JSON) ----
 
+export { ImportValidationError };
+
+/**
+ * Backup format version. v1 omitted `saved` and file `deletedAt` on import, so
+ * stars, notes and the Bin did not survive a restore; v2 carries every field of
+ * `WorkspaceRecord` except the storage revision. Both versions (and the older
+ * unwrapped record) remain readable.
+ */
+export const BACKUP_VERSION = 2;
+
+/** A complete, faithful backup — Bin, stars, notes and layout included. */
 export function serializeWorkspace(w: WorkspaceRecord): string {
-  return JSON.stringify({ format: "localdox-workspace", version: 1, workspace: w }, null, 2);
+  const { revision: _revision, ...workspace } = w;
+  return JSON.stringify(
+    { format: "localdox-workspace", version: BACKUP_VERSION, workspace },
+    null,
+    2,
+  );
 }
 
-/** Parse an exported workspace JSON into a fresh record (new id, no clobber). */
+/**
+ * Validate a backup completely before anything is written. Keeps the source
+ * workspace id so the caller can detect a second import of the same backup;
+ * the caller must give it a fresh id before storing it alongside the original.
+ */
 export function parseWorkspaceImport(json: string): WorkspaceRecord {
-  const data = JSON.parse(json);
-  const w = data?.workspace ?? data;
-  if (!w || !Array.isArray(w.files)) {
-    throw new Error("Not a valid workspace file");
+  const data = parseImportJson(json) as { format?: unknown; version?: unknown; workspace?: unknown };
+  if (data && typeof data === "object" && "format" in data) {
+    if (data.format !== "localdox-workspace")
+      throw new ImportValidationError("This file is not a Localdox workspace backup.");
+    if (typeof data.version !== "number" || data.version < 1 || data.version > BACKUP_VERSION)
+      throw new ImportValidationError(
+        "This backup was made by a newer version of Localdox. Update the app to open it.",
+      );
   }
+  const w = validateWorkspaceImport(
+    data && typeof data === "object" && "workspace" in data ? data.workspace : data,
+  );
   const now = Date.now();
+  const fileIds = new Map(w.files.map((file) => [file.id, file.id]));
   return {
-    id: crypto.randomUUID(),
-    name: typeof w.name === "string" && w.name.trim() ? w.name : "Imported workspace",
-    createdAt: typeof w.createdAt === "number" ? w.createdAt : now,
+    id: w.id ?? crypto.randomUUID(),
+    name: w.name,
+    createdAt: w.createdAt ?? now,
     updatedAt: now,
-    files: w.files
-      .filter((f: any) => f && typeof f.content === "string")
-      .map((f: any) => ({
-        id: typeof f.id === "string" ? f.id : crypto.randomUUID(),
-        name: typeof f.name === "string" ? f.name : "untitled.md",
-        content: f.content,
-        data: typeof f.data === "string" ? f.data : undefined,
-        mimeType: typeof f.mimeType === "string" ? f.mimeType : undefined,
-        size: typeof f.size === "number" ? f.size : undefined,
-        addedAt: typeof f.addedAt === "number" ? f.addedAt : undefined,
-        kind: typeof f.kind === "string" ? f.kind : undefined,
-        derivedFrom: parseDerivation(f.derivedFrom),
-        folderId: typeof f.folderId === "string" ? f.folderId : null,
-      })),
-    folders: Array.isArray(w.folders)
-      ? (w.folders as Partial<FolderRecord & { parentId?: unknown }>[])
-          .filter((f) => f && typeof f.id === "string" && typeof f.name === "string")
-          .map((f) => ({
-            purpose: f.purpose === "embed-media" ? "embed-media" as const : undefined,
-            id: f.id as string,
-            name: f.name as string,
-            createdAt: typeof f.createdAt === "number" ? f.createdAt : now,
-            // Nesting has to survive a share link or a re-import. Dropping this
-            // would silently flatten every subfolder into the top level.
-            parentId: typeof f.parentId === "string" ? f.parentId : null,
-          }))
-      : [],
-    bookmarks: Array.isArray(w.bookmarks)
-      ? w.bookmarks.filter((b: any) => typeof b === "string")
-      : [],
-    highlights: Array.isArray(w.highlights) ? w.highlights : [],
+    files: w.files.map((file) => {
+      const record: PersistedFile = {
+        id: file.id,
+        name: file.name,
+        content: file.content,
+        folderId: file.folderId ?? null,
+      };
+      if (file.data !== undefined) record.data = file.data;
+      if (file.mimeType !== undefined) record.mimeType = file.mimeType;
+      if (file.size !== undefined) record.size = file.size;
+      if (file.addedAt !== undefined) record.addedAt = file.addedAt;
+      if (file.kind !== undefined) record.kind = file.kind;
+      if (file.deletedAt != null) record.deletedAt = file.deletedAt;
+      const derivedFrom = remapDerivation(parseDerivation(file.derivedFrom), fileIds);
+      if (derivedFrom) record.derivedFrom = derivedFrom;
+      return record;
+    }),
+    folders: w.folders.map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      createdAt: folder.createdAt,
+      parentId: folder.parentId ?? null,
+      ...(folder.purpose ? { purpose: folder.purpose } : {}),
+    })),
+    bookmarks: w.bookmarks,
+    ...(w.saved ? { saved: w.saved } : {}),
+    highlights: w.highlights,
     ui: {
-      activeFileId: typeof w.ui?.activeFileId === "string" ? w.ui.activeFileId : null,
-      expanded: typeof w.ui?.expanded === "object" ? w.ui.expanded : {},
-      sidebarCollapsed: typeof w.ui?.sidebarCollapsed === "boolean" ? w.ui.sidebarCollapsed : false,
-      scrollTop: typeof w.ui?.scrollTop === "number" ? w.ui.scrollTop : 0,
-      fileOrder: Array.isArray(w.ui?.fileOrder) ? w.ui.fileOrder : [],
-      recentFileIds: Array.isArray(w.ui?.recentFileIds) ? w.ui.recentFileIds : [],
-      // The split layout has to survive a reload or a share link. Dropping it
-      // here would silently collapse every workspace back to one pane.
-      panes: Array.isArray(w.ui?.panes)
-        ? (w.ui.panes as Partial<PersistedPane>[])
-            .filter((pane) => pane && typeof pane.id === "string" && Array.isArray(pane.tabs))
-            .map((pane) => ({
-              id: pane.id as string,
-              tabs: (pane.tabs as unknown[]).filter((id): id is string => typeof id === "string"),
-              activeTabId: typeof pane.activeTabId === "string" ? pane.activeTabId : null,
-            }))
-        : [],
-      focusedPaneId: typeof w.ui?.focusedPaneId === "string" ? w.ui.focusedPaneId : null,
+      activeFileId: w.ui.activeFileId,
+      expanded: w.ui.expanded,
+      sidebarCollapsed: w.ui.sidebarCollapsed,
+      scrollTop: w.ui.scrollTop,
+      fileOrder: w.ui.fileOrder ?? [],
+      recentFileIds: w.ui.recentFileIds ?? [],
+      panes: w.ui.panes ?? [],
+      focusedPaneId: w.ui.focusedPaneId ?? null,
     },
   };
 }

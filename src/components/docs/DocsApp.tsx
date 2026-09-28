@@ -1,22 +1,9 @@
+import { ConversionContext } from "@/services/doc-conversion/ConversionContext";
 import { ensureEmbedMediaFolder } from "@/lib/workspace/embed-media";
 import type { DocumentUpdate } from "@/services/office-editing";
 import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import {
-  BookOpen,
-  Menu,
-  X,
-  Search,
-  Monitor,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Undo2,
-  Home,
-  Upload,
-  Settings,
-  FilePlus,
-  PenTool,
-} from "lucide-react";
+import { Menu, X, Search, Undo2, Settings } from "lucide-react";
 
 import {
   ESCAPE_DEPTH,
@@ -28,7 +15,34 @@ import { Sidebar, AddMenu, DEFAULT_VIEW, type SidebarView } from "./workspace/Si
 import { MarkdownViewer } from "./viewer/MarkdownViewer";
 import { PaneDocument } from "./viewer/PaneDocument";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { Sheet, SheetClose, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useSearchIndex } from "@/hooks/use-search-index";
+import type { SearchHit } from "@/lib/search/schema";
+import type { SearchPanelState } from "./workspace/sidebar/SearchPanel";
+import { Header } from "./docs-app/Header";
+import { EmptyWorkspace } from "./docs-app/EmptyWorkspace";
+import { DragDropOverlay } from "./docs-app/DragDropOverlay";
+import { useReaderPreferences } from "./docs-app/use-reader-preferences";
+import {
+  useSidebarCollapseAnimation,
+  SIDEBAR_WIDTH,
+} from "./docs-app/use-sidebar-collapse-animation";
+import { toMdFile, uniqueFileName, findDuplicate } from "./docs-app/file-helpers";
+import { availableWorkspaceName, resolveWorkspaceName } from "./docs-app/workspace-naming";
+import { ConflictBanner } from "./docs-app/ConflictBanner";
+import { SaveErrorBanner } from "./docs-app/SaveErrorBanner";
+import { SaveIndicator, type SaveState } from "./docs-app/SaveIndicator";
+import { DraftRecoveryBanner, type RecoveredDraft } from "./docs-app/DraftRecoveryBanner";
+import { DraftJournalContext } from "./editor/draft-journal-context";
+import {
+  draftJournal,
+  hashText,
+  liveSessions,
+  recoverableDrafts,
+  type DraftEntry,
+} from "@/lib/workspace/draft-journal";
+import { mergeWorkspaces } from "@/lib/workspace/merge";
 import {
   activeFileOf,
   closeFileEverywhere,
@@ -43,6 +57,7 @@ import {
 } from "@/lib/workspace/panes";
 import {
   applyToDestination,
+  removeFromSource,
   planTransfer,
   transferCounts,
 } from "@/lib/workspace/workspace-transfer";
@@ -59,9 +74,6 @@ import type { AskAiPrefill } from "@/services/ai";
 // interaction that triggered it.
 const DocumentViewer = lazy(() =>
   import("./viewer/DocumentViewer").then((m) => ({ default: m.DocumentViewer })),
-);
-const CommandPalette = lazy(() =>
-  import("./navigation/CommandPalette").then((m) => ({ default: m.CommandPalette })),
 );
 /**
  * How many columns the split view will go to.
@@ -85,6 +97,9 @@ let pendingSettingsTab: "workspace" | undefined;
 const AskAiPanel = lazy(() =>
   import("@/services/ai/AskAiPanel").then((m) => ({ default: m.AskAiPanel })),
 );
+const SharePreviewDialog = lazy(() =>
+  import("./workspace/SharePreviewDialog").then((m) => ({ default: m.SharePreviewDialog })),
+);
 const SharedFilesDialog = lazy(() =>
   import("./workspace/SharedFilesDialog").then((m) => ({ default: m.SharedFilesDialog })),
 );
@@ -93,7 +108,11 @@ import type { MdFile, MdChunk } from "@/lib/markdown/markdown-utils";
 // the OOXML builder is never on the path to the first paint.
 import type { ExportFormat } from "@/services/markdown-export";
 import type { Highlight } from "@/lib/markdown/dom-highlighter";
-import { isBinExpired, WorkspaceConflictError } from "@/lib/workspace/persistence";
+import {
+  isBinExpired,
+  WorkspaceConflictError,
+  type ConflictReason,
+} from "@/lib/workspace/persistence";
 import { fileSubtopics, readingMinutes } from "@/lib/markdown/markdown-utils";
 import {
   DISCARD_PROMPT,
@@ -102,9 +121,7 @@ import {
   SUPPORTED_ACCEPT,
 } from "@/lib/markdown/document-utils";
 import { clearArtifactResolutionCache } from "@/lib/workspace/workspace-artifacts";
-import { loadReadingFont, warmAppFonts } from "@/lib/fonts/fonts";
-import { restoreCustomFont } from "@/lib/fonts/custom-font";
-import { loadGoogleFont } from "@/lib/fonts/google-font";
+import { warmAppFonts } from "@/lib/fonts/fonts";
 import { toast } from "sonner";
 import { useHistory } from "@/hooks/use-history";
 import {
@@ -120,20 +137,16 @@ import {
   newWorkspaceRecord,
   serializeWorkspace,
   parseWorkspaceImport,
-  isDarkTheme,
   saveScrollTop,
   loadScrollTop,
+  ImportValidationError,
   type PersistedFile,
   type FolderRecord,
   type WorkspaceRecord,
   type WorkspaceSummary,
   type SaveStatus,
   type ThemePref,
-  type ReadingMode,
-  type ReadingFont,
 } from "@/lib/workspace/persistence";
-import { clearMathCache } from "@/services/math";
-import type { MathPreferences, MathRendererType } from "@/services/math";
 import {
   findSaved,
   migrateBookmarks,
@@ -148,12 +161,12 @@ import {
   copyLink,
   fetchShare,
   parseSharedFiles,
-  serializeSharedFiles,
   uploadShare,
   SHARE_HASH,
   SHARE_FILES_HASH,
   type SharedFilesPayload,
 } from "@/lib/workspace/share";
+import type { ShareRequest } from "./workspace/SharePreviewDialog";
 import { MAX_UPLOAD_BYTES, getMaxStorageBytes, formatBytes } from "@/lib/workspace/storage-limits";
 import {
   useDocumentConversion,
@@ -168,15 +181,6 @@ import {
 
 type Theme = ThemePref;
 
-/**
- * One sidebar width for everyone. It used to be drag-resizable and persisted
- * per browser, which bought very little — the panel holds a file list, not a
- * document — at the cost of a drag handle, a stored preference, and layouts
- * that differed between machines. Long names are truncated with an ellipsis and
- * carry their full text as a tooltip instead.
- */
-const SIDEBAR_WIDTH = 288;
-
 // Shared empties, so "this file has no highlights / nothing saved" is always the
 // same array. A fresh `[]` would be a new prop identity on every render.
 const EMPTY_HIGHLIGHTS: Highlight[] = [];
@@ -189,118 +193,33 @@ interface WorkspaceLite {
 }
 
 /**
- * Stored file → in-memory file.
- *
- * Structure is deliberately not parsed here. This runs for every document in
- * the workspace during hydrate, before the first paint, and parsing each one
- * meant scanning the entire workspace's text up front — most of it for
- * documents the reader never opens. `fileSubtopics()` derives (and caches) a
- * document's sections the first time something actually asks.
+ * Import a `#share=` link at most once per page load. The restore effect can
+ * run twice for one visit (a StrictMode re-run, or a route swap remounting the
+ * app) while the first import is still awaiting the network, and the hash is
+ * only cleared after it lands — so both runs share this one import instead of
+ * each writing its own copy of the workspace.
  */
-function toMdFile(f: PersistedFile): MdFile {
-  return {
-    id: f.id,
-    name: f.name,
-    content: f.content,
-    data: f.data,
-    mimeType: f.mimeType,
-    size: f.size,
-    addedAt: f.addedAt,
-    kind: f.kind ?? getDocumentKind(f.name, f.mimeType),
-    folderId: f.folderId ?? null,
-    deletedAt: f.deletedAt,
-    derivedFrom: f.derivedFrom,
-  };
-}
-
-/** `report.md` → `report (2).md` when the workspace already holds that name. */
-function uniqueFileName(name: string, taken: Set<string>): string {
-  if (!taken.has(name)) return name;
-  const dot = name.lastIndexOf(".");
-  const stem = dot > 0 ? name.slice(0, dot) : name;
-  const ext = dot > 0 ? name.slice(dot) : "";
-  for (let n = 2; ; n++) {
-    const candidate = `${stem} (${n})${ext}`;
-    if (!taken.has(candidate)) return candidate;
+const sharedWorkspaceImports = new Map<string, Promise<WorkspaceRecord>>();
+function importSharedWorkspaceOnce(key: string): Promise<WorkspaceRecord> {
+  let pending = sharedWorkspaceImports.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const ws = parseWorkspaceImport(await fetchShare(key));
+      ws.id = crypto.randomUUID();
+      // This runs during boot, before anything is on screen, so a name clash
+      // is settled by numbering rather than by a modal prompt the reader would
+      // meet before the app has even drawn.
+      const already = await persistence.listWorkspaceSummaries();
+      ws.name = availableWorkspaceName(`${ws.name} (Shared)`, already);
+      await persistence.serial(() => persistence.putWorkspace(ws));
+      toast.success("Shared workspace imported successfully!", { id: "share-import" });
+      return ws;
+    })();
+    // A failed import may be retried by reloading the same link.
+    pending.catch(() => sharedWorkspaceImports.delete(key));
+    sharedWorkspaceImports.set(key, pending);
   }
-}
-
-/**
- * Workspace names are how the reader tells one workspace from another in the
- * switcher, so two carrying the same name is a real ambiguity rather than a
- * cosmetic one. Compared case- and whitespace-insensitively: "Notes" and
- * "notes " are the same name to a person reading the list.
- */
-function normalizeWorkspaceName(name: string): string {
-  return name.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-/** `Notes` → `Notes (2)` when a workspace already carries that name. */
-function availableWorkspaceName(name: string, existing: { name: string }[]): string {
-  const taken = new Set(existing.map((w) => normalizeWorkspaceName(w.name)));
-  const base = name.trim() || "Workspace";
-  if (!taken.has(normalizeWorkspaceName(base))) return base;
-  for (let n = 2; ; n++) {
-    const candidate = `${base} (${n})`;
-    if (!taken.has(normalizeWorkspaceName(candidate))) return candidate;
-  }
-}
-
-/**
- * Asks for a different workspace name until one is free, or the reader cancels.
- *
- * `existing` holds the names already in use; `excludeId` lets a rename keep its
- * own current name. Returns the accepted name, or `null` when the reader backs
- * out of the prompt.
- */
-function resolveWorkspaceName(
-  proposed: string,
-  existing: { id: string; name: string }[],
-  opts: { excludeId?: string; whatIsIt?: string } = {},
-): string | null {
-  const { excludeId, whatIsIt = "A workspace" } = opts;
-  const taken = new Set(
-    existing.filter((w) => w.id !== excludeId).map((w) => normalizeWorkspaceName(w.name)),
-  );
-  let candidate = proposed.trim();
-  while (candidate && taken.has(normalizeWorkspaceName(candidate))) {
-    const next = window.prompt(
-      `${whatIsIt} named “${candidate}” already exists. Enter a different name:`,
-      candidate,
-    );
-    if (next == null) return null; // cancelled — leave everything untouched
-    candidate = next.trim();
-  }
-  return candidate || null;
-}
-
-/**
- * A file already in the workspace that the incoming one duplicates.
- *
- * Two kinds of duplicate matter, and they are not the same problem: the same
- * bytes arriving again (re-uploading a file that is already here, which is
- * simply redundant) and a different document arriving under a name that is
- * taken (which would leave two indistinguishable rows in the sidebar).
- */
-type DuplicateKind = "content" | "name";
-
-function fileFingerprint(f: { content?: string; data?: string }): string {
-  // Binary files carry their bytes in `data`; text ones in `content`. Either is
-  // a faithful identity for "the same file uploaded twice".
-  return f.data ?? f.content ?? "";
-}
-
-function findDuplicate(
-  incoming: { name: string; content?: string; data?: string },
-  existing: MdFile[],
-): { kind: DuplicateKind; file: MdFile } | null {
-  const print = fileFingerprint(incoming);
-  if (print) {
-    const same = existing.find((f) => fileFingerprint(f) === print);
-    if (same) return { kind: "content", file: same };
-  }
-  const clash = existing.find((f) => f.name === incoming.name);
-  return clash ? { kind: "name", file: clash } : null;
+  return pending;
 }
 
 export function DocsApp() {
@@ -326,6 +245,7 @@ export function DocsApp() {
      narrowest, plus the handle between them — below that a split is worse than
      no split, so the panes stack top to bottom instead of getting thinner. */
   const splitStacks = useMediaQuery("(max-width: 767px)");
+  const mobileNavigation = useMediaQuery("(max-width: 1023px)");
   const setActiveFileId = useCallback((fileId: string | null) => {
     setPaneLayout((layout) => {
       if (fileId === null) {
@@ -424,26 +344,55 @@ export function DocsApp() {
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
   const [scrollTarget, setScrollTarget] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [theme, setTheme] = useState<Theme>(() => loadPrefs().theme);
-  const [readingMode, setReadingMode] = useState<ReadingMode>(() => loadPrefs().readingMode);
-  const [readingFont, setReadingFont] = useState<ReadingFont>(() => loadPrefs().readingFont);
-  const [googleFont, setGoogleFont] = useState<string | null>(() => loadPrefs().googleFont);
-  const [diagramColors, setDiagramColors] = useState<boolean>(() => loadPrefs().diagramColors);
-  const [diagramCamera, setDiagramCamera] = useState<boolean>(() => loadPrefs().diagramCamera);
-  const [diagramFollowNumbers, setDiagramFollowNumbers] = useState<boolean>(
-    () => loadPrefs().diagramFollowNumbers,
-  );
-  const [diagramNumbers, setDiagramNumbers] = useState<boolean>(() => loadPrefs().diagramNumbers);
-  const [showEmbedMedia, setShowEmbedMedia] = useState(() => loadPrefs().showEmbedMedia);
-  useEffect(() => { savePrefs({ showEmbedMedia }); }, [showEmbedMedia]);
-  const [aiEnabled, setAiEnabled] = useState<boolean>(() => loadPrefs().aiEnabled);
-  const [mathRenderer, setMathRenderer] = useState<MathRendererType>(
-    () => loadPrefs().mathRenderer,
-  );
-  const [mathNumbering, setMathNumbering] = useState<boolean>(() => loadPrefs().mathNumbering);
-  const [mathExplorer, setMathExplorer] = useState<boolean>(() => loadPrefs().mathExplorer);
-  const [contentWidth, setContentWidth] = useState<number>(() => loadPrefs().contentWidth);
-  const [paletteOpen, setPaletteOpen] = useState(false);
+  const drawerOpenerRef = useRef<HTMLElement | null>(null);
+  const drawerContentRef = useRef<HTMLDivElement | null>(null);
+  const openDrawer = useCallback(() => {
+    if (!drawerOpen) {
+      drawerOpenerRef.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+    setDrawerOpen(true);
+  }, [drawerOpen]);
+  // CSS hiding a modal leaves its focus trap and scroll lock active. Close it
+  // when the docked sidebar takes over, including when browser zoom changes.
+  useEffect(() => {
+    if (!mobileNavigation) setDrawerOpen(false);
+  }, [mobileNavigation]);
+  const {
+    theme,
+    setTheme,
+    cycleTheme,
+    readingMode,
+    setReadingMode,
+    readingFont,
+    setReadingFont,
+    googleFont,
+    setGoogleFont,
+    diagramColors,
+    setDiagramColors,
+    diagramCamera,
+    setDiagramCamera,
+    diagramFollowNumbers,
+    setDiagramFollowNumbers,
+    diagramNumbers,
+    setDiagramNumbers,
+    showEmbedMedia,
+    setShowEmbedMedia,
+    aiEnabled,
+    setAiEnabled,
+    mathRenderer,
+    setMathRenderer,
+    mathNumbering,
+    setMathNumbering,
+    mathExplorer,
+    setMathExplorer,
+    contentWidth,
+    setContentWidth,
+    mathPreferences,
+  } = useReaderPreferences();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchCrossWorkspace, setSearchCrossWorkspace] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [highlightQuery, setHighlightQuery] = useState<string | null>(null);
   /**
@@ -454,6 +403,8 @@ export function DocsApp() {
     fileId: string;
     text: string;
     query: string;
+    /** Which occurrence of `query` within `text` to land on, when it repeats. */
+    occurrence: number;
   } | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   // File ids in most-recently-opened order — drives the "Recent" chip.
@@ -464,6 +415,22 @@ export function DocsApp() {
   const [workspaces, setWorkspaces] = useState<WorkspaceLite[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  // Why the last write failed. Unlike `saveStatus`, which the next edit moves
+  // on to "pending", this stays until a write actually commits.
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const saveErrorRef = useRef<string | null>(null);
+  saveErrorRef.current = saveError;
+  const [retryingSave, setRetryingSave] = useState(false);
+  // Mirrors `editorDirtyRef` for rendering: an editor holding text it has not
+  // handed to the app yet is a pending change too.
+  const [editorDirty, setEditorDirty] = useState(false);
+  // Every editor on the page journals into the same per-tab draft journal.
+  const journal = useMemo(() => draftJournal(), []);
+  const journalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleJournalFlush = useCallback(() => {
+    if (journalTimer.current) clearTimeout(journalTimer.current);
+    journalTimer.current = setTimeout(() => journal.flush(), 250);
+  }, [journal]);
   // Stars. Not just files any more: a star can point at a section, a table, a
   // code block or a passage the reader selected. Legacy `${fileId}#${sectionId}`
   // bookmarks are read as saved items on hydrate (see `migrateBookmarks`).
@@ -527,9 +494,6 @@ export function DocsApp() {
   const firstVisitRef = useRef(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const sidebarWrapRef = useRef<HTMLDivElement>(null);
-  const sidebarInnerRef = useRef<HTMLDivElement>(null);
-  const firstCollapseRun = useRef(true);
 
   // Refs the (async, debounced) save reads from, so it always writes the latest
   // state without being recreated on every render.
@@ -566,154 +530,7 @@ export function DocsApp() {
   const scrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoredFlash = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Resize the reading column once. Animating sidebar width reflows every
-  // paragraph, table and diagram on every frame; only the sidebar contents fade.
-  useEffect(() => {
-    const wrap = sidebarWrapRef.current;
-    if (!wrap) return;
-    const inner = sidebarInnerRef.current;
-    const width = sidebarCollapsed ? 56 : SIDEBAR_WIDTH;
-    const opacity = sidebarCollapsed ? 0 : 1;
-    const shift = sidebarCollapsed ? -16 : 0;
-
-    // First run positions without animating: the restored state shouldn't play
-    // an entrance every time the app boots.
-    if (firstCollapseRun.current) {
-      firstCollapseRun.current = false;
-      wrap.style.width = `${width}px`;
-      if (inner) {
-        inner.style.opacity = String(opacity);
-        inner.style.visibility = sidebarCollapsed ? "hidden" : "visible";
-        inner.style.transform = `translateX(${shift}px)`;
-      }
-      return;
-    }
-
-    const animations: Animation[] = [];
-    wrap.style.width = `${width}px`;
-
-    if (inner) {
-      // Expanding: become visible up front so the fade-in is actually seen.
-      // Collapsing: stay visible until the fade finishes, then drop out of
-      // hit-testing — a transparent-but-visible sidebar would swallow clicks
-      // meant for the collapsed icon rail underneath it.
-      if (!sidebarCollapsed) inner.style.visibility = "visible";
-
-      const fade = inner.animate?.(
-        [
-          { opacity: inner.style.opacity || "1", transform: inner.style.transform || "none" },
-          { opacity: String(opacity), transform: `translateX(${shift}px)` },
-        ],
-        {
-          duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 160,
-          easing: "cubic-bezier(0.16, 1, 0.3, 1)",
-          fill: "forwards",
-        },
-      );
-      inner.style.opacity = String(opacity);
-      inner.style.transform = `translateX(${shift}px)`;
-
-      if (sidebarCollapsed) {
-        if (fade) {
-          animations.push(fade);
-          void fade.finished
-            .then(() => {
-              // Guard against a re-expand landing while the fade was running.
-              if (inner.style.opacity === "0") inner.style.visibility = "hidden";
-            })
-            .catch(() => {
-              /* cancelled by a state change — the next run sets visibility */
-            });
-        } else {
-          inner.style.visibility = "hidden";
-        }
-      } else if (fade) {
-        animations.push(fade);
-      }
-    }
-
-    return () => animations.forEach((a) => a.cancel());
-  }, [sidebarCollapsed]);
-
-  // Theme: apply to <html> and persist as a lightweight preference.
-  // Apply the selected reader theme. All five themes are keyed by the
-  // `data-theme` attribute; dark-based themes also carry the `.dark` class so
-  // dark-only rules (code highlighting, katex, mermaid) keep working.
-  useEffect(() => {
-    const root = document.documentElement;
-    root.setAttribute("data-theme", theme);
-    root.classList.toggle("dark", isDarkTheme(theme));
-  }, [theme]);
-
-  // Reading typeface is keyed by `data-font`. The webfont itself is fetched
-  // here rather than bundled into the app's stylesheet — the attribute applies
-  // immediately against the system fallback and the real face swaps in when it
-  // lands.
-  useEffect(() => {
-    document.documentElement.setAttribute("data-font", readingFont);
-    loadReadingFont(readingFont);
-  }, [readingFont]);
-
-  // Semantic diagram colouring rides the same channel: a diagram sits deep
-  // inside rendered markdown with no props reaching it, so it watches <html>.
-  // Written as "off" rather than removed, so the attribute's absence during
-  // first paint still means the default (on).
-  useEffect(() => {
-    document.documentElement.setAttribute("data-diagram-colors", diagramColors ? "on" : "off");
-    savePrefs({ diagramColors });
-  }, [diagramColors]);
-
-  // The explainer camera rides the same channel, for the same reason.
-  useEffect(() => {
-    document.documentElement.setAttribute("data-diagram-camera", diagramCamera ? "on" : "off");
-    savePrefs({ diagramCamera });
-  }, [diagramCamera]);
-
-  // Step order and step numbers ride the same channel.
-  useEffect(() => {
-    const root = document.documentElement;
-    root.setAttribute("data-diagram-order", diagramFollowNumbers ? "numbered" : "auto");
-    root.setAttribute("data-diagram-numbers", diagramNumbers ? "on" : "off");
-    savePrefs({ diagramFollowNumbers, diagramNumbers });
-  }, [diagramFollowNumbers, diagramNumbers]);
-
-  // Turning AI off removes its surfaces rather than disabling them, so the
-  // attribute is published for CSS as well as read through props.
-  useEffect(() => {
-    document.documentElement.setAttribute("data-ai", aiEnabled ? "on" : "off");
-    savePrefs({ aiEnabled });
-  }, [aiEnabled]);
-
-  // A custom face lives in IndexedDB, so it has to be re-registered with the
-  // FontFace API on every boot before `[data-font="custom"]` can resolve it.
-  // If the file is gone (cleared storage, another device), fall back rather
-  // than leaving the reader on a family that no longer exists.
-  useEffect(() => {
-    let cancelled = false;
-    void restoreCustomFont().then((record) => {
-      if (cancelled || record) return;
-      setReadingFont((current) => (current === "custom" ? "hyperlegible" : current));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // A Google family is only a stored *name*, so the stylesheet has to be
-  // re-requested on every boot before `[data-font="google"]` can resolve it.
-  // A family that no longer loads (offline, renamed upstream) falls back rather
-  // than leaving the reader on a face that never arrives.
-  useEffect(() => {
-    if (!googleFont) return;
-    let cancelled = false;
-    void loadGoogleFont(googleFont).catch(() => {
-      if (cancelled) return;
-      setReadingFont((current) => (current === "google" ? "hyperlegible" : current));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [googleFont]);
+  const { sidebarWrapRef, sidebarInnerRef } = useSidebarCollapseAnimation(sidebarCollapsed);
 
   // Warm the UI font after first contentful paint. Markdown plugins stay
   // demand-loaded; idle importing them still adds download and execution work
@@ -759,72 +576,17 @@ export function DocsApp() {
     };
   }, []);
 
-  useEffect(() => {
-    savePrefs({ theme });
-  }, [theme]);
-
-  useEffect(() => {
-    savePrefs({ readingMode });
-  }, [readingMode]);
-
-  useEffect(() => {
-    savePrefs({ mathRenderer, mathNumbering, mathExplorer });
-  }, [mathRenderer, mathNumbering, mathExplorer]);
-
-  useEffect(() => {
-    savePrefs({ contentWidth });
-  }, [contentWidth]);
-
-  /**
-   * Switching engines invalidates every rendered equation: the cache is keyed
-   * by renderer preference, so the old entries are simply unreachable rather
-   * than wrong — but dropping them keeps memory from holding two full sets.
-   */
-  useEffect(() => {
-    clearMathCache();
-  }, [mathRenderer]);
-
-  /**
-   * MathJax's accessibility explorer, turned on for the page when the reader
-   * asks for it. It pulls in a speech-rule engine, which is why it is neither
-   * the default nor loaded alongside MathJax itself.
-   */
-  useEffect(() => {
-    if (!mathExplorer) return;
-    // Imported here rather than at module scope: a static import would pull
-    // MathJax's adapter — and with it the loader for a 1 MB engine — into the
-    // initial bundle of every reader, math or no math.
-    void import("@/services/math/adapters/mathjax")
-      .then((module) => module.enableExplorer())
-      .catch(() => {
-        // Nothing to recover: expressions stay readable, they just aren't
-        // keyboard-explorable. Surfacing a toast for it would be noise.
-      });
-  }, [mathExplorer]);
-
-  /**
-   * What the viewer passes to its math layer. Memoized because it crosses into
-   * a memoized component — a fresh object here would re-render every document.
-   */
-  const mathPreferences = useMemo<MathPreferences>(
-    () => ({ renderer: mathRenderer, numberEquations: mathNumbering }),
-    [mathRenderer, mathNumbering],
-  );
-
-  useEffect(() => {
-    savePrefs({ readingFont });
-  }, [readingFont]);
-
-  useEffect(() => {
-    savePrefs({ googleFont });
-  }, [googleFont]);
-
   // ---- persistence core ----
 
+  // Storage revision the in-memory workspace is based on. Every write sends it
+  // and storage refuses the write if another tab has committed since, so a
+  // stale snapshot can never silently replace newer work (see persistence.ts).
+  const storageRevisionRef = useRef<string | undefined>(undefined);
   const buildRecord = useCallback((): WorkspaceRecord => {
     const s = snapshotRef.current;
     return {
       id: workspaceIdRef.current ?? crypto.randomUUID(),
+      revision: storageRevisionRef.current,
       name: workspaceNameRef.current,
       createdAt: createdAtRef.current,
       updatedAt: Date.now(),
@@ -867,52 +629,129 @@ export function DocsApp() {
   const mutationRef = useRef(0);
   const savedMutationRef = useRef(0);
   const workspaceConflictRef = useRef(false);
+  // `storedRecordRef` is what storage holds at `storageRevisionRef`;
+  // `baseRecordRef` is the snapshot this tab's state was last reconciled with.
+  // They are the same object until another tab commits, and the difference
+  // between them is exactly what that tab changed (see merge.ts).
+  const storedRecordRef = useRef<WorkspaceRecord | null>(null);
+  const baseRecordRef = useRef<WorkspaceRecord | null>(null);
+  // Set by `hydrateWorkspace`, which is declared after the writer.
+  const adoptRef = useRef<(ws: WorkspaceRecord) => void>(() => {});
+  // Why the last write was refused. While set, nothing is written; the banner
+  // offers to keep this tab's version as a copy or to load the saved one.
+  const [conflict, setConflict] = useState<ConflictReason | null>(null);
 
-  const persistNow = useCallback(
-    async (silent: boolean, rejectStale = false) => {
+  const enterConflict = useCallback((reason: ConflictReason) => {
+    workspaceConflictRef.current = true;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setConflict(reason);
+    setSaveStatus("conflict");
+  }, []);
+
+  /**
+   * Write the active workspace now. Only call from inside `persistence.serial`,
+   * so writes from this tab commit in the order they were made.
+   */
+  const writeActive = useCallback(
+    async (silent: boolean, force: boolean): Promise<boolean> => {
       if (workspaceConflictRef.current) return false;
       if (!workspaceIdRef.current) return true;
-      if (mutationRef.current === savedMutationRef.current) {
+      if (!force && mutationRef.current === savedMutationRef.current) {
         // Nothing changed since the last write. Still settle the indicator, so
         // a "Saving…" left over from a coalesced burst doesn't stick.
-        if (!silent) setSaveStatus("saved");
+        if (!silent)
+          setSaveStatus((status) =>
+            status === "saving" || status === "pending" ? "saved" : status,
+          );
         return true;
       }
+      const id = workspaceIdRef.current;
       const pending = mutationRef.current;
-      const targetId = workspaceIdRef.current;
-      try {
-        await persistence.putWorkspace(buildRecord(), { rejectStale });
-        if (workspaceIdRef.current === targetId) {
-          savedMutationRef.current = Math.max(savedMutationRef.current, pending);
-          if (!silent && pending === mutationRef.current) setSaveStatus("saved");
-        }
-        return true;
-      } catch (error) {
-        if (workspaceIdRef.current !== targetId) return false;
-        if (error instanceof WorkspaceConflictError) {
-          workspaceConflictRef.current = true;
-          if (saveTimer.current) clearTimeout(saveTimer.current);
-          setSaveStatus("idle");
-          toast.error(error.message, { id: "workspace-save-error", duration: Infinity });
+      if (!silent) setSaveStatus("saving");
+      const mine = buildRecord();
+      // A refusal means another tab committed first. Re-read, merge this tab's
+      // changes onto theirs, and try again; only a real collision stops here.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const base = baseRecordRef.current;
+        const stored = storedRecordRef.current;
+        const merging = !!base && !!stored && base !== stored;
+        const record = merging ? mergeWorkspaces(base, mine, stored) : { ...mine };
+        if (!record) {
+          enterConflict("changed");
           return false;
         }
-        if (!silent) setSaveStatus("idle");
-        console.error("Could not save workspace", error);
-        toast.error(
-          "Changes could not be saved. Keep this tab open and export your workspace as a backup.",
-          { id: "workspace-save-error" },
-        );
-        return false;
+        record.revision = storageRevisionRef.current;
+        try {
+          await persistence.putWorkspace(record);
+        } catch (error) {
+          if (workspaceIdRef.current !== id) return false;
+          if (error instanceof WorkspaceConflictError && error.reason === "changed") {
+            const latest = await persistence.getWorkspace(id);
+            if (workspaceIdRef.current !== id) return false;
+            if (!latest) {
+              enterConflict("deleted");
+              return false;
+            }
+            storedRecordRef.current = latest;
+            storageRevisionRef.current = latest.revision;
+            continue;
+          }
+          if (error instanceof WorkspaceConflictError) {
+            enterConflict(error.reason);
+            return false;
+          }
+          setSaveStatus("error");
+          console.error("Could not save workspace", error);
+          // Stays on screen until a write commits; see SaveErrorBanner.
+          setSaveError(
+            error instanceof DOMException && error.name === "QuotaExceededError"
+              ? "This browser is out of storage space for Localdox. Free up space or remove large files, then retry. Until then, keep this tab open or export a backup."
+              : "Your latest changes could not be written to this device. Retry, or keep this tab open and export a backup.",
+          );
+          return false;
+        }
+        // Journalled drafts this record now holds are safe to forget.
+        if (journal.has(id)) journal.settle(id, record.files);
+        if (workspaceIdRef.current !== id) return true;
+        storageRevisionRef.current = record.revision;
+        storedRecordRef.current = record;
+        baseRecordRef.current = merging ? mine : record;
+        savedMutationRef.current = Math.max(savedMutationRef.current, pending);
+        if (pending === mutationRef.current) setSaveStatus("saved");
+        setSaveError(null);
+        // Show the other tab's changes here too, unless the reader has changed
+        // something since this snapshot was taken; the next save merges again.
+        if (
+          merging &&
+          mutationRef.current === pending &&
+          !editorDirtyRef.current &&
+          !officeDirtyPanes.current.size
+        )
+          adoptRef.current(record);
+        return true;
       }
+      enterConflict("changed");
+      return false;
     },
-    [buildRecord],
+    [buildRecord, enterConflict, journal],
   );
 
-  // Called by every user mutation. Shows "Saving…", then writes after a pause.
+  /**
+   * Save the active workspace, queued behind every earlier write from this
+   * tab. `force` writes even when no mutation was counted — used right after a
+   * caller has put new state into `snapshotRef` itself.
+   */
+  const persistNow = useCallback(
+    (silent: boolean, force = false) => persistence.serial(() => writeActive(silent, force)),
+    [writeActive],
+  );
+
+  // Called by every user mutation. Shows "Changes pending", then writes after a
+  // pause; the write itself switches the indicator to "Saving…".
   const markDirty = useCallback(() => {
     if (!hydratedRef.current || !workspaceIdRef.current || workspaceConflictRef.current) return;
     mutationRef.current++;
-    setSaveStatus("saving");
+    setSaveStatus("pending");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => void persistNow(false), 700);
   }, [persistNow]);
@@ -921,8 +760,15 @@ export function DocsApp() {
   markDirtyRef.current = markDirty;
 
   const hydrateWorkspace = useCallback(
-    (ws: WorkspaceRecord) => {
+    // `background`: another tab saved this workspace while this one was idle.
+    // Adopt its data without moving the reader's scroll or flashing a status.
+    (ws: WorkspaceRecord, { background = false }: { background?: boolean } = {}) => {
+      storageRevisionRef.current = ws.revision;
+      storedRecordRef.current = ws;
+      baseRecordRef.current = ws;
       workspaceConflictRef.current = false;
+      setConflict(null);
+      setSaveError(null);
       if (saveTimer.current) clearTimeout(saveTimer.current);
       const wsFolders = ws.folders ?? [];
       const folderIds = new Set(wsFolders.map((f) => f.id));
@@ -972,11 +818,16 @@ export function DocsApp() {
       // The live position is tracked in localStorage (see `saveScrollTop`); the
       // record's own value is the fallback for an imported or shared workspace
       // that has never been scrolled on this device.
-      const st = loadScrollTop(ws.id) ?? ws.ui?.scrollTop ?? 0;
+      const st = background ? scrollRef.current : (loadScrollTop(ws.id) ?? ws.ui?.scrollTop ?? 0);
       scrollRef.current = st;
-      // A freshly hydrated workspace is exactly what is on disk.
-      mutationRef.current = 0;
+      // A freshly hydrated workspace is exactly what is on disk — unless the
+      // Bin sweep just dropped expired files. That removal is written straight
+      // back, so the expired bytes are actually reclaimed rather than lingering
+      // until the reader happens to change something else.
+      mutationRef.current = swept.length === parsed.length ? 0 : 1;
       savedMutationRef.current = 0;
+      if (mutationRef.current) saveTimer.current = setTimeout(() => void persistNow(true), 0);
+      if (background) return;
       // Restore the exact scroll after the document has painted. Runs after the
       // viewer's own mount effects, so it wins.
       setTimeout(() => window.scrollTo({ top: st }), 350);
@@ -987,8 +838,9 @@ export function DocsApp() {
         2500,
       );
     },
-    [resetHighlights],
+    [resetHighlights, persistNow],
   );
+  adoptRef.current = (ws) => hydrateWorkspace(ws, { background: true });
 
   const refreshWorkspaceList = useCallback(async () => {
     const list = await persistence.listWorkspaceSummaries();
@@ -1008,29 +860,28 @@ export function DocsApp() {
         let hashSharedWs: WorkspaceRecord | null = null;
         if (window.location.hash.startsWith(SHARE_HASH)) {
           try {
-            const json = await fetchShare(window.location.hash.slice(SHARE_HASH.length));
-            const ws = parseWorkspaceImport(json);
-            ws.id = crypto.randomUUID();
-            // This runs during boot, before anything is on screen, so a name
-            // clash is settled by numbering rather than by a modal prompt the
-            // reader would meet before the app has even drawn.
-            const already = await persistence.listWorkspaceSummaries();
-            ws.name = availableWorkspaceName(`${ws.name} (Shared)`, already);
-            await persistence.putWorkspace(ws);
-            hashSharedWs = ws;
+            hashSharedWs = await importSharedWorkspaceOnce(
+              window.location.hash.slice(SHARE_HASH.length),
+            );
             window.history.replaceState(
               null,
               "",
               window.location.pathname + window.location.search,
             );
-            toast.success("Shared workspace imported successfully!");
           } catch (e) {
             console.error("Failed to import shared workspace", e);
-            toast.error("Invalid or corrupted shared workspace link.");
+            toast.error("Invalid or corrupted shared workspace link.", { id: "share-import" });
           }
         }
 
-        const list = await persistence.listWorkspaceSummaries();
+        // Queued behind any write still in flight — including the final save of
+        // the route this instance replaced — so it reads what that route saw.
+        const { list, ws } = await persistence.serial(async () => {
+          const list = await persistence.listWorkspaceSummaries();
+          if (list.length === 0 && !hashSharedWs) return { list, ws: undefined };
+          const selected = list.find((w) => w.id === prefs.lastWorkspaceId) ?? list[0];
+          return { list, ws: hashSharedWs ?? (await persistence.getWorkspace(selected.id)) };
+        });
         if (list.length === 0 && !hashSharedWs) {
           if (!alive) return;
           setWorkspaces([]);
@@ -1038,8 +889,6 @@ export function DocsApp() {
           workspaceIdRef.current = null;
           setSaveStatus("idle");
         } else {
-          const selected = list.find((w) => w.id === prefs.lastWorkspaceId) ?? list[0];
-          const ws = hashSharedWs ?? (await persistence.getWorkspace(selected.id));
           if (!alive) return;
           if (!ws) throw new Error("The selected workspace could not be loaded");
           list.sort((a, b) => a.createdAt - b.createdAt);
@@ -1091,6 +940,10 @@ export function DocsApp() {
       });
     };
     const flush = () => {
+      // First, synchronously: the IndexedDB write below may never finish if
+      // the page is being torn down, but a journalled draft is already on disk.
+      if (journalTimer.current) clearTimeout(journalTimer.current);
+      journal.flush();
       if (!hydratedRef.current) return;
       const id = workspaceIdRef.current;
       if (id) saveScrollTop(id, scrollRef.current);
@@ -1099,16 +952,30 @@ export function DocsApp() {
     const onVisibility = () => {
       if (document.visibilityState === "hidden") flush();
     };
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      flush();
+      // Only when storage is known not to hold the latest state. Ordinary
+      // pending edits are journalled or about to be written, and prompting on
+      // every close would teach readers to ignore the prompt.
+      if (saveErrorRef.current || workspaceConflictRef.current) event.preventDefault();
+    };
     window.addEventListener("scroll", onScroll, { passive: true });
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("beforeunload", flush);
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", onBeforeUnload);
     return () => {
       if (frame) cancelAnimationFrame(frame);
       window.removeEventListener("scroll", onScroll);
       document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("beforeunload", flush);
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      // Every route mounts its own instance of this component. A save still
+      // waiting on its debounce is queued now, ahead of the next route's read,
+      // instead of firing later from an instance nobody is looking at.
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      flush();
     };
-  }, [persistNow]);
+  }, [persistNow, journal]);
 
   // ---- file + navigation actions (each marks the workspace dirty) ----
 
@@ -1221,6 +1088,7 @@ export function DocsApp() {
         if (!workspaceIdRef.current) {
           const id = crypto.randomUUID();
           workspaceIdRef.current = id;
+          storageRevisionRef.current = undefined;
           workspaceNameRef.current = "My workspace";
           createdAtRef.current = Date.now();
           setWorkspaceId(id);
@@ -1240,8 +1108,14 @@ export function DocsApp() {
         setFolders(nextFolders);
         setActiveFileId(nextActiveFileId);
         setSaveStatus("saving");
-        await persistence.putWorkspace(buildRecord());
-        setSaveStatus("saved");
+        if (!(await persistNow(false, true))) {
+          // The files are open in this tab but not on disk. Stay here: another
+          // route would hydrate from storage and they would be gone.
+          toast.error("The files are open but could not be saved to this device yet.", {
+            id: toastId,
+          });
+          return [...kept, ...existing];
+        }
 
         toast.success(`Successfully uploaded ${kept.length} file${kept.length > 1 ? "s" : ""}!`, {
           id: toastId,
@@ -1249,12 +1123,12 @@ export function DocsApp() {
         if (!attachments) navigate({ to: "/" }); // Attachments keep the editor open.
         return [...kept, ...existing];
       } catch {
-        setSaveStatus("idle");
+        setSaveStatus((status) => (status === "saving" ? "idle" : status));
         toast.error("Could not upload the selected file(s). Please try again.", { id: toastId });
         return [];
       }
     },
-    [buildRecord, navigate],
+    [navigate, persistNow],
   );
 
   const importAttachments = useCallback((files: File[]) => addFiles(files, true), [addFiles]);
@@ -1347,6 +1221,10 @@ export function DocsApp() {
    * prompt meaningful when it does appear.
    */
   const editorDirtyRef = useRef(false);
+  const syncEditorDirty = useCallback(
+    () => setEditorDirty(editorDirtyRef.current || officeDirtyPanes.current.size > 0),
+    [],
+  );
   const confirmDiscardDraft = useCallback((fileId?: string) => {
     // Re-opening the document already on screen is not leaving it.
     if (!editorDirtyRef.current && !officeDirtyPanes.current.size) return true;
@@ -1355,7 +1233,13 @@ export function DocsApp() {
   }, []);
 
   const handleSelect = useCallback(
-    (fileId: string, headingId?: string, query?: string, matchedLine?: string) => {
+    (
+      fileId: string,
+      headingId?: string,
+      query?: string,
+      matchedLine?: string,
+      occurrence?: number,
+    ) => {
       if (!confirmDiscardDraft(fileId)) return;
       setActiveFileId(fileId);
       if (query !== undefined) setHighlightQuery(query || null);
@@ -1363,7 +1247,9 @@ export function DocsApp() {
       // passage instead of to the heading above it. Always a fresh object, so
       // running the same search twice still moves the reader the second time.
       setPendingSearch(
-        matchedLine ? { fileId, text: matchedLine, query: query?.trim() || "" } : null,
+        matchedLine
+          ? { fileId, text: matchedLine, query: query?.trim() || "", occurrence: occurrence ?? 0 }
+          : null,
       );
 
       let targetHeadingId = headingId;
@@ -1481,7 +1367,6 @@ export function DocsApp() {
       file={file}
       files={files}
       runningId={conversion.runningId}
-      onConvert={conversion.start}
       onCancel={conversion.cancel}
       onOpen={handleSelect}
       onCompare={openBeside}
@@ -1650,7 +1535,9 @@ export function DocsApp() {
         selected,
         format,
         (done) => {
-          toast.loading(`Exporting ${done} of ${total} as ${FORMAT_LABEL[format]}…`, { id: toastId });
+          toast.loading(`Exporting ${done} of ${total} as ${FORMAT_LABEL[format]}…`, {
+            id: toastId,
+          });
         },
         {
           workspaceId: workspaceIdRef.current,
@@ -2059,17 +1946,12 @@ flowchart LR
 
       if (workspaceIdRef.current) {
         setSaveStatus("saving");
-        try {
-          await persistence.putWorkspace(buildRecord());
-          setSaveStatus("saved");
-        } catch {
-          setSaveStatus("idle");
-        }
+        await persistNow(false, true);
       }
 
       navigate({ to: "/" });
     },
-    [buildRecord, navigate],
+    [navigate, persistNow],
   );
 
   const handleDocumentSave = useCallback(
@@ -2111,6 +1993,98 @@ flowchart LR
     [markDirty],
   );
 
+  // ---- recovered drafts ----
+  //
+  // Edits journalled by a tab that has since gone (closed, crashed, killed)
+  // and that storage never received. Checked whenever a workspace opens;
+  // drafts from tabs still open elsewhere are theirs to save.
+  const [recovered, setRecovered] = useState<(DraftEntry & { asCopy: boolean })[]>([]);
+  useEffect(() => {
+    setRecovered([]);
+    if (booting || !workspaceId) return;
+    const id = workspaceId;
+    const entries = journal.list(id);
+    if (entries.length === 0) return;
+    let alive = true;
+    void liveSessions().then((live) => {
+      if (!alive || workspaceIdRef.current !== id) return;
+      const { offer, stale } = recoverableDrafts(entries, snapshotRef.current.files, {
+        session: journal.session,
+        live,
+      });
+      for (const entry of stale) journal.discard(id, entry.fileId);
+      setRecovered(offer.map((entry) => ({ ...entry, asCopy: entry.changedSince })));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [booting, workspaceId, journal]);
+
+  const discardRecovered = useCallback(
+    (fileId: string) => {
+      const id = workspaceIdRef.current;
+      if (id) journal.discard(id, fileId);
+      setRecovered((list) => list.filter((entry) => entry.fileId !== fileId));
+    },
+    [journal],
+  );
+
+  const restoreRecovered = useCallback(
+    (fileId: string) => {
+      const id = workspaceIdRef.current;
+      const entry = recovered.find((e) => e.fileId === fileId);
+      if (!id || !entry) return;
+      const current = snapshotRef.current.files.find((f) => f.id === fileId);
+      // Checked again now rather than trusted from when the offer was made:
+      // restoring in place must never overwrite a version saved since.
+      const inPlace = !!current && !current.deletedAt && hashText(current.content) === entry.base;
+      let targetId = fileId;
+      let targetName = current?.name ?? entry.fileName;
+      if (inPlace) {
+        handleContentChange(fileId, entry.text);
+      } else {
+        const taken = new Set(snapshotRef.current.files.map((f) => f.name));
+        const dot = entry.fileName.lastIndexOf(".");
+        const stem = dot > 0 ? entry.fileName.slice(0, dot) : entry.fileName;
+        const extension = dot > 0 ? entry.fileName.slice(dot) : ".md";
+        const name = uniqueFileName(`${stem} (recovered)${extension}`, taken);
+        targetId = `${name}-${crypto.randomUUID().slice(0, 8)}`;
+        targetName = name;
+        const doc: MdFile = {
+          id: targetId,
+          name,
+          content: entry.text,
+          mimeType: current?.mimeType ?? "text/markdown",
+          size: new TextEncoder().encode(entry.text).byteLength,
+          addedAt: Date.now(),
+          kind: current?.kind,
+          folderId: current && !current.deletedAt ? (current.folderId ?? null) : null,
+        };
+        setFiles((prev) => [...prev, doc]);
+        markDirty();
+      }
+      // Re-owned by this tab until the write holding it commits (`settle`).
+      journal.stage({
+        workspaceId: id,
+        fileId: targetId,
+        fileName: targetName,
+        text: entry.text,
+        base: inPlace && current ? hashText(current.content) : hashText(""),
+      });
+      if (targetId !== fileId) journal.discard(id, fileId);
+      journal.flush();
+      setRecovered((list) => list.filter((e) => e.fileId !== fileId));
+      setActiveFileId(targetId);
+      setActiveHeadingId(null);
+      toast.success(
+        inPlace
+          ? `Restored your edits to “${entry.fileName}”.`
+          : "Your edits were restored as a copy.",
+      );
+    },
+    [recovered, handleContentChange, journal, markDirty, setActiveFileId],
+  );
+
   useEffect(() => {
     if (!activeFile) return;
     const hash = window.location.hash.slice(1);
@@ -2131,8 +2105,6 @@ flowchart LR
     markDirty();
   }, [activeFileId, markDirty]);
 
-  const cycleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
-
   const nextReadingMin = nextFile ? readingMinutes(nextFile.content) : null;
 
   // ---- workspace management ----
@@ -2141,13 +2113,145 @@ flowchart LR
     async (id: string) => {
       if (id === workspaceIdRef.current) return;
       if (!(await persistNow(true))) return;
-      const ws = await persistence.getWorkspace(id);
+      const ws = await persistence.serial(() => persistence.getWorkspace(id));
       if (!ws) return;
       hydrateWorkspace(ws);
       savePrefs({ lastWorkspaceId: id });
     },
     [persistNow, hydrateWorkspace],
   );
+
+  // ---- other tabs ----
+  //
+  // A commit in another tab is announced here. It is only a hint: the revision
+  // check inside every write is what actually prevents a stale overwrite. An
+  // idle tab quietly adopts the other tab's data; a tab holding unsaved work
+  // goes straight to the conflict banner instead of waiting to fail a save.
+  const hasUnsavedWork = useCallback(
+    () =>
+      mutationRef.current !== savedMutationRef.current ||
+      editorDirtyRef.current ||
+      officeDirtyPanes.current.size > 0,
+    [],
+  );
+
+  useEffect(
+    () =>
+      persistence.subscribe((change) => {
+        const id = workspaceIdRef.current;
+        if (!hydratedRef.current) return;
+        void refreshWorkspaceList();
+        if (!id || workspaceConflictRef.current) return;
+        if (change.type === "cleared" || (change.type === "deleted" && change.id === id)) {
+          enterConflict("deleted");
+          return;
+        }
+        if (change.type !== "changed" || change.id !== id) return;
+        if (change.revision === storageRevisionRef.current) return;
+        void persistence.serial(async () => {
+          const latest = await persistence.getWorkspace(id);
+          if (workspaceIdRef.current !== id || workspaceConflictRef.current) return;
+          if (!latest) return enterConflict("deleted");
+          if (latest.revision === storageRevisionRef.current) return;
+          if (hasUnsavedWork()) {
+            // This tab's pending save will merge onto the other tab's commit
+            // (and only stop for the reader if both changed the same thing).
+            storedRecordRef.current = latest;
+            storageRevisionRef.current = latest.revision;
+            return;
+          }
+          // Keep this tab's own view — which documents are open, what is
+          // expanded — and take everything else from storage.
+          const view = buildRecord().ui;
+          hydrateWorkspace(
+            {
+              ...latest,
+              ui: { ...latest.ui, ...view, fileOrder: latest.ui.fileOrder },
+            },
+            { background: true },
+          );
+        });
+      }),
+    [buildRecord, enterConflict, hasUnsavedWork, hydrateWorkspace, refreshWorkspaceList],
+  );
+
+  const [resolvingConflict, setResolvingConflict] = useState(false);
+
+  /** Save this tab's version as a new workspace and carry on in it. */
+  const keepMyVersion = useCallback(async () => {
+    setResolvingConflict(true);
+    try {
+      const mine = buildRecord();
+      const existing = await persistence.listWorkspaceSummaries();
+      const copy: WorkspaceRecord = {
+        ...mine,
+        id: crypto.randomUUID(),
+        revision: undefined,
+        name: availableWorkspaceName(
+          conflict === "deleted" ? mine.name : `${mine.name} (my changes)`,
+          existing,
+        ),
+        createdAt: Date.now(),
+      };
+      await persistence.serial(() => persistence.putWorkspace(copy));
+      await refreshWorkspaceList();
+      hydrateWorkspace(copy, { background: true });
+      setSaveStatus("saved");
+      savePrefs({ lastWorkspaceId: copy.id });
+      toast.success(`Your version is saved as “${copy.name}”.`, {
+        description: conflict === "deleted" ? undefined : "The other tab's version is unchanged.",
+      });
+    } catch (error) {
+      console.error("Could not keep this tab's version", error);
+      toast.error("Your version could not be saved. Export this workspace as a backup.", {
+        id: "workspace-save-error",
+      });
+    } finally {
+      setResolvingConflict(false);
+    }
+  }, [buildRecord, conflict, hydrateWorkspace, refreshWorkspaceList]);
+
+  /** Drop this tab's unsaved version and show what storage holds. */
+  const loadSavedVersion = useCallback(async () => {
+    setResolvingConflict(true);
+    try {
+      const id = workspaceIdRef.current;
+      const latest = id ? await persistence.serial(() => persistence.getWorkspace(id)) : undefined;
+      if (latest) {
+        hydrateWorkspace(latest);
+        return;
+      }
+      const list = await persistence.listWorkspaceSummaries();
+      await refreshWorkspaceList();
+      const next = list[0] ? await persistence.getWorkspace(list[0].id) : undefined;
+      if (next) {
+        hydrateWorkspace(next);
+        savePrefs({ lastWorkspaceId: next.id });
+        return;
+      }
+      // Nothing left anywhere: back to the empty first-run state.
+      workspaceConflictRef.current = false;
+      setConflict(null);
+      workspaceIdRef.current = null;
+      storageRevisionRef.current = undefined;
+      setWorkspaceId(null);
+      setFiles([]);
+      setFolders([]);
+      setSaved([]);
+      setSaveStatus("idle");
+    } finally {
+      setResolvingConflict(false);
+    }
+  }, [hydrateWorkspace, refreshWorkspaceList]);
+
+  const conflictBanner = conflict ? (
+    <ConflictBanner
+      reason={conflict}
+      busy={resolvingConflict}
+      onKeepBoth={() => void keepMyVersion()}
+      onUseSaved={() => void loadSavedVersion()}
+    />
+  ) : null;
 
   /**
    * What the sidebar asked to move, held while the reader picks a destination.
@@ -2182,12 +2286,11 @@ flowchart LR
   /**
    * Move documents and folders into another workspace.
    *
-   * The destination is written first and the source is only trimmed once that
-   * write has succeeded. Done the other way round, a failure between the two
-   * steps would take the documents out of this workspace without putting them
-   * in the other one — the one outcome a local-first app must never produce.
-   * The cost of this order is a possible duplicate rather than a loss, which is
-   * the right way for it to fail.
+   * Both workspaces are written in one transaction, each checked against the
+   * revision it was read at: either the documents are in the destination and
+   * gone from here, or nothing changed at all. It runs inside the write queue,
+   * so no save from this tab can land between reading the destination and
+   * committing the move.
    */
   const moveToWorkspace = useCallback(
     async (destinationId: string) => {
@@ -2197,26 +2300,50 @@ flowchart LR
       setMoving(true);
       const toastId = toast.loading("Moving…");
       try {
-        // Flush this workspace first: the plan is built from live state, and an
-        // unsaved edit would otherwise be written back over the move.
-        if (!(await persistNow(true))) throw new Error("Could not save this workspace first.");
+        const result = await persistence.serial(async () => {
+          if (workspaceConflictRef.current)
+            throw new Error("Resolve the conflict with another tab first.");
+          const destination = await persistence.getWorkspace(destinationId);
+          if (!destination) throw new Error("That workspace no longer exists.");
 
-        const destination = await persistence.getWorkspace(destinationId);
-        if (!destination) throw new Error("That workspace no longer exists.");
+          // The source is this tab's current snapshot, unsaved edits included,
+          // so the move also saves them — nothing is written back over it later.
+          const pending = mutationRef.current;
+          const current = buildRecord();
+          const plan = planTransfer(current, destination, selection);
+          if (!plan.files.length && !plan.folders.length) return null;
 
-        const plan = planTransfer(
-          { files: filesRef.current, folders, saved, highlights },
-          destination,
-          selection,
-        );
-        if (!plan.files.length && !plan.folders.length) {
+          const layout = closeFileEverywhere(snapshotRef.current.paneLayout, [
+            ...plan.removeFileIds,
+          ]);
+          const source = removeFromSource(current, plan);
+          source.ui = {
+            ...source.ui,
+            panes: toPersisted(layout),
+            focusedPaneId: layout.focusedPaneId,
+            activeFileId: activeFileOf(layout),
+            fileOrder: source.files.map((file) => file.id),
+          };
+          try {
+            await persistence.putWorkspaces([source, applyToDestination(destination, plan)]);
+          } catch (error) {
+            if (error instanceof WorkspaceConflictError && error.workspaceId === source.id)
+              enterConflict(error.reason);
+            throw error;
+          }
+          storageRevisionRef.current = source.revision;
+          storedRecordRef.current = source;
+          baseRecordRef.current = source;
+          savedMutationRef.current = Math.max(savedMutationRef.current, pending);
+          return { plan, destination };
+        });
+        if (!result) {
           toast.info("Nothing to move", { id: toastId });
           return;
         }
+        const { plan, destination } = result;
 
-        await persistence.putWorkspace(applyToDestination(destination, plan));
-
-        // Only now does anything leave this workspace.
+        // Storage already holds this state; bring the view in line with it.
         setFiles((prev) => prev.filter((file) => !plan.removeFileIds.has(file.id)));
         setFolders((prev) => prev.filter((folder) => !plan.removeFolderIds.has(folder.id)));
         setSaved((prev) => prev.filter((item) => !plan.removeFileIds.has(item.fileId)));
@@ -2224,8 +2351,6 @@ flowchart LR
         // A moved document must not stay open in a pane pointing at a file this
         // workspace no longer has.
         setPaneLayout((prev) => closeFileEverywhere(prev, [...plan.removeFileIds]));
-        markDirty();
-        await persistNow(true);
         await refreshWorkspaceList();
 
         const counts = transferCounts(plan);
@@ -2235,25 +2360,21 @@ flowchart LR
         ].filter(Boolean);
         toast.success(`Moved ${parts.join(" and ")} to ${destination.name}`, { id: toastId });
       } catch (error) {
-        toast.error("Move failed", {
+        toast.error("Move failed — nothing was moved", {
           id: toastId,
-          description: error instanceof Error ? error.message : undefined,
+          description:
+            error instanceof WorkspaceConflictError
+              ? "One of the workspaces changed in another tab."
+              : error instanceof Error
+                ? error.message
+                : undefined,
         });
       } finally {
         setMoving(false);
         setPendingMove(null);
       }
     },
-    [
-      pendingMove,
-      folders,
-      saved,
-      highlights,
-      persistNow,
-      markDirty,
-      refreshWorkspaceList,
-      setHighlights,
-    ],
+    [pendingMove, buildRecord, enterConflict, refreshWorkspaceList, setHighlights],
   );
 
   const openEmbeddedArtifact = useCallback(
@@ -2283,7 +2404,7 @@ flowchart LR
       if (!finalName) return;
       if (!(await persistNow(true))) return;
       const ws = newWorkspaceRecord(finalName);
-      await persistence.putWorkspace(ws);
+      await persistence.serial(() => persistence.putWorkspace(ws));
       await refreshWorkspaceList();
       hydrateWorkspace(ws);
       savePrefs({ lastWorkspaceId: ws.id });
@@ -2322,42 +2443,53 @@ flowchart LR
         ws.name = finalName;
 
         if (!(await persistNow(true))) return;
-        await persistence.putWorkspace(ws);
+        await persistence.serial(() => persistence.putWorkspace(ws));
         await refreshWorkspaceList();
         hydrateWorkspace(ws);
         savePrefs({ lastWorkspaceId: ws.id });
-      } catch {
+      } catch (error) {
         setSaveStatus("idle");
-        alert("That file isn't a valid workspace export.");
+        // Validation runs before anything is written, so nothing was imported.
+        toast.error(
+          error instanceof ImportValidationError
+            ? `Nothing was imported. ${error.message}`
+            : "Nothing was imported. That file isn't a valid workspace backup.",
+          { id: "workspace-import-error" },
+        );
       }
     },
     [persistNow, refreshWorkspaceList, hydrateWorkspace, storedWorkspaces, switchWorkspace],
   );
 
-  const exportWorkspace = useCallback(() => {
-    const rec = buildRecord();
-    const blob = new Blob([serializeWorkspace(rec)], { type: "application/json" });
+  /** Save a workspace backup (full, or a share selection) as a .json download. */
+  const downloadJson = useCallback((json: string, name: string) => {
+    const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${rec.name.trim().replace(/\s+/g, "-").toLowerCase() || "workspace"}.json`;
+    a.download = `${name.trim().replace(/\s+/g, "-").toLowerCase() || "workspace"}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }, [buildRecord]);
+  }, []);
 
-  const shareWorkspace = useCallback(async () => {
-    try {
-      toast.loading("Generating share link...", { id: "share-workspace" });
-      const key = await uploadShare(serializeWorkspace(buildRecord()));
-      const url = `${window.location.origin}${window.location.pathname}${SHARE_HASH}${key}`;
-      await copyLink(url);
-      toast.success("Workspace link copied to clipboard!", { id: "share-workspace" });
-    } catch (e) {
-      console.error(e);
-      toast.error("Failed to generate share link. Workspace might be too large.", {
-        id: "share-workspace",
-      });
+  const exportWorkspace = useCallback(() => {
+    const rec = buildRecord();
+    downloadJson(serializeWorkspace(rec), rec.name);
+  }, [buildRecord, downloadJson]);
+
+  // Sharing uploads to a third party, so it never happens straight from a menu
+  // click: both entry points open SharePreviewDialog, which names the
+  // destination, lists the files, keeps the Bin and annotations out by default
+  // and offers a local download instead. Backup export stays separate above.
+  const [shareRequest, setShareRequest] = useState<ShareRequest | null>(null);
+
+  const shareWorkspace = useCallback(() => {
+    const record = buildRecord();
+    if (record.files.length === 0) {
+      toast.info("This workspace has no files to share yet.");
+      return;
     }
+    setShareRequest({ mode: "workspace", record, fileIds: record.files.map((f) => f.id) });
   }, [buildRecord]);
 
   /**
@@ -2365,38 +2497,24 @@ flowchart LR
    * this one asks the recipient where the files should land — see
    * `SharedFilesDialog` and `acceptSharedFiles`.
    */
-  const shareFiles = useCallback(async (fileIds: string[]) => {
-    const picked = snapshotRef.current.files.filter((f) => fileIds.includes(f.id));
-    if (picked.length === 0) return;
-    const label = picked.length === 1 ? `“${picked[0].name}”` : `${picked.length} files`;
-    try {
-      toast.loading(`Generating link for ${label}...`, { id: "share-files" });
-      const json = serializeSharedFiles(
-        picked.map((f) => ({
-          id: f.id,
-          name: f.name,
-          content: f.content,
-          data: f.data,
-          mimeType: f.mimeType,
-          size: f.size,
-          addedAt: f.addedAt,
-          kind: f.kind,
-        })),
-        workspaceNameRef.current,
-      );
-      const key = await uploadShare(json);
-      const url = `${window.location.origin}${window.location.pathname}${SHARE_FILES_HASH}${key}`;
-      await copyLink(url);
-      toast.success(`Link to ${label} copied to clipboard!`, { id: "share-files" });
-    } catch (e) {
-      console.error(e);
-      toast.error("Failed to generate share link. The files might be too large.", {
-        id: "share-files",
-      });
-    }
+  const shareFiles = useCallback(
+    (fileIds: string[]) => {
+      const record = buildRecord();
+      const ids = record.files.filter((f) => fileIds.includes(f.id)).map((f) => f.id);
+      if (ids.length > 0) setShareRequest({ mode: "files", record, fileIds: ids });
+    },
+    [buildRecord],
+  );
+
+  const uploadShareLink = useCallback(async (mode: ShareRequest["mode"], json: string) => {
+    const key = await uploadShare(json);
+    const hash = mode === "workspace" ? SHARE_HASH : SHARE_FILES_HASH;
+    // Always the app root: a link made from /settings or /saved should open the
+    // reader for the recipient, not the sender's current page.
+    return `${new URL(import.meta.env.BASE_URL ?? "/", window.location.origin).href}${hash}${key}`;
   }, []);
 
-  const shareFile = useCallback((fileId: string) => void shareFiles([fileId]), [shareFiles]);
+  const shareFile = useCallback((fileId: string) => shareFiles([fileId]), [shareFiles]);
 
   // ---- receiving a #share-files= link ----
   //
@@ -2467,7 +2585,7 @@ flowchart LR
           ws.files = stamped;
           ws.ui.activeFileId = stamped[0].id;
           ws.ui.fileOrder = stamped.map((f) => f.id);
-          await persistence.putWorkspace(ws);
+          await persistence.serial(() => persistence.putWorkspace(ws));
           await refreshWorkspaceList();
           hydrateWorkspace(ws);
           savePrefs({ lastWorkspaceId: ws.id });
@@ -2486,6 +2604,7 @@ flowchart LR
           if (!workspaceIdRef.current) {
             const id = crypto.randomUUID();
             workspaceIdRef.current = id;
+            storageRevisionRef.current = undefined;
             workspaceNameRef.current = payload.sourceName;
             createdAtRef.current = Date.now();
             setWorkspaceId(id);
@@ -2500,8 +2619,7 @@ flowchart LR
           setFiles(nextFiles);
           setActiveFileId(nextActiveFileId);
           setSaveStatus("saving");
-          await persistence.putWorkspace(buildRecord());
-          setSaveStatus("saved");
+          if (!(await persistNow(false, true))) throw new Error("Shared files could not be saved");
           await refreshWorkspaceList();
         }
 
@@ -2514,7 +2632,7 @@ flowchart LR
         if (location.pathname !== "/") navigate({ to: "/" });
       } catch (e) {
         console.error("Failed to import shared files", e);
-        setSaveStatus("idle");
+        setSaveStatus((status) => (status === "saving" ? "idle" : status));
         toast.error("Could not import the shared files. Please try again.");
       } finally {
         setImportingShare(false);
@@ -2533,28 +2651,29 @@ flowchart LR
 
   const deleteWorkspace = useCallback(
     async (id: string) => {
-      await persistence.deleteWorkspace(id);
-      let list: WorkspaceSummary[] = await persistence.listWorkspaceSummaries();
-      if (list.length === 0) {
-        const ws = newWorkspaceRecord("My workspace");
-        await persistence.putWorkspace(ws);
-        list = [
-          {
-            id: ws.id,
-            name: ws.name,
-            createdAt: ws.createdAt,
-            updatedAt: ws.updatedAt,
-            docCount: 0,
-          },
-        ];
+      const active = id === workspaceIdRef.current;
+      if (active) {
+        // Its pending save must not run after the delete and trip over the
+        // missing record.
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        savedMutationRef.current = mutationRef.current;
       }
-      list.sort((a, b) => a.createdAt - b.createdAt);
+      const { list, next } = await persistence.serial(async () => {
+        await persistence.deleteWorkspace(id);
+        let list: WorkspaceSummary[] = await persistence.listWorkspaceSummaries();
+        if (list.length === 0) {
+          const ws = newWorkspaceRecord("My workspace");
+          await persistence.putWorkspace(ws);
+          list = await persistence.listWorkspaceSummaries();
+        }
+        list.sort((a, b) => a.createdAt - b.createdAt);
+        return { list, next: active ? await persistence.getWorkspace(list[0].id) : undefined };
+      });
       setWorkspaces(list);
-      if (id === workspaceIdRef.current) {
-        const next = await persistence.getWorkspace(list[0].id);
+      if (active) {
         if (!next) throw new Error("Workspace could not be loaded");
         hydrateWorkspace(next);
-        savePrefs({ lastWorkspaceId: list[0].id });
+        savePrefs({ lastWorkspaceId: next.id });
       }
     },
     [hydrateWorkspace],
@@ -2562,18 +2681,35 @@ flowchart LR
 
   const renameWorkspace = useCallback(
     async (id: string, newName: string) => {
-      const ws = await persistence.getWorkspace(id);
-      if (!ws) return;
-      const finalName = resolveWorkspaceName(newName, await storedWorkspaces(), { excludeId: id });
-      if (!finalName || finalName === ws.name) return;
-      ws.name = finalName;
-      await persistence.putWorkspace(ws);
-      if (id === workspaceIdRef.current) {
-        workspaceNameRef.current = finalName;
+      const existing = await storedWorkspaces();
+      const current = existing.find((w) => w.id === id);
+      if (!current) return;
+      const finalName = resolveWorkspaceName(newName, existing, { excludeId: id });
+      if (!finalName || finalName === current.name) return;
+      const active = id === workspaceIdRef.current;
+      try {
+        await persistence.serial(async () => {
+          if (!active) {
+            await persistence.renameWorkspace(id, finalName);
+            return;
+          }
+          // The open workspace is renamed through its own revision, so a tab
+          // holding an older copy cannot quietly write the old name back.
+          if (!(await writeActive(true, false))) throw new Error("Save pending changes first");
+          storageRevisionRef.current = await persistence.renameWorkspace(
+            id,
+            finalName,
+            storageRevisionRef.current,
+          );
+          workspaceNameRef.current = finalName;
+        });
+      } catch (error) {
+        if (error instanceof WorkspaceConflictError && active) enterConflict(error.reason);
+        toast.error("The workspace could not be renamed.");
       }
       await refreshWorkspaceList();
     },
-    [refreshWorkspaceList, storedWorkspaces],
+    [enterConflict, refreshWorkspaceList, storedWorkspaces, writeActive],
   );
 
   const clearAllStorage = useCallback(async () => {
@@ -2866,13 +3002,13 @@ flowchart LR
     });
   }, [aiOpen, registerEscape]);
   useEffect(() => {
-    if (!paletteOpen) return;
+    if (!searchOpen) return;
     return registerEscape({
-      id: "palette",
-      depth: ESCAPE_DEPTH.overlay,
-      close: () => setPaletteOpen(false),
+      id: "search-panel",
+      depth: ESCAPE_DEPTH.panel,
+      close: () => setSearchOpen(false),
     });
-  }, [paletteOpen, registerEscape]);
+  }, [searchOpen, registerEscape]);
 
   // The browser's own back/gesture is the same intent as the header's back, so
   // it runs the same code — including closing an open mode first. `popstate`
@@ -2902,31 +3038,20 @@ flowchart LR
   }, []);
   const closeAskAi = useCallback(() => setAiOpen(false), []);
 
-  // Cmd/Ctrl+K. Owned here rather than inside <CommandPalette>, which is code
-  // split and unmounted until the palette opens — a shortcut registered by that
-  // component could not open it the first time.
+  // Cmd/Ctrl+K. The search panel lives docked inside <Sidebar>, which on
+  // mobile is only mounted while the drawer is open — so there, opening
+  // search has to open the drawer too.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (hasModKey(e) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setPaletteOpen((open) => !open);
+        if (mobileNavigation) openDrawer();
+        setSearchOpen((open) => !open);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // Fetch the palette's chunk as soon as the app is idle. It is the most likely
-  // of the split surfaces to be opened, and opening it is a keystroke away, so
-  // it should already be in cache by the time that keystroke arrives.
-  //
-  // Scheduled off the shared idle helper so it queues behind the same work the
-  // other warm-ups do, and is cancelled on unmount rather than firing into a
-  // torn-down tree.
-  useEffect(() => {
-    const handle = requestIdleCallbackSafe(() => void import("./navigation/CommandPalette"), 4000);
-    return () => cancelIdleCallbackSafe(handle);
-  }, []);
+  }, [mobileNavigation, openDrawer]);
 
   // Append AI output to the open document, or spin it out into a new one.
   const insertAiOutput = useCallback(
@@ -2975,50 +3100,77 @@ flowchart LR
     navigate({ to: "/" });
   }, [navigate, newWorkspace]);
 
-  const dragOverlay = globalDrag ? (
-    <div className="fixed inset-0 z-(--z-overlay) flex items-center justify-center bg-background/80 backdrop-blur-sm border-4 border-dashed border-primary transition-all duration-300">
-      <div className="rounded-3xl bg-card p-10 shadow-2xl flex flex-col items-center gap-6 animate-in fade-in zoom-in duration-300">
-        <Upload className="h-16 w-16 text-primary animate-bounce" />
-        <div className="text-center">
-          <h2 className="text-3xl font-bold text-foreground">Drop files to upload</h2>
-          <p className="mt-2 text-base text-muted-foreground">
-            Documents, spreadsheets, PDFs, and presentations are ready to preview.
-          </p>
-        </div>
-      </div>
-    </div>
-  ) : null;
+  const dragOverlay = <DragDropOverlay open={globalDrag} />;
 
   // Rendered from both the empty state and the reader — a shared link can land
   // on either.
-  const shareDialog = incomingShare ? (
-    <Suspense fallback={null}>
-      <SharedFilesDialog
-        open
-        files={incomingShare.files}
-        sourceName={incomingShare.sourceName}
-        currentWorkspaceName={workspaceId ? workspaceNameRef.current : null}
-        busy={importingShare}
-        onDismiss={() => setIncomingShare(null)}
-        onImport={(target: "new" | "current", ids: string[], name: string) =>
-          void acceptSharedFiles(target, ids, name)
-        }
-      />
-    </Suspense>
-  ) : null;
+  const shareDialog = (
+    <>
+      {incomingShare && (
+        <Suspense fallback={null}>
+          <SharedFilesDialog
+            open
+            files={incomingShare.files}
+            sourceName={incomingShare.sourceName}
+            currentWorkspaceName={workspaceId ? workspaceNameRef.current : null}
+            busy={importingShare}
+            onDismiss={() => setIncomingShare(null)}
+            onImport={(target: "new" | "current", ids: string[], name: string) =>
+              void acceptSharedFiles(target, ids, name)
+            }
+          />
+        </Suspense>
+      )}
+      {shareRequest && (
+        <Suspense fallback={null}>
+          <SharePreviewDialog
+            request={shareRequest}
+            onDismiss={() => setShareRequest(null)}
+            onUpload={uploadShareLink}
+            onCopy={copyLink}
+            onDownload={downloadJson}
+          />
+        </Suspense>
+      )}
+    </>
+  );
 
-  // Search palette. Split out of the main bundle, so it is only in the tree
-  // while it is open; its chunk is warmed on idle above.
-  const commandPalette = paletteOpen ? (
-    <Suspense fallback={null}>
-      <CommandPalette
-        files={files}
-        open
-        onOpenChange={setPaletteOpen}
-        onSelect={showSettings ? openFromHome : handleSelect}
-      />
-    </Suspense>
-  ) : null;
+  const {
+    hits: searchHits,
+    pending: searchPending,
+    loadingWorkspaces,
+  } = useSearchIndex({
+    active: searchOpen,
+    currentWorkspaceId: workspaceId,
+    files,
+    workspaces,
+    query: searchQuery,
+    crossWorkspace: searchCrossWorkspace,
+  });
+  const handleSearchHitSelect = useCallback(
+    async (hit: SearchHit) => {
+      await switchWorkspace(hit.workspaceId);
+      if (showSettings) await openFromHome(hit.fileId, hit.headingId);
+      else handleSelect(hit.fileId, hit.headingId, searchQuery, hit.line, hit.occurrence);
+      // Clicking a result jumps the reader to it; the panel stays open so more
+      // results can be tried without reopening it, the way VS Code's does.
+    },
+    [switchWorkspace, showSettings, openFromHome, handleSelect, searchQuery],
+  );
+  const searchPanelState: SearchPanelState | null = searchOpen
+    ? {
+        query: searchQuery,
+        onQueryChange: setSearchQuery,
+        crossWorkspace: searchCrossWorkspace,
+        onCrossWorkspaceChange: setSearchCrossWorkspace,
+        hits: searchHits,
+        pending: searchPending,
+        loadingWorkspaces,
+        onSelectHit: (hit: SearchHit) => void handleSearchHitSelect(hit),
+        workspaceName: (id: string) => workspaces.find((w) => w.id === id)?.name ?? "Workspace",
+        onClose: () => setSearchOpen(false),
+      }
+    : null;
 
   const savedPage = showSaved ? (
     <Suspense fallback={null}>
@@ -3123,279 +3275,285 @@ flowchart LR
     </Suspense>
   ) : null;
 
+  // ---- durability surface ----
+
+  const retrySave = useCallback(async () => {
+    setRetryingSave(true);
+    try {
+      await persistNow(false, true);
+    } finally {
+      setRetryingSave(false);
+    }
+  }, [persistNow]);
+
+  const saveState: SaveState | null = !workspaceId
+    ? null
+    : saveError || conflict
+      ? "error"
+      : saveStatus === "saving"
+        ? "saving"
+        : saveStatus === "pending" || editorDirty
+          ? "pending"
+          : "saved";
+
+  const journalContext = useMemo(
+    () => ({ workspaceId, journal, schedule: scheduleJournalFlush }),
+    [workspaceId, journal, scheduleJournalFlush],
+  );
+
+  // One bottom banner at a time, most urgent first: a conflict is waiting on a
+  // decision, a failed save is losing ground, recovered drafts can wait.
+  const statusBanner =
+    conflictBanner ??
+    (saveError ? (
+      <SaveErrorBanner
+        message={saveError}
+        retrying={retryingSave}
+        onRetry={() => void retrySave()}
+        onExport={exportWorkspace}
+      />
+    ) : recovered.length > 0 ? (
+      <DraftRecoveryBanner
+        drafts={recovered.map((entry): RecoveredDraft => ({
+          fileId: entry.fileId,
+          fileName: entry.fileName,
+          updatedAt: entry.updatedAt,
+          asCopy: entry.asCopy,
+        }))}
+        onRestore={restoreRecovered}
+        onDiscard={discardRecovered}
+      />
+    ) : null);
+
   if (booting) {
-    return <div className="min-h-dvh bg-background" />;
+    return <div className="min-h-dvh bg-background">{statusBanner}</div>;
   }
 
   if (files.length === 0) {
     return (
-      <div className="min-h-dvh bg-background">
-        <Header
-          theme={theme}
-          onCycleTheme={cycleTheme}
-          onMenu={null}
-          hideMenu
-          onOpenPalette={() => setPaletteOpen(true)}
-          hasFiles={false}
-          onAddFiles={() => inputRef.current?.click()}
-          saveStatus={saveStatus}
-          onHome={goHome}
-          workspaces={workspaces}
-          currentWorkspaceId={workspaceId}
-          onSwitchWorkspace={switchWorkspace}
-          onImportWorkspace={importWorkspace}
-          onExportWorkspace={exportWorkspace}
-          onShareWorkspace={shareWorkspace}
-          onDeleteWorkspace={deleteWorkspace}
-          onOpenSettings={openSettings}
-        />
-        {commandPalette}
-        <div className="flex min-h-[calc(100dvh-4rem)] flex-col items-center justify-center px-6 py-12">
-          <div className="w-full max-w-sm text-center">
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              className="group flex w-full flex-col items-center gap-4 rounded-3xl border-2 border-dashed border-border bg-card/40 px-8 py-14 shadow-sm transition-all duration-200 ease-out hover:border-primary/50 hover:bg-primary/5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-transform duration-200 ease-out group-hover:scale-105">
-                <Upload className="h-6 w-6" />
-              </span>
-              <span className="space-y-1">
-                <span className="block text-lg font-semibold text-foreground">
-                  Drop files here, or click to upload
-                </span>
-                <span className="block text-sm text-muted-foreground">
-                  Markdown, PDFs, spreadsheets, slides, images & more
-                </span>
-              </span>
-            </button>
-
-            <div className="mt-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <span className="h-px flex-1 bg-border" aria-hidden="true" />
-              or start something new
-              <span className="h-px flex-1 bg-border" aria-hidden="true" />
-            </div>
-
-            {/* Nothing to right-click yet, so the sidebar's New menu is out of
-                reach — a blank document has to be startable from here too. The
-                same applies to a board: without this the only way to reach one
-                is to first create some other file just to make the sidebar
-                appear. */}
-            <div className="mt-5 flex items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => createFile(null)}
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors duration-150 hover:border-primary/40 hover:bg-accent"
-              >
-                <FilePlus className="h-4 w-4 text-muted-foreground" />
-                New file
-              </button>
-              <button
-                type="button"
-                onClick={() => createBoardFile(null)}
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors duration-150 hover:border-primary/40 hover:bg-accent"
-              >
-                <PenTool className="h-4 w-4 text-muted-foreground" />
-                New board
-              </button>
-            </div>
-          </div>
-        </div>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept={SUPPORTED_ACCEPT}
-          className="hidden"
-          onChange={(e) => {
-            handleFileInput(e.target.files);
-            e.target.value = "";
-          }}
-        />
-        {dragOverlay}
-        {shareDialog}
-        {settingsDialog}
-        {moveDialog}
-      </div>
+      <EmptyWorkspace
+        onHome={goHome}
+        workspaces={workspaces}
+        currentWorkspaceId={workspaceId}
+        onSwitchWorkspace={switchWorkspace}
+        onOpenSettings={openSettings}
+        inputRef={inputRef}
+        onFileInputChange={handleFileInput}
+        onCreateFile={createFile}
+        onCreateBoardFile={createBoardFile}
+        dragOverlay={dragOverlay}
+        shareDialog={shareDialog}
+        settingsDialog={settingsDialog}
+        moveDialog={moveDialog}
+        statusBanner={statusBanner}
+      />
     );
   }
 
   return (
     <NavHistoryContext.Provider value={navHistory}>
-      <div className="min-h-dvh bg-background">
-        <Header
-          hideOnDesktop
-          theme={theme}
-          onCycleTheme={cycleTheme}
-          onMenu={() => setDrawerOpen(true)}
-          onOpenPalette={() => setPaletteOpen(true)}
-          hasFiles
-          onAddFiles={() => inputRef.current?.click()}
-          sidebarCollapsed={sidebarCollapsed}
-          onToggleSidebar={toggleSidebar}
-          saveStatus={saveStatus}
-          onHome={goHome}
-          workspaces={workspaces}
-          currentWorkspaceId={workspaceId}
-          onSwitchWorkspace={switchWorkspace}
-          onImportWorkspace={importWorkspace}
-          onExportWorkspace={exportWorkspace}
-          onShareWorkspace={shareWorkspace}
-          onDeleteWorkspace={deleteWorkspace}
-          onOpenSettings={openSettings}
-        />
+      <DraftJournalContext.Provider value={journalContext}>
+        <div className="min-h-dvh bg-background">
+          <Header
+            hideOnDesktop
+            onMenu={openDrawer}
+            onOpenPalette={() => {
+              openDrawer();
+              setSearchOpen(true);
+            }}
+            hasFiles
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={toggleSidebar}
+            onHome={goHome}
+            workspaces={workspaces}
+            currentWorkspaceId={workspaceId}
+            onSwitchWorkspace={switchWorkspace}
+            onOpenSettings={openSettings}
+            saveIndicator={saveState ? <SaveIndicator state={saveState} compact /> : null}
+          />
 
-        {commandPalette}
-
-        <div className="flex">
-          <div
-            ref={sidebarWrapRef}
-            className="sticky top-0 hidden h-dvh shrink-0 border-r border-border bg-background lg:block"
-            style={{ width: sidebarCollapsed ? 56 : SIDEBAR_WIDTH }}
-          >
-            <div ref={sidebarInnerRef} className="h-full w-full">
-              <Sidebar
-                showEmbedMedia={showEmbedMedia}
-                files={files}
-                activeFileId={activeFileId}
-                activeHeadingId={activeHeadingId}
-                expanded={expanded}
-                onToggleFile={toggleFile}
-                onSelect={handleSelect}
-                onAddFiles={() => inputRef.current?.click()}
-                onRemoveFile={moveToBin}
-                onDownloadFile={downloadFile}
-                onDownloadFiles={downloadFiles}
-                onMoveToWorkspace={workspaces.length > 1 ? setPendingMove : undefined}
-                onShareFile={shareFile}
-                onShareFiles={(ids) => void shareFiles(ids)}
-                onRenameFile={renameFile}
-                onEditFile={editFile}
-                onConvertFile={conversion.start}
-                convertingFileId={conversion.runningId}
-                folders={folders}
-                onCreateFile={createFile}
-                onCreateMermaid={createMermaidFile}
-                onCreateBoard={createBoardFile}
-                onCreateFolder={createFolder}
-                onRenameFolder={renameFolder}
-                onDeleteFolder={deleteFolder}
-                onMoveFileToFolder={moveFileToFolder}
-                onMoveFolderToFolder={moveFolderToFolder}
-                onReorderFile={reorderFile}
-                onSortByName={sortFilesByName}
-                view={sidebarView}
-                onView={setSidebarView}
-                saved={savedEntries}
-                onOpenSaved={openSaved}
-                onRemoveSaved={removeSaved}
-                theme={theme}
-                onCycleTheme={cycleTheme}
-                currentWorkspaceName={workspaceNameRef.current}
-                canDeleteWorkspace={workspaces.length > 1}
-                onRenameCurrentWorkspace={(name) =>
-                  workspaceIdRef.current && void renameWorkspace(workspaceIdRef.current, name)
-                }
-                onDeleteCurrentWorkspace={() =>
-                  workspaceIdRef.current && void deleteWorkspace(workspaceIdRef.current)
-                }
-                onClearStorage={clearAllStorage}
-                highlights={highlights}
-                onRemoveHighlight={removeHighlight}
-                onOpenSettings={openSettings}
-                onAddToSplit={openBeside}
-                splitFileIds={splitFileIds}
-                onAskAi={aiEnabled ? openAskAi : undefined}
-                onImportWorkspace={importWorkspace}
-                onExportWorkspace={exportWorkspace}
-                onShareWorkspace={shareWorkspace}
-                workspaces={workspaces}
-                currentWorkspaceId={workspaceId}
-                onSwitchWorkspace={switchWorkspace}
-                docked
-                onOpenPalette={() => setPaletteOpen(true)}
-                onToggleSidebar={toggleSidebar}
-              />
-            </div>
-
+          <div className="flex">
             <div
-              className="absolute inset-y-0 left-0 flex w-14 flex-col items-center gap-4 border-r border-border bg-background py-3 z-20 transition-opacity duration-200"
-              style={{
-                opacity: sidebarCollapsed ? 1 : 0,
-                pointerEvents: sidebarCollapsed ? "auto" : "none",
-              }}
+              ref={sidebarWrapRef}
+              className="sticky top-0 hidden h-dvh shrink-0 border-r border-border bg-background lg:block"
+              style={{ width: sidebarCollapsed ? 56 : SIDEBAR_WIDTH }}
             >
-              <button
-                onClick={() => setSidebarCollapsed(false)}
-                className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
-                aria-label="Expand sidebar"
-                title="Expand sidebar"
+              <div ref={sidebarInnerRef} className="h-full w-full">
+                <Sidebar
+                  showEmbedMedia={showEmbedMedia}
+                  files={files}
+                  activeFileId={activeFileId}
+                  activeHeadingId={activeHeadingId}
+                  expanded={expanded}
+                  onToggleFile={toggleFile}
+                  onSelect={handleSelect}
+                  onAddFiles={() => inputRef.current?.click()}
+                  onRemoveFile={moveToBin}
+                  onDownloadFile={downloadFile}
+                  onDownloadFiles={downloadFiles}
+                  onMoveToWorkspace={workspaces.length > 1 ? setPendingMove : undefined}
+                  onShareFile={shareFile}
+                  onShareFiles={(ids) => void shareFiles(ids)}
+                  onRenameFile={renameFile}
+                  onEditFile={editFile}
+                  onConvertFile={conversion.start}
+                  convertingFileId={conversion.runningId}
+                  folders={folders}
+                  onCreateFile={createFile}
+                  onCreateMermaid={createMermaidFile}
+                  onCreateBoard={createBoardFile}
+                  onCreateFolder={createFolder}
+                  onRenameFolder={renameFolder}
+                  onDeleteFolder={deleteFolder}
+                  onMoveFileToFolder={moveFileToFolder}
+                  onMoveFolderToFolder={moveFolderToFolder}
+                  onReorderFile={reorderFile}
+                  onSortByName={sortFilesByName}
+                  view={sidebarView}
+                  onView={setSidebarView}
+                  saved={savedEntries}
+                  onOpenSaved={openSaved}
+                  onRemoveSaved={removeSaved}
+                  theme={theme}
+                  onCycleTheme={cycleTheme}
+                  currentWorkspaceName={workspaceNameRef.current}
+                  canDeleteWorkspace={workspaces.length > 1}
+                  onRenameCurrentWorkspace={(name) =>
+                    workspaceIdRef.current && void renameWorkspace(workspaceIdRef.current, name)
+                  }
+                  onDeleteCurrentWorkspace={() =>
+                    workspaceIdRef.current && void deleteWorkspace(workspaceIdRef.current)
+                  }
+                  onClearStorage={clearAllStorage}
+                  highlights={highlights}
+                  onRemoveHighlight={removeHighlight}
+                  onOpenSettings={openSettings}
+                  onAddToSplit={openBeside}
+                  splitFileIds={splitFileIds}
+                  onAskAi={aiEnabled ? openAskAi : undefined}
+                  onImportWorkspace={importWorkspace}
+                  onExportWorkspace={exportWorkspace}
+                  onShareWorkspace={shareWorkspace}
+                  workspaces={workspaces}
+                  currentWorkspaceId={workspaceId}
+                  onSwitchWorkspace={switchWorkspace}
+                  docked
+                  saveIndicator={saveState ? <SaveIndicator state={saveState} /> : null}
+                  onOpenSearch={() => setSearchOpen(true)}
+                  onToggleSidebar={toggleSidebar}
+                  search={searchPanelState}
+                />
+              </div>
+
+              <div
+                className="absolute inset-y-0 left-0 flex w-14 flex-col items-center gap-4 border-r border-border bg-background py-3 z-20 transition-opacity duration-200"
+                style={{
+                  opacity: sidebarCollapsed ? 1 : 0,
+                  pointerEvents: sidebarCollapsed ? "auto" : "none",
+                }}
               >
-                <Menu className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => setPaletteOpen(true)}
-                className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
-                aria-label="Search docs"
-                title="Search docs"
-              >
-                <Search className="h-4 w-4" />
-              </button>
-              {/* The same three ways to add as the expanded sidebar offers —
+                <button
+                  onClick={() => setSidebarCollapsed(false)}
+                  className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  aria-label="Expand sidebar"
+                  title="Expand sidebar"
+                >
+                  <Menu className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    setSidebarCollapsed(false);
+                    setSearchOpen(true);
+                  }}
+                  className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  aria-label="Search docs"
+                  title="Search docs"
+                >
+                  <Search className="h-4 w-4" />
+                </button>
+                {saveState && (
+                  <span
+                    // The rail stays mounted behind the expanded sidebar;
+                    // only the visible copy of the status is read out.
+                    aria-hidden={!sidebarCollapsed}
+                    className="flex h-8 w-8 items-center justify-center"
+                  >
+                    <SaveIndicator state={saveState} compact />
+                  </span>
+                )}
+                {/* The same three ways to add as the expanded sidebar offers —
                   the rail used to jump straight to the file picker, which was
                   the one option of the three you could not undo by closing a
                   menu. Opens rightwards, since there is nothing to its left. */}
-              <AddMenu
-                align="left"
-                onCreateFile={() => createFile(null)}
-                onCreateMermaid={() => createMermaidFile(null)}
-                onCreateBoard={() => createBoardFile(null)}
-                onCreateFolder={promptNewFolderFromRail}
-                onUpload={() => inputRef.current?.click()}
-                buttonClassName="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
-              />
-              <div className="flex-1" />
-              <button
-                onClick={() => openSettings()}
-                className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
-                aria-label="Settings"
-                title="Settings"
-              >
-                <Settings className="h-4 w-4" />
-              </button>
-              {/* The workspace monogram opens the same avatar-strip switcher
+                <AddMenu
+                  align="left"
+                  onCreateFile={() => createFile(null)}
+                  onCreateMermaid={() => createMermaidFile(null)}
+                  onCreateBoard={() => createBoardFile(null)}
+                  onCreateFolder={promptNewFolderFromRail}
+                  onUpload={() => inputRef.current?.click()}
+                  buttonClassName="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                />
+                <div className="flex-1" />
+                <button
+                  onClick={() => openSettings()}
+                  className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  aria-label="Settings"
+                  title="Settings"
+                >
+                  <Settings className="h-4 w-4" />
+                </button>
+                {/* The workspace monogram opens the same avatar-strip switcher
                   the expanded sidebar's footer shows inline. */}
-              <WorkspaceMenu
-                variant="icon"
-                workspaces={workspaces}
-                currentId={workspaceId}
-                onSwitch={(id) => void switchWorkspace(id)}
-              />
+                <WorkspaceMenu
+                  variant="icon"
+                  workspaces={workspaces}
+                  currentId={workspaceId}
+                  onSwitch={(id) => void switchWorkspace(id)}
+                />
+              </div>
             </div>
-          </div>
 
-          {drawerOpen && (
-            <div className="fixed inset-0 z-(--z-overlay) lg:hidden">
-              <div
-                className="absolute inset-0 bg-foreground/20 backdrop-blur-sm"
-                onClick={() => setDrawerOpen(false)}
-              />
-              <div className="absolute left-0 top-0 flex h-full w-80 max-w-[85vw] flex-col border-r border-border bg-background shadow-2xl animate-in slide-in-from-left duration-200 pl-[env(safe-area-inset-left)] pb-[env(safe-area-inset-bottom)]">
+            <Sheet open={drawerOpen && mobileNavigation} onOpenChange={setDrawerOpen}>
+              <SheetContent
+                ref={drawerContentRef}
+                side="left"
+                aria-describedby={undefined}
+                showCloseButton={false}
+                className="flex w-80 max-w-[85vw] flex-col gap-0 p-0 pl-[env(safe-area-inset-left)] pb-[env(safe-area-inset-bottom)]"
+                onCloseAutoFocus={(event) => {
+                  // There are multiple openers (menu, search, keyboard shortcut),
+                  // so a single SheetTrigger cannot restore the right one.
+                  event.preventDefault();
+                  const opener = drawerOpenerRef.current;
+                  if (opener?.isConnected && opener.getClientRects().length) opener.focus();
+                }}
+                onEscapeKeyDown={(event) => {
+                  // Sidebar menus and search own their Escape handlers. Let
+                  // those close first without also dismissing their parent.
+                  if (
+                    searchOpen ||
+                    drawerContentRef.current?.querySelector("[data-sidebar-menu-panel]")
+                  ) {
+                    event.preventDefault();
+                  }
+                }}
+              >
+                <SheetTitle className="sr-only">Workspace navigation</SheetTitle>
                 <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
                   <span className="text-sm font-semibold truncate px-1">
                     {workspaceNameRef.current || "Workspace"}
                   </span>
-                  <button
-                    onClick={() => setDrawerOpen(false)}
+                  <SheetClose
                     aria-label="Close"
                     className="-mr-2 inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11"
                   >
                     <X className="h-4 w-4" />
-                  </button>
+                  </SheetClose>
                 </div>
                 <div className="min-h-0 flex-1">
                   <Sidebar
-                showEmbedMedia={showEmbedMedia}
+                    showEmbedMedia={showEmbedMedia}
                     files={files}
                     activeFileId={activeFileId}
                     activeHeadingId={activeHeadingId}
@@ -3463,38 +3621,47 @@ flowchart LR
                     onImportWorkspace={importWorkspace}
                     onExportWorkspace={exportWorkspace}
                     onShareWorkspace={shareWorkspace}
+                    search={searchPanelState}
                   />
                 </div>
-              </div>
-            </div>
-          )}
+              </SheetContent>
+            </Sheet>
 
-          {/* One boundary for the whole content column. The settings page and the
+            {/* One boundary for the whole content column. The settings page and the
             binary-document viewers are code-split; the markdown viewer is not,
             so the common case never suspends here. */}
-          <Suspense fallback={<main className="min-w-0 flex-1" aria-busy />}>
-            {/* In split view the column is pinned to the viewport and each pane
+            <ConversionContext.Provider
+              value={{
+                files,
+                runningId: conversion.runningId,
+                onConvert: conversion.start,
+                onCancel: conversion.cancel,
+                onOpen: handleSelect,
+              }}
+            >
+              <Suspense fallback={<main className="min-w-0 flex-1" aria-busy />}>
+                {/* In split view the column is pinned to the viewport and each pane
                 scrolls itself. Without a real height here the group resolves
                 `h-full` against an auto-height parent, every pane grows to its
                 content, and the *window* ends up doing the scrolling — which is
                 why the panes used to move together. */}
-            <main
-              className={
-                paneLayout.panes.length > 1 && !showSaved
-                  ? "flex min-h-0 w-0 min-w-0 flex-1 flex-col overflow-hidden h-[calc(100dvh-var(--header-h,3.5rem))]"
-                  : "min-w-0 flex-1 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:pb-0"
-              }
-            >
-              {!showSaved &&
-                paneLayout.panes.length === 1 &&
-                activeFile &&
-                conversionActions(activeFile)}
-              {/* Saved is a page, not an overlay: it takes the content column
+                <main
+                  className={
+                    paneLayout.panes.length > 1 && !showSaved
+                      ? "flex min-h-0 w-0 min-w-0 flex-1 flex-col overflow-hidden h-[calc(100dvh-var(--header-h,3.5rem))]"
+                      : "min-w-0 flex-1 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:pb-0"
+                  }
+                >
+                  {!showSaved &&
+                    paneLayout.panes.length === 1 &&
+                    activeFile &&
+                    conversionActions(activeFile)}
+                  {/* Saved is a page, not an overlay: it takes the content column
                   instead of stacking on top of whatever document was open. */}
-              {showSaved ? (
-                savedPage
-              ) : paneLayout.panes.length > 1 ? (
-                /* Split view. Each pane carries its own tab strip and its own
+                  {showSaved ? (
+                    savedPage
+                  ) : paneLayout.panes.length > 1 ? (
+                    /* Split view. Each pane carries its own tab strip and its own
                    document; the focused pane is what the rest of the app means
                    by "the active file", so nothing outside here has to know
                    panes exist.
@@ -3506,383 +3673,239 @@ flowchart LR
                    window narrowed with a split already open used to land
                    exactly there. Below the width where two columns still read,
                    the panes stack instead. */
-                <ResizablePanelGroup
-                  orientation={splitStacks ? "vertical" : "horizontal"}
-                  className="h-full"
-                >
-                  {paneLayout.panes.map((pane, index) => {
-                    const paneFile = files.find((f) => f.id === pane.activeTabId) ?? null;
-                    const paneKind = paneFile
-                      ? (paneFile.kind ?? getDocumentKind(paneFile.name, paneFile.mimeType))
-                      : null;
-                    const paneIsBoard = paneKind === "board";
-                    return (
-                      <Fragment key={pane.id}>
-                        {index > 0 && <ResizableHandle withHandle />}
-                        <ResizablePanel
-                          defaultSize={`${Math.floor(100 / paneLayout.panes.length)}%`}
-                          minSize="20%"
-                        >
-                          <div
-                            onMouseDown={() => focusPane(pane.id)}
-                            className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
-                          >
-                            {/* No tab strip. The open documents live in the
+                    <ResizablePanelGroup
+                      orientation={splitStacks ? "vertical" : "horizontal"}
+                      className="h-full"
+                    >
+                      {paneLayout.panes.map((pane, index) => {
+                        const paneFile = files.find((f) => f.id === pane.activeTabId) ?? null;
+                        const paneKind = paneFile
+                          ? (paneFile.kind ?? getDocumentKind(paneFile.name, paneFile.mimeType))
+                          : null;
+                        const paneIsBoard = paneKind === "board";
+                        return (
+                          <Fragment key={pane.id}>
+                            {index > 0 && <ResizableHandle withHandle />}
+                            <ResizablePanel
+                              defaultSize={`${Math.floor(100 / paneLayout.panes.length)}%`}
+                              minSize="20%"
+                            >
+                              <div
+                                onMouseDown={() => focusPane(pane.id)}
+                                className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+                              >
+                                {/* No tab strip. The open documents live in the
                                 sidebar; a pane is just a column of reading, and
                                 the only chrome it carries is a thin header
                                 saying which document it holds and how to close
                                 it. */}
-                            <div
-                              className={`flex h-9 shrink-0 items-center gap-2 border-b px-3 ${
-                                pane.id === paneLayout.focusedPaneId
-                                  ? "border-border bg-background"
-                                  : "border-border/60 bg-muted/20"
-                              }`}
-                            >
-                              <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
-                                {paneFile ? paneFile.name.replace(/\.[^.]+$/, "") : "Empty"}
-                              </span>
-                              <button
-                                onClick={() => closePane(pane.id)}
-                                aria-label="Close this pane"
-                                title="Close this pane"
-                                className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                            <div
-                              className={
-                                paneIsBoard
-                                  ? "min-h-0 min-w-0 flex-1 overflow-hidden"
-                                  : "min-h-0 min-w-0 flex-1 overflow-y-auto px-4"
-                              }
-                            >
-                              {paneFile && conversionActions(paneFile)}
-                              {paneFile ? (
-                                <PaneDocument
-                                  file={paneFile}
-                                  files={files}
-                                  saved={saved}
-                                  highlights={highlights}
-                                  workspaceFolders={folders}
-                                  onImportAttachments={importAttachments}
-                                  workspaceId={workspaceId}
-                                  workspaceRevision={workspaceRevision}
-                                  workspaceName={workspaceNameRef.current}
-                                  onContentChange={handleContentChange}
-                                  onDocumentSave={handleDocumentSave}
-                                  onEditorDirtyChange={(dirty) => {
-                                    if (dirty) officeDirtyPanes.current.add(pane.id);
-                                    else officeDirtyPanes.current.delete(pane.id);
-                                  }}
-                                  onRenameFile={renameFile}
-                                  onAddHighlight={addHighlight}
-                                  onUpdateHighlight={updateHighlight}
-                                  onRemoveHighlight={removeHighlight}
-                                  onRepairHighlights={repairHighlights}
-                                  onToggleSaved={toggleSaved}
-                                  onRemoveSaved={removeSaved}
-                                  onOpenArtifact={openEmbeddedArtifact}
-                                  readingMode={readingMode}
-                                  contentWidth={contentWidth}
-                                  // An edit request belongs to the column the
-                                  // reader is working in, not to every column
-                                  // showing that document. `revealInPane` has
-                                  // already moved focus to the pane holding the
-                                  // file, so this is that pane — and the same
-                                  // document deliberately opened side by side
-                                  // with itself no longer drops both copies
-                                  // into the editor at once.
-                                  startInEditFileId={
-                                    pane.id === paneLayout.focusedPaneId ? autoEditFileId : null
+                                <div
+                                  className={`flex h-9 shrink-0 items-center gap-2 border-b px-3 ${
+                                    pane.id === paneLayout.focusedPaneId
+                                      ? "border-border bg-background"
+                                      : "border-border/60 bg-muted/20"
+                                  }`}
+                                >
+                                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
+                                    {paneFile ? paneFile.name.replace(/\.[^.]+$/, "") : "Empty"}
+                                  </span>
+                                  <button
+                                    onClick={() => closePane(pane.id)}
+                                    aria-label="Close this pane"
+                                    title="Close this pane"
+                                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                                <div
+                                  className={
+                                    paneIsBoard
+                                      ? "min-h-0 min-w-0 flex-1 overflow-hidden"
+                                      : "min-h-0 min-w-0 flex-1 overflow-y-auto px-4"
                                   }
-                                  mathPreferences={mathPreferences}
-                                  onStartInEditConsumed={consumeStartInEdit}
-                                  // Only the pane showing the document a jump
-                                  // names is told about it.
-                                  activeSubtopicId={
-                                    paneFile.id === activeFileId ? activeHeadingId : null
-                                  }
-                                  highlightQuery={
-                                    paneFile.id === activeFileId ? highlightQuery : null
-                                  }
-                                  pendingSearch={
-                                    pendingSearch?.fileId === paneFile.id ? pendingSearch : null
-                                  }
-                                  onSearchShown={clearPendingSearch}
-                                />
-                              ) : (
-                                <p className="px-2 py-16 text-center text-sm text-muted-foreground">
-                                  Nothing open in this pane. Drag a tab here, or pick a document
-                                  from the sidebar.
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </ResizablePanel>
-                      </Fragment>
-                    );
-                  })}
-                </ResizablePanelGroup>
-              ) : activeFile &&
-                (activeFile.kind === "markdown" ||
-                  activeFile.kind === "text" ||
-                  !activeFile.kind) ? (
-                <MarkdownViewer
-                  file={activeFile}
-                  prevFile={prevFile}
-                  nextFile={nextFile}
-                  onNav={navFromViewer}
-                  activeSubtopicId={activeHeadingId}
-                  highlightQuery={highlightQuery}
-                  onContentChange={handleContentChange}
-                  onEditorDirtyChange={(dirty) => {
-                    editorDirtyRef.current = dirty;
-                  }}
-                  startInEditFileId={autoEditFileId}
-                  onStartInEditConsumed={consumeStartInEdit}
-                  nextReadingMin={nextReadingMinutes}
-                  isBookmarked={!!activePageSaved}
-                  onToggleBookmark={toggleActivePageSaved}
-                  highlights={activeFileHighlights}
-                  onAddHighlight={addHighlightToActive}
-                  onUpdateHighlight={updateHighlight}
-                  onRemoveHighlight={removeHighlight}
-                  onRepairHighlights={repairHighlights}
-                  saved={activeFileSaved}
-                  onToggleSaved={toggleSavedOnActive}
-                  onRemoveSaved={removeSaved}
-                  pendingSaved={pendingSaved?.fileId === activeFile.id ? pendingSaved : null}
-                  onSavedShown={clearPendingSaved}
-                  pendingSearch={pendingSearch?.fileId === activeFile.id ? pendingSearch : null}
-                  onSearchShown={clearPendingSearch}
-                  onHome={goHome}
-                  onRenameFile={renameActiveFile}
-                  onShareFile={shareActiveFile}
-                  onAskAi={aiEnabled ? askAiFromSelection : undefined}
-                  readingMode={readingMode}
-                  contentWidth={contentWidth}
-                  mathPreferences={mathPreferences}
-                  workspaceId={workspaceId}
-                  workspaceRevision={workspaceRevision}
-                  workspaceFiles={files}
-                  workspaceFolders={folders}
-                  onImportAttachments={importAttachments}
-                  workspaceName={workspaceNameRef.current}
-                  onOpenArtifact={openEmbeddedArtifact}
-                  onOpenPalette={() => setPaletteOpen(true)}
-                />
-              ) : activeFile ? (
-                <DocumentViewer
-                  key={activeFile.id}
-                  onDocumentSave={handleDocumentSave}
-                  onEditorDirtyChange={(dirty) => {
-                    editorDirtyRef.current = dirty;
-                    if (dirty) officeDirtyPanes.current.add("main");
-                    else officeDirtyPanes.current.delete("main");
-                  }}
-                  file={activeFile}
-                  isBookmarked={!!findSaved(saved, { fileId: activeFile.id, kind: "file" })}
-                  onToggleBookmark={toggleActiveDocumentSaved}
-                  prevFile={prevFile}
-                  nextFile={nextFile}
-                  onNavFile={navToFile}
-                  onContentChange={handleContentChange}
-                  onOpenPalette={() => setPaletteOpen(true)}
-                  startInEditFileId={autoEditFileId}
-                  onStartInEditConsumed={consumeStartInEdit}
-                />
-              ) : null}
-            </main>
-          </Suspense>
-        </div>
+                                >
+                                  {paneFile && conversionActions(paneFile)}
+                                  {paneFile ? (
+                                    <PaneDocument
+                                      file={paneFile}
+                                      files={files}
+                                      saved={saved}
+                                      highlights={highlights}
+                                      workspaceFolders={folders}
+                                      onImportAttachments={importAttachments}
+                                      workspaceId={workspaceId}
+                                      workspaceRevision={workspaceRevision}
+                                      workspaceName={workspaceNameRef.current}
+                                      onContentChange={handleContentChange}
+                                      onDocumentSave={handleDocumentSave}
+                                      onEditorDirtyChange={(dirty) => {
+                                        if (dirty) officeDirtyPanes.current.add(pane.id);
+                                        else officeDirtyPanes.current.delete(pane.id);
+                                        syncEditorDirty();
+                                      }}
+                                      onRenameFile={renameFile}
+                                      onAddHighlight={addHighlight}
+                                      onUpdateHighlight={updateHighlight}
+                                      onRemoveHighlight={removeHighlight}
+                                      onRepairHighlights={repairHighlights}
+                                      onToggleSaved={toggleSaved}
+                                      onRemoveSaved={removeSaved}
+                                      onOpenArtifact={openEmbeddedArtifact}
+                                      readingMode={readingMode}
+                                      contentWidth={contentWidth}
+                                      // An edit request belongs to the column the
+                                      // reader is working in, not to every column
+                                      // showing that document. `revealInPane` has
+                                      // already moved focus to the pane holding the
+                                      // file, so this is that pane — and the same
+                                      // document deliberately opened side by side
+                                      // with itself no longer drops both copies
+                                      // into the editor at once.
+                                      startInEditFileId={
+                                        pane.id === paneLayout.focusedPaneId ? autoEditFileId : null
+                                      }
+                                      mathPreferences={mathPreferences}
+                                      onStartInEditConsumed={consumeStartInEdit}
+                                      // Only the pane showing the document a jump
+                                      // names is told about it.
+                                      activeSubtopicId={
+                                        paneFile.id === activeFileId ? activeHeadingId : null
+                                      }
+                                      highlightQuery={
+                                        paneFile.id === activeFileId ? highlightQuery : null
+                                      }
+                                      pendingSearch={
+                                        pendingSearch?.fileId === paneFile.id ? pendingSearch : null
+                                      }
+                                      onSearchShown={clearPendingSearch}
+                                    />
+                                  ) : (
+                                    <p className="px-2 py-16 text-center text-sm text-muted-foreground">
+                                      Nothing open in this pane. Drag a tab here, or pick a document
+                                      from the sidebar.
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </ResizablePanel>
+                          </Fragment>
+                        );
+                      })}
+                    </ResizablePanelGroup>
+                  ) : activeFile &&
+                    (activeFile.kind === "markdown" ||
+                      activeFile.kind === "text" ||
+                      !activeFile.kind) ? (
+                    <MarkdownViewer
+                      file={activeFile}
+                      prevFile={prevFile}
+                      nextFile={nextFile}
+                      onNav={navFromViewer}
+                      activeSubtopicId={activeHeadingId}
+                      highlightQuery={highlightQuery}
+                      onContentChange={handleContentChange}
+                      onEditorDirtyChange={(dirty) => {
+                        editorDirtyRef.current = dirty;
+                        syncEditorDirty();
+                      }}
+                      startInEditFileId={autoEditFileId}
+                      onStartInEditConsumed={consumeStartInEdit}
+                      nextReadingMin={nextReadingMinutes}
+                      isBookmarked={!!activePageSaved}
+                      onToggleBookmark={toggleActivePageSaved}
+                      highlights={activeFileHighlights}
+                      onAddHighlight={addHighlightToActive}
+                      onUpdateHighlight={updateHighlight}
+                      onRemoveHighlight={removeHighlight}
+                      onRepairHighlights={repairHighlights}
+                      saved={activeFileSaved}
+                      onToggleSaved={toggleSavedOnActive}
+                      onRemoveSaved={removeSaved}
+                      pendingSaved={pendingSaved?.fileId === activeFile.id ? pendingSaved : null}
+                      onSavedShown={clearPendingSaved}
+                      pendingSearch={pendingSearch?.fileId === activeFile.id ? pendingSearch : null}
+                      onSearchShown={clearPendingSearch}
+                      onHome={goHome}
+                      onRenameFile={renameActiveFile}
+                      onShareFile={shareActiveFile}
+                      onAskAi={aiEnabled ? askAiFromSelection : undefined}
+                      readingMode={readingMode}
+                      contentWidth={contentWidth}
+                      mathPreferences={mathPreferences}
+                      workspaceId={workspaceId}
+                      workspaceRevision={workspaceRevision}
+                      workspaceFiles={files}
+                      workspaceFolders={folders}
+                      onImportAttachments={importAttachments}
+                      workspaceName={workspaceNameRef.current}
+                      onOpenArtifact={openEmbeddedArtifact}
+                    />
+                  ) : activeFile ? (
+                    <DocumentViewer
+                      key={activeFile.id}
+                      onDocumentSave={handleDocumentSave}
+                      onEditorDirtyChange={(dirty) => {
+                        editorDirtyRef.current = dirty;
+                        if (dirty) officeDirtyPanes.current.add("main");
+                        else officeDirtyPanes.current.delete("main");
+                        syncEditorDirty();
+                      }}
+                      file={activeFile}
+                      isBookmarked={!!findSaved(saved, { fileId: activeFile.id, kind: "file" })}
+                      onToggleBookmark={toggleActiveDocumentSaved}
+                      prevFile={prevFile}
+                      nextFile={nextFile}
+                      onNavFile={navToFile}
+                      onContentChange={handleContentChange}
+                      startInEditFileId={autoEditFileId}
+                      onStartInEditConsumed={consumeStartInEdit}
+                    />
+                  ) : null}
+                </main>
+              </Suspense>
+            </ConversionContext.Provider>
+          </div>
 
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept={SUPPORTED_ACCEPT}
-          className="hidden"
-          onChange={(e) => {
-            handleFileInput(e.target.files);
-            e.target.value = "";
-          }}
-        />
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            accept={SUPPORTED_ACCEPT}
+            className="hidden"
+            onChange={(e) => {
+              handleFileInput(e.target.files);
+              e.target.value = "";
+            }}
+          />
 
-        {/* Mounted only once opened. The panel is a large component whose props
+          {/* Mounted only once opened. The panel is a large component whose props
           are derived from every document in the workspace; keeping it out of
           the tree until it is asked for saves that work on every render. */}
-        {aiOpen && aiEnabled && (
-          <Suspense fallback={null}>
-            <AskAiPanel
-              open
-              onClose={closeAskAi}
-              prefill={aiPrefill}
-              initialSelection={null}
-              activeFile={aiActiveFile}
-              activeSection={aiActiveSection}
-              files={aiFiles}
-              onInsert={insertAiOutput}
-              onCreateDoc={createAiDoc}
-            />
-          </Suspense>
-        )}
+          {aiOpen && aiEnabled && (
+            <Suspense fallback={null}>
+              <AskAiPanel
+                open
+                onClose={closeAskAi}
+                prefill={aiPrefill}
+                initialSelection={null}
+                activeFile={aiActiveFile}
+                activeSection={aiActiveSection}
+                files={aiFiles}
+                onInsert={insertAiOutput}
+                onCreateDoc={createAiDoc}
+              />
+            </Suspense>
+          )}
 
-        {settingsDialog}
-        {moveDialog}
+          {settingsDialog}
+          {moveDialog}
 
-        {dragOverlay}
-        {shareDialog}
-      </div>
-    </NavHistoryContext.Provider>
-  );
-}
-
-function Header({
-  theme,
-  onCycleTheme,
-  onMenu,
-  hideMenu,
-  hideUpload,
-  hideOnDesktop,
-  onOpenPalette,
-  hasFiles,
-  onAddFiles,
-  sidebarCollapsed,
-  onToggleSidebar,
-  saveStatus,
-  onHome,
-  workspaces = [],
-  currentWorkspaceId,
-  onSwitchWorkspace,
-  onImportWorkspace,
-  onExportWorkspace,
-  onShareWorkspace,
-  onDeleteWorkspace,
-  onOpenSettings,
-}: {
-  theme: Theme;
-  onCycleTheme: () => void;
-  onMenu: (() => void) | null;
-  hideMenu?: boolean;
-  hideUpload?: boolean;
-  hideOnDesktop?: boolean;
-  onOpenPalette: () => void;
-  hasFiles: boolean;
-  onAddFiles: () => void;
-  sidebarCollapsed?: boolean;
-  onToggleSidebar?: () => void;
-  saveStatus?: SaveStatus;
-  onHome?: () => void;
-  workspaces?: { id: string; name: string }[];
-  currentWorkspaceId?: string | null;
-  onSwitchWorkspace?: (id: string) => void;
-  onImportWorkspace?: (file: File) => void;
-  onExportWorkspace?: () => void;
-  onShareWorkspace?: () => void;
-  onDeleteWorkspace?: (id: string) => void;
-  onOpenSettings?: (tab?: "workspace") => void;
-}) {
-  return (
-    <header
-      className={`app-surface z-(--z-nav) flex h-16 items-center justify-between border-b border-border px-4 md:px-6 relative pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] ${
-        hideOnDesktop ? "lg:hidden" : ""
-      }`}
-    >
-      <div className="flex items-center gap-3">
-        {!hideMenu && (
-          <button
-            onClick={() => onMenu?.()}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md transition-transform hover:bg-accent active:scale-90 coarse:h-11 coarse:w-11 lg:hidden"
-            aria-label="Menu"
-          >
-            <Menu className="h-4 w-4" />
-          </button>
-        )}
-        {onToggleSidebar && (
-          <button
-            onClick={onToggleSidebar}
-            className={`hidden h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-accent hover:text-foreground active:scale-90 ${sidebarCollapsed ? "lg:hidden" : "lg:inline-flex"}`}
-            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            <Menu className="h-4 w-4" />
-          </button>
-        )}
-        <button
-          onClick={onHome}
-          className="flex h-10 items-center gap-2 rounded-md px-2 text-muted-foreground transition-colors hover:text-foreground coarse:h-11"
-          aria-label="Home"
-          title="Home"
-        >
-          <span className="text-sm font-semibold tracking-tight text-foreground">Localdox</span>
-        </button>
-      </div>
-
-      {hasFiles && (
-        <div className="absolute left-1/2 -translate-x-1/2 hidden lg:flex items-center">
-          <button
-            onClick={onOpenPalette}
-            className="w-80 items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground flex"
-          >
-            <Search className="h-3.5 w-3.5" />
-            <span>Search...</span>
-            <span className="ml-auto flex items-center gap-1">
-              <kbd className="rounded border border-border bg-background px-1 py-0.5 font-mono text-xs">
-                ⌘
-              </kbd>
-              <kbd className="rounded border border-border bg-background px-1 py-0.5 font-mono text-xs">
-                K
-              </kbd>
-            </span>
-          </button>
+          {dragOverlay}
+          {shareDialog}
+          {statusBanner}
         </div>
-      )}
-
-      <div className="flex items-center gap-3">
-        {hasFiles && (
-          <button
-            onClick={onOpenPalette}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11 lg:hidden"
-            aria-label="Search"
-          >
-            <Search className="h-4 w-4" />
-          </button>
-        )}
-
-        {/* Workspace control lives in the header to the right of the search
-            icon: the avatar strip on desktop/landscape, the same strip inside
-            a bottom sheet on mobile/portrait. */}
-        {onSwitchWorkspace && (
-          <>
-            <div className="hidden items-center gap-2 lg:flex">
-              <WorkspaceMenu
-                workspaces={workspaces}
-                currentId={currentWorkspaceId ?? null}
-                onSwitch={onSwitchWorkspace}
-              />
-            </div>
-            <div className="flex items-center gap-2 lg:hidden">
-              <WorkspaceSheet
-                workspaces={workspaces}
-                currentId={currentWorkspaceId ?? null}
-                onSwitch={onSwitchWorkspace}
-              />
-            </div>
-          </>
-        )}
-        {onOpenSettings && (
-          <button
-            onClick={() => onOpenSettings()}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11"
-            aria-label="Settings"
-            title="Settings"
-          >
-            <Settings className="h-4 w-4" />
-          </button>
-        )}
-      </div>
-    </header>
+      </DraftJournalContext.Provider>
+    </NavHistoryContext.Provider>
   );
 }

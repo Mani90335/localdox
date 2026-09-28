@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 import type { PdfReaderState } from "./use-pdf-reader-state";
 import type { PdfSearchMatch } from "./types";
@@ -75,45 +75,58 @@ export function PdfPageArea({
   );
   const scale = fitScale ? fitScale * reader.zoom : null;
 
-  // Arrow/Page keys flip pages; Home/End jump to the ends; +/- zoom. Ignored
-  // while typing anywhere (the page jump box, search, etc.).
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target && /^(INPUT|TEXTAREA)$/.test(target.tagName)) return;
-      switch (event.key) {
-        case "ArrowRight":
-        case "PageDown":
-          event.preventDefault();
-          reader.goNext();
-          break;
-        case "ArrowLeft":
-        case "PageUp":
-          event.preventDefault();
-          reader.goPrev();
-          break;
-        case "Home":
-          event.preventDefault();
-          reader.goToPage(1);
-          break;
-        case "End":
-          if (reader.numPages) {
-            event.preventDefault();
-            reader.goToPage(reader.numPages);
-          }
-          break;
-        case "+":
-        case "=":
-          reader.zoomIn();
-          break;
-        case "-":
-          reader.zoomOut();
-          break;
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [reader]);
+  // Only the focusable page surface owns these shortcuts. Controls, portals,
+  // other readers and browser/selection shortcuts keep their own key handling.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.target !== event.currentTarget ||
+      event.defaultPrevented ||
+      event.nativeEvent.isComposing ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      (event.shiftKey && event.key !== "+")
+    )
+      return;
+    switch (event.key) {
+      case "ArrowRight":
+      case "PageDown":
+        reader.goNext();
+        break;
+      case "ArrowLeft":
+      case "PageUp":
+        reader.goPrev();
+        break;
+      case "Home":
+        reader.goToPage(1);
+        break;
+      case "End":
+        if (reader.numPages) reader.goToPage(reader.numPages);
+        break;
+      case "+":
+      case "=":
+        reader.zoomIn();
+        break;
+      case "-":
+        reader.zoomOut();
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+  };
+
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || event.button !== 0) return;
+    // Focus text/canvas clicks without cancelling native text selection. Leave
+    // any nested annotation/form controls in charge of their own focus.
+    const control = (event.target as Element).closest(
+      'a, button, input, textarea, select, summary, [contenteditable], [tabindex], [role]:not([role="presentation"]):not([role="none"])',
+    );
+    if (!control || control === event.currentTarget) {
+      event.currentTarget.focus({ preventScroll: true });
+    }
+  };
 
   // Ctrl/Cmd + wheel (trackpad pinch on most browsers) zooms the page instead
   // of the browser tab, matching `ImageViewer`'s existing pinch handling.
@@ -152,9 +165,15 @@ export function PdfPageArea({
   return (
     <div
       ref={containerRef}
+      role="region"
+      aria-label="PDF pages"
+      aria-description="Use Left and Right or Page Up and Page Down to turn pages, Home and End to jump, and plus and minus to zoom."
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      onPointerDown={onPointerDown}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
-      className="pdf-page-area relative flex min-h-[calc(100dvh-7.5rem)] flex-1 items-center justify-center gap-8 overflow-auto p-6"
+      className="pdf-page-area relative flex min-h-[calc(100dvh-7.5rem)] flex-1 items-center justify-center gap-8 overflow-auto p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
     >
       {!scale ? (
         <div className="h-[70vh] w-[54vh] max-w-md animate-pulse rounded-sm bg-muted/40" />

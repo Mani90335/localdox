@@ -6,6 +6,7 @@ import {
   forwardRef,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -16,6 +17,8 @@ import { caretTop } from "@/lib/markdown/source-locate";
 import { mathExpression, type FormatAction } from "@/lib/markdown/markdown-format";
 import { TOOLBAR_ITEMS } from "@/lib/markdown/markdown-toolbar-items";
 import { MarkdownToolbar } from "./MarkdownToolbar";
+import { DraftJournalContext } from "./draft-journal-context";
+import { hashText } from "@/lib/workspace/draft-journal";
 
 /**
  * What the math keyboard should open showing, given the text the reader had
@@ -206,6 +209,30 @@ function MarkdownEditorImpl(
     return () => clearTimeout(t);
   }, [draft, initialContent, fileId]);
 
+  // Journal every change synchronously-durable (see draft-journal.ts), so a tab
+  // closed inside the autosave window — or before the app's own write lands —
+  // can offer the text back on the next load. The base is what this document
+  // held when the editor opened; the journal re-bases it after each commit.
+  const drafts = useContext(DraftJournalContext);
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
+  const fileNameRef = useRef(fileName);
+  fileNameRef.current = fileName;
+  const [openedBase] = useState(() => hashText(initialContent));
+  useEffect(() => {
+    const context = draftsRef.current;
+    if (!context?.workspaceId) return;
+    if (draft.fileId !== fileId || draft.text === initialContent) return;
+    context.journal.stage({
+      workspaceId: context.workspaceId,
+      fileId: draft.fileId,
+      fileName: fileNameRef.current ?? draft.fileId,
+      text: draft.text,
+      base: openedBase,
+    });
+    context.schedule();
+  }, [draft, initialContent, fileId, openedBase]);
+
   // Don't lose the tail of a burst of typing when the editor closes between the
   // last keystroke and the autosave firing.
   //
@@ -372,6 +399,9 @@ function MarkdownEditorImpl(
     // Order matters: the flag has to be set before the parent unmounts this
     // component, or the cleanup above would re-save the discarded draft.
     cancelledRef.current = true;
+    // An abandoned draft is not something to offer back after a reload.
+    const context = draftsRef.current;
+    if (context?.workspaceId) context.journal.discard(context.workspaceId, draftRef.current.fileId);
     setText(initialContent);
     onCancel(textareaRef.current?.selectionStart);
   }, [initialContent, onCancel, setText]);

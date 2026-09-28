@@ -9,6 +9,7 @@ lerna-debug.log*
 
 node_modules
 dist
+/bench
 dist-ssr
 .output
 .vinxi
@@ -55,5 +56,3 @@ engine/*/target/
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
-
-.claude

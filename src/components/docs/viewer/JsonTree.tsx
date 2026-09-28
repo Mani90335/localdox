@@ -177,7 +177,7 @@ function JsonTreeImpl({ value, query = "" }: { value: unknown; query?: string })
           type="button"
           onClick={() => setOpen(new Set(paths.keys()))}
           disabled={allOpen}
-          className="rounded px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+          className="rounded px-2 py-1 text-2xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
         >
           Expand all
         </button>
@@ -185,7 +185,7 @@ function JsonTreeImpl({ value, query = "" }: { value: unknown; query?: string })
           type="button"
           onClick={() => setOpen(new Set())}
           disabled={open.size === 0}
-          className="rounded px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+          className="rounded px-2 py-1 text-2xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
         >
           Collapse all
         </button>

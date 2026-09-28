@@ -10,7 +10,7 @@ import {
   decryptSecret,
   deleteSecret,
   listSecretIds,
-} from "./crypto-store";
+} from "./crypto-store.ts";
 
 export type StorageMode = "encrypted" | "insecure-fallback";
 
@@ -45,12 +45,14 @@ export function storageMode(): StorageMode {
 export async function setKey(provider: ProviderId, key: string): Promise<void> {
   const trimmed = key.trim();
   if (!trimmed) return removeKey(provider);
-  cache.set(provider, trimmed);
+  // Cache only after the write is durable: a key that failed to save must not
+  // look saved for the rest of the session.
   if (storageMode() === "encrypted") {
     await encryptSecret(secretId(provider), trimmed);
   } else if (typeof localStorage !== "undefined") {
     localStorage.setItem(LS_PREFIX + provider, scramble(trimmed));
   }
+  cache.set(provider, trimmed);
 }
 
 export async function getKey(provider: ProviderId): Promise<string | null> {
@@ -80,12 +82,12 @@ export async function getKey(provider: ProviderId): Promise<string | null> {
 }
 
 export async function removeKey(provider: ProviderId): Promise<void> {
-  cache.delete(provider);
   if (storageMode() === "encrypted") {
     await deleteSecret(secretId(provider));
   } else if (typeof localStorage !== "undefined") {
     localStorage.removeItem(LS_PREFIX + provider);
   }
+  cache.delete(provider);
 }
 
 /** Provider ids that currently have a stored key. */

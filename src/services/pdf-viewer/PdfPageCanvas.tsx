@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PDFPageProxy, RenderTask } from "pdfjs-dist";
 import type { PdfSearchMatch } from "./types";
+import { createHighlightPainter } from "@/lib/markdown/highlight-registry";
 import type { PdfRotation } from "./use-pdf-reader-state";
 
 type PdfjsModule = typeof import("pdfjs-dist");
@@ -112,28 +113,35 @@ export function PdfPageCanvas({
     };
   }, [pageNumber, scale, rotation, getPage, getTextContent, pdfjs]);
 
-  // Re-applied whenever the search state or the text layer itself changes,
-  // without re-rendering the layer — this is cheap DOM class toggling over
-  // spans pdf.js already positioned correctly.
+  // Exact ranges distinguish multiple hits within the same PDF text span.
   useEffect(() => {
     const layer = textLayerRef.current;
     if (!layer) return;
-    const divs = layer.textDivs;
-    for (const div of divs) div.classList.remove("pdf-search-hit", "pdf-search-hit-active");
+    const painter = createHighlightPainter();
+    const groups: Record<string, Range[]> = { "pdf-search-hit": [], "pdf-search-hit-active": [] };
     for (const match of matches) {
       const isActive = match === activeMatch;
-      for (const highlight of match.highlights) {
-        divs[highlight.itemIndex]?.classList.add(
-          isActive ? "pdf-search-hit-active" : "pdf-search-hit",
-        );
+      for (const hit of match.highlights) {
+        const node = layer.textDivs[hit.itemIndex]?.firstChild;
+        if (
+          !node ||
+          node.nodeType !== Node.TEXT_NODE ||
+          hit.charIndex + hit.length > (node.textContent?.length ?? 0)
+        )
+          continue;
+        const range = document.createRange();
+        range.setStart(node, hit.charIndex);
+        range.setEnd(node, hit.charIndex + hit.length);
+        groups[isActive ? "pdf-search-hit-active" : "pdf-search-hit"].push(range);
       }
-      if (isActive) {
-        divs[match.highlights[0]?.itemIndex]?.scrollIntoView({
+      if (isActive)
+        layer.textDivs[match.highlights[0]?.itemIndex]?.scrollIntoView({
           block: "center",
           inline: "center",
         });
-      }
     }
+    painter.paint(groups);
+    return painter.clear;
   }, [matches, activeMatch, textLayerVersion]);
 
   return (

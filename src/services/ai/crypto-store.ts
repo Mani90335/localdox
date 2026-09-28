@@ -3,8 +3,12 @@
 // Strategy: generate one AES-GCM CryptoKey with extractable=false and persist
 // the CryptoKey object itself in IndexedDB. Non-extractable keys are structured-
 // cloneable — the browser stores the raw material opaquely and never exposes it
-// to JS, so we get real encryption that survives refresh without ever asking the
-// user for a passphrase. API-key ciphertext lives in the same IDB db.
+// to JS, so key ciphertext on disk is useless without this origin's key. It is
+// not an XSS boundary: any script running on this origin can call decryptSecret.
+// API-key ciphertext lives in the same IDB db.
+//
+// Every write resolves only once its transaction has committed, so a caller
+// that reports "saved" is telling the truth.
 //
 // If WebCrypto or IndexedDB is unavailable, callers fall back to obfuscated
 // localStorage (see keys.ts) and surface a "less secure" warning.
@@ -24,6 +28,7 @@ interface EncryptedRecord {
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
+let masterKeyPromise: Promise<CryptoKey> | null = null;
 
 function hasWebCrypto(): boolean {
   return (
@@ -35,7 +40,8 @@ function hasWebCrypto(): boolean {
 
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
+  let blocked = false;
+  const opening: Promise<IDBDatabase> = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -44,13 +50,42 @@ function openDb(): Promise<IDBDatabase> {
         db.createObjectStore(SECRET_STORE, { keyPath: "id" });
       }
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      if (blocked) {
+        db.close();
+        return;
+      }
+      // Another tab is upgrading or deleting the database: step aside instead
+      // of blocking it. The master key may be gone after that, so forget it
+      // too, or new secrets would be sealed with a key that is no longer saved.
+      db.onversionchange = () => {
+        db.close();
+        if (dbPromise === guarded) dbPromise = null;
+        masterKeyPromise = null;
+      };
+      db.onclose = () => {
+        if (dbPromise === guarded) dbPromise = null;
+      };
+      resolve(db);
+    };
+    req.onerror = () => reject(req.error ?? new Error("Could not open key storage"));
+    req.onblocked = () => {
+      blocked = true;
+      reject(new Error("Close other Localdox tabs to finish updating key storage"));
+    };
   });
-  return dbPromise;
+  // A failed open must not poison every later call for the rest of the session.
+  const guarded: Promise<IDBDatabase> = opening.catch((error) => {
+    if (dbPromise === guarded) dbPromise = null;
+    throw error;
+  });
+  dbPromise = guarded;
+  return guarded;
 }
 
-function idbRequest<T>(
+/** Runs one request and resolves with its result once the transaction commits. */
+function transact<T>(
   store: string,
   mode: IDBTransactionMode,
   fn: (s: IDBObjectStore) => IDBRequest<T>,
@@ -60,29 +95,50 @@ function idbRequest<T>(
       new Promise<T>((resolve, reject) => {
         const t = db.transaction(store, mode);
         const req = fn(t.objectStore(store));
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
+        t.oncomplete = () => resolve(req.result);
+        t.onabort = () =>
+          reject(t.error ?? req.error ?? new Error("Key storage transaction aborted"));
       }),
   );
 }
 
-let masterKeyPromise: Promise<CryptoKey> | null = null;
+async function loadOrCreateMasterKey(): Promise<CryptoKey> {
+  const existing = await transact<CryptoKey | undefined>(KEY_STORE, "readonly", (s) =>
+    s.get(MASTER_KEY_ID),
+  );
+  if (existing) return existing;
+  // Generating is async, and awaiting inside a transaction would let it
+  // auto-commit, so make a candidate first. The check-and-install below shares
+  // one readwrite transaction, which IndexedDB serialises against every other
+  // tab's: exactly one key is ever stored, and a tab that lost the race adopts
+  // the winner instead of sealing secrets with a key nobody kept.
+  const candidate = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
+  const db = await openDb();
+  return new Promise<CryptoKey>((resolve, reject) => {
+    const t = db.transaction(KEY_STORE, "readwrite");
+    const store = t.objectStore(KEY_STORE);
+    let winner = candidate;
+    const current = store.get(MASTER_KEY_ID);
+    current.onsuccess = () => {
+      if (current.result) winner = current.result as CryptoKey;
+      else store.add(candidate, MASTER_KEY_ID);
+    };
+    t.oncomplete = () => resolve(winner);
+    t.onabort = () => reject(t.error ?? new Error("Could not save the encryption key"));
+  });
+}
 
-async function getMasterKey(): Promise<CryptoKey> {
+function getMasterKey(): Promise<CryptoKey> {
   if (masterKeyPromise) return masterKeyPromise;
-  masterKeyPromise = (async () => {
-    const existing = await idbRequest<CryptoKey | undefined>(KEY_STORE, "readonly", (s) =>
-      s.get(MASTER_KEY_ID),
-    );
-    if (existing) return existing;
-    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
-      "encrypt",
-      "decrypt",
-    ]);
-    await idbRequest<IDBValidKey>(KEY_STORE, "readwrite", (s) => s.put(key, MASTER_KEY_ID));
-    return key;
-  })();
-  return masterKeyPromise;
+  const loading: Promise<CryptoKey> = loadOrCreateMasterKey().catch((error) => {
+    if (masterKeyPromise === loading) masterKeyPromise = null;
+    throw error;
+  });
+  masterKeyPromise = loading;
+  return loading;
 }
 
 /** Whether encrypted storage is possible in this environment. */
@@ -103,11 +159,11 @@ export async function encryptSecret(id: string, plaintext: string): Promise<void
     iv: Array.from(iv),
     data: Array.from(new Uint8Array(cipher)),
   };
-  await idbRequest<IDBValidKey>(SECRET_STORE, "readwrite", (s) => s.put(record));
+  await transact<IDBValidKey>(SECRET_STORE, "readwrite", (s) => s.put(record));
 }
 
 export async function decryptSecret(id: string): Promise<string | null> {
-  const record = await idbRequest<EncryptedRecord | undefined>(SECRET_STORE, "readonly", (s) =>
+  const record = await transact<EncryptedRecord | undefined>(SECRET_STORE, "readonly", (s) =>
     s.get(id),
   );
   if (!record) return null;
@@ -121,10 +177,10 @@ export async function decryptSecret(id: string): Promise<string | null> {
 }
 
 export async function deleteSecret(id: string): Promise<void> {
-  await idbRequest<undefined>(SECRET_STORE, "readwrite", (s) => s.delete(id));
+  await transact<undefined>(SECRET_STORE, "readwrite", (s) => s.delete(id));
 }
 
 export async function listSecretIds(): Promise<string[]> {
-  const keys = await idbRequest<IDBValidKey[]>(SECRET_STORE, "readonly", (s) => s.getAllKeys());
+  const keys = await transact<IDBValidKey[]>(SECRET_STORE, "readonly", (s) => s.getAllKeys());
   return keys.map(String);
 }
