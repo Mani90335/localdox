@@ -69,6 +69,16 @@ function PdfThumbnail({
     return () => observer.disconnect();
   }, []);
 
+  // Free the thumbnail's backing store as soon as it leaves the list.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    return () => {
+      if (!canvas) return;
+      canvas.width = 0;
+      canvas.height = 0;
+    };
+  }, []);
+
   useEffect(() => {
     if (!visible || rendered) return;
     let cancelled = false;

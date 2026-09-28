@@ -1,4 +1,144 @@
-Latest update — 2026-09-28 (A07 search worker protocol and lifecycle)
+Latest update — 2026-09-28 (A08 PDF zoom pixel budget)
+
+Completed A08 / Package 5's PDF memory item. Zooming a PDF no longer grows
+its canvases without limit. Each visible page stays within 32 MiB of backing
+pixels on desktop (16 MiB on a phone), and all visible pages together within
+64 MiB (32 MiB on a phone). The part of the page in view stays at full device
+resolution.
+
+Before (HEAD fa5ca35, production build, DPR 2, 1280×800, 3-page fixture, 400%):
+- One page: a single 3611×4672 canvas, 64.4 MiB. (The audit's own fixture and
+  window measured 4435×6272, 106.1 MiB.)
+- Two-page spread: 124.5 MiB still held. One replaced canvas, detached from
+  the page, still held its pixels.
+- Zoomed pages were centred with justify/align-center in the scroll area.
+  The page's top 828 px and left 407 px (spread: left 1,266 px) were outside
+  the scrollable range, so no scrolling could reach them.
+- Page proxies and text content were cached for the document's lifetime, and
+  a rejected page/text promise stayed cached.
+- Results were identical over 3 runs.
+
+Fix:
+- src/services/pdf-viewer/pdf-raster-budget.ts: pure budget math.
+  - Per-page and total budgets, and a live count of visible pages across
+    every open reader.
+  - A page that fits is one canvas at device resolution, as before.
+  - Otherwise the full-page base canvas gets half the budget: a softer page,
+    still readable while scrolling. The rest goes to a detail canvas that
+    covers the visible region at device resolution. It adds margin around the
+    view when the budget allows (the same approach as pdf.js's own
+    maxCanvasPixels plus PDFPageDetailView).
+  - Canvas sides are capped at 16,384 px.
+- PdfPageCanvas.tsx:
+  - Every raster goes into a fresh canvas, swapped in when complete. Until
+    then the previous pixels stretch to the new size (the zoom preview), so
+    the page never goes blank.
+  - A re-raster waits 150 ms after the last zoom step, so rapid steps cost
+    one render.
+  - The detail canvas follows scroll and resize (100 ms settle) and is
+    re-rendered only when the view nears its edge.
+  - Replaced and unmounted canvases are released (width/height 0).
+  - Rotation re-renders immediately, with no stretched preview of the wrong
+    orientation.
+  - A budget change that doesn't change the plan (a page joining the screen)
+    doesn't re-render.
+- PdfReader.tsx: page-proxy and text caches are bounded LRUs
+  (bounded-promise-cache.ts).
+  - Pages: 12 entries. An evicted page gets page.cleanup(), which frees its
+    operator list and decoded resources.
+  - Text: 200,000 text items / 2,000 pages.
+  - A rejection evicts only its own entry, so the next call retries.
+- PdfPageArea.tsx:
+  - Pages are centred with auto margins, so every edge of a zoomed page is
+    reachable.
+  - Zoom keeps the same point of the page in the middle of the view. The
+    anchor is a fraction of the page box. It is snapshotted when scale
+    changes and restored by a ResizeObserver, and it ignores the browser's
+    own clamp scroll.
+- PdfThumbnailList.tsx releases thumbnail canvases on unmount.
+
+After (same measurement script and build settings, 3 runs, identical):
+- One page at 400%: 1800×2329 base (1.02 device px per CSS px) plus a
+  2474×1696 detail canvas at exactly 2.0, 32.0 MiB in total.
+- Spread at 400%: 56.9 MiB for both pages.
+- No detached canvas holds pixels.
+- 0 px of the page is out of reach.
+
+Validation:
+- Unit: tests/pdf-raster-budget.test.ts, 13 tests.
+  - Budgets, including 1/2/4 pages sharing the total.
+  - The audit's 2217.5×3136 CSS page at DPR 2 fits 32 MiB with DPR-2
+    detail pixels.
+  - A phone at DPR 3.
+  - fitCanvas pixel/side limits, detail margin and clamping, and
+    detailCovers hysteresis.
+  - Registry notifications.
+  - LRU eviction with onEvict, rejected-promise eviction, a late rejection
+    not evicting its replacement, and weight bounds.
+  - npm test: 274/274, on a clean worktree of HEAD plus only this change.
+- Browser: tests/e2e/pdf-zoom-budget.spec.ts, 7 tests, production preview,
+  DPR 2. Every canvas ever attached is tracked, so released canvases are
+  checked, not only those in the DOM.
+  - 400%: ≤32 MiB, base below DPR 2 and detail at DPR 2, text layer intact,
+    all four edges reachable, detail follows the scroll, nothing retained.
+  - Zoom keeps the centre, including zooming out from a lower-right view.
+  - Three rapid zoom steps: the stretched preview is shown (never zero
+    canvases), then exactly one base render.
+  - A spread (≤32 MiB each, ≤64 MiB together).
+  - Two readers in a split with spreads (4 pages, ≤16 MiB each).
+  - Rotation at 400%.
+  - Leaving the PDF releases every page canvas (0 bytes retained).
+  - With --repeat-each=3, the new spec and pdf-keyboard.spec.ts passed 38 of
+    39. The one failure was a beforeEach timeout while the machine's load
+    average was about 11: the upload toast appeared, but the viewer never
+    opened, so no PDF code ran. That test then passed 5/5 on a rerun.
+  - Against a HEAD build every new test fails. They fail waiting for the new
+    render state, so the before numbers above come from a markup-agnostic
+    measurement script (in the session scratchpad, not committed).
+- Chrome DevTools MCP (production preview, 1280×800 at DPR 2, real toolbar
+  zoom):
+  - Base 1800×2329 plus detail 2474×1696 at exactly 2.0 device px per CSS
+    px, 32.00 MiB.
+  - After scrolling to the top-left (reachable), the screenshot shows
+    retina-sharp text at 400%.
+  - PDF search on the zoomed page: 31 hits, the active one scrolled into
+    view, the detail re-rendered there, 28.6 MiB.
+  - No console errors or warnings.
+- npm run typecheck, npm run build, and ESLint/Prettier on every changed
+  file pass on the clean worktree.
+- Full browser suite (clean worktree, production preview, private port): 72
+  passed, 9 skipped, 5 failed. None of the failures are PDF tests. Rerun with
+  PLAYWRIGHT_PRODUCTION=1, the master-key race test skips itself (it imports
+  a dev-server module). The other 4 fail identically on a plain HEAD build:
+  - mobile-navigation "close button and backdrop dismiss the drawer"
+  - both sharing.spec preview tests
+  - viewers.spec spreadsheet controls
+  They are pre-existing failures, not caused by this change.
+
+Environment:
+- Another session was editing search files (DocsApp, SearchPanel, lib/search)
+  and package.json/bun.lock in the shared tree during this work. Its
+  reinstall removed @orama/orama from the shared node_modules.
+- All validation therefore ran in a detached worktree of HEAD plus only these
+  files, with its own node_modules, on private ports and output directories.
+- This commit contains only the PDF files, their tests and this log.
+
+Limits:
+- While a raster or detail render is in flight, the old and new canvases
+  briefly coexist (up to about 2× one page's budget). Steady state is within
+  budget.
+- At high zoom on DPR ≥2, scrolling past the detail area shows the softer
+  base pixels for about 100 ms before the detail catches up.
+- The device class is coarse pointer plus a short screen side under 768 px.
+  There is no real-device memory measurement, and no Safari, Firefox or
+  physical phone run.
+- Native/GPU intermediate surfaces are not measured; this counts canvas
+  backing stores (width × height × 4), as the audit did.
+- Turning a page at high zoom keeps the view centred rather than jumping to
+  the new page's top.
+- R03's outline work, A04, A05, R01–R02 and R04 remain in Package 5.
+
+Previous update — 2026-09-28 (A07 search worker protocol and lifecycle)
 
 Completed A07, and with it Package 4 (A06 was done earlier). Search requests
 now settle on every path. Mutations apply in order, and a replaced worker
@@ -619,7 +759,7 @@ Pending (not started, or started but not committed)
 
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
-- Package 5: R03's PDF keyboard isolation is done (R03 update above); its outline work remains pending. A04 (500-edge Stepped diagram makes a 52,311 px page), A05 (3,000-section Markdown), A08 (PDF zoom memory), R01–R02 and R04 remain pending.
+- Package 5: R03's PDF keyboard isolation is done (R03 update above), and A08's PDF zoom pixel budget is done (latest update); R03's outline work remains pending. A04 (500-edge Stepped diagram makes a 52,311 px page), A05 (3,000-section Markdown), R01–R02 and R04 remain pending.
 - Package 6: B01 is done (latest update above); B02–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).

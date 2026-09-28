@@ -3,6 +3,7 @@ import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { dataUrlToArrayBuffer } from "@/lib/markdown/document-utils";
 import type { PdfBookProps } from "./PdfReaderLazy";
 import { configurePdfWorker, PDFJS_CMAP_URL, PDFJS_STANDARD_FONT_URL } from "./pdf-worker";
+import { BoundedPromiseCache } from "./bounded-promise-cache";
 import { PdfPageArea } from "./PdfPageArea";
 import { PdfSidebar } from "./PdfSidebar";
 import { PdfSearchOverlay } from "./PdfSearchOverlay";
@@ -13,6 +14,42 @@ import "./pdf-viewer.css";
 type PdfjsModule = typeof import("pdfjs-dist");
 type PdfTextContent = Awaited<ReturnType<PDFPageProxy["getTextContent"]>>;
 type RawOutline = NonNullable<Awaited<ReturnType<PDFDocumentProxy["getOutline"]>>>;
+
+/**
+ * Page proxies kept warm. pdf.js keeps every proxy itself; what grows is each
+ * rendered page's operator list and decoded resources, which `cleanup()`
+ * frees (it declines while a render is still running).
+ */
+const PAGE_CACHE_ENTRIES = 12;
+/**
+ * Text content is only cached here (pdf.js doesn't), for the text layer and
+ * repeated searches. Bounded by text items, not pages: one page can hold a
+ * few items or tens of thousands. A search over a longer document re-extracts
+ * the pages that didn't fit.
+ */
+const TEXT_CACHE_ENTRIES = 2000;
+const TEXT_CACHE_MAX_ITEMS = 200_000;
+
+function createPageCache() {
+  return new BoundedPromiseCache<number, PDFPageProxy>({
+    maxEntries: PAGE_CACHE_ENTRIES,
+    onEvict: (page) => {
+      try {
+        page.cleanup();
+      } catch {
+        // Already destroyed with its document.
+      }
+    },
+  });
+}
+
+function createTextCache() {
+  return new BoundedPromiseCache<number, PdfTextContent>({
+    maxEntries: TEXT_CACHE_ENTRIES,
+    maxWeight: TEXT_CACHE_MAX_ITEMS,
+    weigh: (content) => content.items.length,
+  });
+}
 
 /** pdf.js itself, loaded once in the browser and configured to point its worker/cmaps/fonts at their published URLs. */
 function usePdfjsModule() {
@@ -64,15 +101,15 @@ async function resolveDestPage(
   }
 }
 
-/** Loads the document, resolves its outline, and caches per-page proxies + text content for the rest of the reader. */
+/** Loads the document, resolves its outline, and keeps bounded caches of page proxies + text content for the rest of the reader. */
 function usePdfDocument(
   file: PdfBookProps["file"],
   pdfjs: PdfjsModule | null,
   reader: PdfBookProps["reader"],
 ) {
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
-  const pageCache = useRef(new Map<number, Promise<PDFPageProxy>>());
-  const textCache = useRef(new Map<number, Promise<PdfTextContent>>());
+  const [pageCache] = useState(createPageCache);
+  const [textCache] = useState(createTextCache);
 
   const setNumPagesRef = useRef(reader.setNumPages);
   const setOutlineRef = useRef(reader.setOutline);
@@ -85,8 +122,8 @@ function usePdfDocument(
     if (!pdfjs) return;
     let alive = true;
     setPdfDocument(null);
-    pageCache.current.clear();
-    textCache.current.clear();
+    pageCache.clear();
+    textCache.clear();
     setLoadErrorRef.current(null);
 
     const arrayBuffer = dataUrlToArrayBuffer(file.data);
@@ -129,31 +166,21 @@ function usePdfDocument(
       alive = false;
       void loadingTask.destroy();
     };
-  }, [pdfjs, file.data]);
+  }, [pdfjs, file.data, pageCache, textCache]);
 
   const getPage = useCallback(
     (pageNumber: number): Promise<PDFPageProxy> => {
       if (!pdfDocument) return Promise.reject(new Error("No PDF document loaded"));
-      let cached = pageCache.current.get(pageNumber);
-      if (!cached) {
-        cached = pdfDocument.getPage(pageNumber);
-        pageCache.current.set(pageNumber, cached);
-      }
-      return cached;
+      return pageCache.get(pageNumber, (n) => pdfDocument.getPage(n));
     },
-    [pdfDocument],
+    [pdfDocument, pageCache],
   );
 
   const getTextContent = useCallback(
     (pageNumber: number): Promise<PdfTextContent> => {
-      let cached = textCache.current.get(pageNumber);
-      if (!cached) {
-        cached = getPage(pageNumber).then((page) => page.getTextContent());
-        textCache.current.set(pageNumber, cached);
-      }
-      return cached;
+      return textCache.get(pageNumber, (n) => getPage(n).then((page) => page.getTextContent()));
     },
-    [getPage],
+    [getPage, textCache],
   );
 
   return { pdfDocument, getPage, getTextContent };
