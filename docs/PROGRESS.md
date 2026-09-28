@@ -1,4 +1,40 @@
-Latest update — 2026-09-28 (R03 PDF keyboard isolation)
+Latest update — 2026-09-28 (B01 lazy HTML-export renderer)
+
+Completed B01 / Package 6. vite.config.ts's manualChunks put react-dom/server
+into the long-lived "react" chunk, so every startup downloaded the renderer
+that only lazy HTML export (src/services/markdown-export/media-bundle.tsx)
+uses. react-dom/server entries and their CJS server builds now go to a separate
+"react-dom-server" chunk that loads only behind that dynamic import. The
+startup react chunk dropped from 378 KB raw / 115 KB gzip to 190 KB / 59.8 KB
+(about 56 KB less gzipped JavaScript on every load); the renderer chunk is
+187 KB / 57 KB and is fetched on first export.
+
+Validation: the new tests/e2e/export-loading.spec.ts (production preview only)
+inspects every downloaded script for renderToStaticMarkup rather than chunk
+names, so renaming or re-merging the chunk can't hide a regression. It covers
+empty startup, opening a document, two HTML exports (content checked, renderer
+fetched once), editing after export, save state and reload (renderer not
+fetched again), and no page errors. Both tests fail against the pre-change
+vite.config.ts build (the renderer is in the startup scripts) and pass after
+it. npm run typecheck, npm test (241/241) and npm run build pass. Production
+Playwright passes 7/7 across export-loading and media, and 37/37 across
+editing, persistence, storage-persistence, sharing, pdf-keyboard and
+durability. The media suite's attachment-export test (the timeout noted
+earlier) targeted a button named "Export this document"; its accessible name is
+"Export", and the locator now matches. Chrome DevTools MCP, in an isolated
+context against the production preview, confirmed startup scripts include the
+190 KB react chunk and no react-dom-server; clicking "Download HTML + Media"
+then fetched react-dom-server once; no console errors or warnings.
+
+Limits: this completes B01 only. B02 (splitting the empty-workspace shell from
+reader/editor and the Orama fallback) and B03 (per-journey optional bundles)
+remain pending. Chromium desktop only; the full browser suite (viewers,
+conversion, search, highlighting, mobile, ai-keys) was not rerun. The
+uncommitted .gitignore change that un-ignores /docs, and the untracked
+docs/PROMPT.md, docs/audit-2026-09-27/ and docs/performance/, were left out of
+this commit.
+
+Previous update — 2026-09-28 (R03 PDF keyboard isolation)
 
 Completed the keyboard-input bug within R03 / Package 5. PDF navigation and
 zoom no longer listen on window. Each PDF page area is a named, keyboard-
@@ -334,8 +370,8 @@ Pending (not started, or started but not committed)
 
 - Package 3: A03 and A10 are done (above). A11's persistent-storage request, capability state and backup reminder are done (A11 update above); offline shell, cached capabilities and offline-readiness state remain pending.
 - Package 4: A06 is done (2026-09-28 update above). A07's unchanged-query refresh is covered; its remaining worker protocol/lifecycle work is pending.
-- Package 5: R03's PDF keyboard isolation is done (latest update above); its outline work remains pending. A04 (500-edge Stepped diagram makes a 52,311 px page), A05 (3,000-section Markdown), A08 (PDF zoom memory), R01–R02 and R04 remain pending.
-- Package 6: B01–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
+- Package 5: R03's PDF keyboard isolation is done (R03 update above); its outline work remains pending. A04 (500-edge Stepped diagram makes a 52,311 px page), A05 (3,000-section Markdown), A08 (PDF zoom memory), R01–R02 and R04 remain pending.
+- Package 6: B01 is done (latest update above); B02–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
 - Package 8: A12 (Gemini models, not yet checked against Google's current list), B04, B05, R05, R06, and the lint debt (76 errors).

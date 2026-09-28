@@ -220,7 +220,7 @@ test("attachment picker imports into the workspace, inserts a durable reference,
   await expect(page.getByRole("img", { name: "uploaded.svg", exact: true })).toBeVisible();
   expect((await download(page)).name).toBe("attach.zip");
   const pending = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export this document", exact: true }).click();
+  await page.getByRole("button", { name: "Export", exact: true }).click();
   await page.getByRole("menuitem", { name: /Web page/ }).click();
   const menuDownload = await pending;
   expect(menuDownload.suggestedFilename()).toBe("attach.zip");
