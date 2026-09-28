@@ -1,4 +1,114 @@
-Latest update — 2026-09-28 (A04 diagram mode parity and bounded Stepped stage)
+Latest update — 2026-09-28 (R03 lazy PDF outline and bounded Contents tree)
+
+Completed R03's outline work (Package 5), so R03 is now done. Opening a PDF no
+longer resolves its outline. The Contents tab resolves only the entries it
+shows, opens large outlines collapsed, and mounts only the visible rows of a
+long list.
+
+Before (HEAD 4178f45, production build, 1280×800, Chrome-generated PDF with
+a 6,020-entry outline: 20 chapters × 50 sections × 5 topics, 100 pages):
+- As soon as the document loaded, before anyone opened Contents, the reader
+  sent 6,020 GetPageIndex worker requests: `resolveOutline` walked the whole
+  tree recursively with `Promise.all`.
+- The Contents tab mounted all 6,020 entries fully expanded: 13,065 sidebar
+  elements and a 144 ms long task.
+- A `getOutline()` failure fell into the document-load catch, so a broken
+  outline showed "This PDF could not be read" for a readable PDF.
+- The outline list had no tree semantics. Every entry was its own Tab stop,
+  and there was no way to collapse anything.
+
+Fix:
+- src/services/pdf-viewer/pdf-outline.ts (pure, unit tested):
+  - `buildOutline` maps pdf.js's outline into ids, titles, unresolved
+    destinations and the PDF's open/closed flag (negative /Count). It is
+    iterative, so a very deep outline can't overflow the stack.
+  - `initialExpanded` honors the PDF's open/closed flags, breadth first. It
+    stops expanding before the visible rows would pass 200, so a small outline
+    opens as its author set it and a huge one opens at its top levels.
+  - `flattenOutline` produces the visible rows with aria level, position and
+    set size. `windowRange` is the virtual window.
+  - `PdfOutlineResolver` resolves destinations to pages on demand:
+    - Cached per named destination or page reference, so entries on one page
+      share one look-up.
+    - At most 4 look-ups in flight.
+    - `prefetch` replaces queued work when rows scroll away. A click jumps the
+      queue and is never dropped.
+    - Integer page-index destinations are supported, as in pdf.js's link
+      service. Failures become inert (disabled) entries.
+    - `dispose` stops everything when the document changes.
+- PdfOutlineTree.tsx is a flat `role="tree"` with treeitems (aria-level,
+  -posinset, -setsize, -expanded, -disabled, aria-current="page"):
+  - It is one Tab stop. Focus stays on the tree via `aria-activedescendant`,
+    so a row leaving the virtual window never drops keyboard focus.
+  - Keys: Up/Down/Home/End move, Right expands or enters, Left collapses or
+    goes to the parent, Enter/Space navigate. A chevron click toggles.
+  - Past 300 visible rows only the window (plus 12 rows of overscan) is
+    mounted, with fixed 28 px rows and spacers.
+  - Rows on screen are prefetched for the current-page highlight. Updates are
+    coalesced to one render per animation frame.
+  - The latest click wins if an earlier entry is still resolving.
+- PdfReader.tsx: the outline is loaded but not resolved. An outline failure
+  only empties Contents and never becomes a document load error. There is one
+  resolver per document.
+- PdfSidebar.tsx: the tree is its own scroll container (it windows by scroll
+  position).
+
+After (same fixture, build settings and script):
+- 0 GetPageIndex requests at load.
+- Opening Contents: 32 look-ups. The 170 initially visible rows (20 chapters,
+  with chapters 1–3 open) point into 32 distinct pages, checked independently
+  with pdf.js in Node.
+- 170 rows / 854 sidebar elements (was 6,020 / 13,065).
+- Longest long task 94 ms (was 144 ms).
+- JS heap 23.4 MiB (was 35.6 MiB).
+- With all 1,020 chapter and section rows expanded, fewer than 80 rows are
+  mounted and the scroll height is exact (1,020 × 28 + 16 px).
+
+Validation:
+- Unit: tests/pdf-outline.test.ts, 13 tests:
+  - Mapping and closed flags.
+  - A 20,000-level chain, built and flattened without recursion.
+  - The initial expansion budget, including 10,050 entries.
+  - aria positions, the window math and destination keys.
+  - Lazy, cached resolution.
+  - Named, missing and broken names, page indexes and bad refs.
+  - The concurrency cap.
+  - Scroll-away dropping, and click priority and promotion.
+  - dispose.
+- Browser: tests/e2e/pdf-outline.spec.ts, 3 tests, production preview:
+  - A handcrafted PDF with explicit, named, missing, no-destination and
+    closed-group entries: disabled states, navigation, aria-current, and full
+    keyboard operation.
+  - The 6,020-entry book: 0 look-ups before Contents opens, a bounded initial
+    tree, ≤ 32 look-ups, and navigation to page 96.
+  - Past 300 rows: windowing, a mid-list scroll with correct aria positions,
+    End/Enter reaching the last row (page 100) with focus kept, and Home.
+  - All 3 fail against the HEAD build. The load test fails with "Received:
+    6020" look-ups.
+- Existing browser specs pdf-keyboard, pdf-zoom-budget, highlighting and
+  viewers: 19/20. The one failure, viewers.spec spreadsheet controls, also
+  fails on the HEAD build (a known existing failure).
+- npm test 287/287, typecheck, build, and ESLint/Prettier on the changed files
+  all pass. All of it ran in a clean worktree of HEAD plus only this change,
+  on private ports, because other sessions share the main tree.
+- Chrome DevTools MCP, isolated context, same fixture:
+  - GetOutline only, and 0 GetPageIndex requests at load.
+  - Contents: 32 look-ups and 170 rows.
+  - Keyboard End → Right → Right → Enter landed on Section 20.1 at page 96,
+    with focus kept and the focus ring and current-page highlight visible.
+  - No new console warnings. The one existing issue, a form field without
+    id/name, isn't in the sidebar.
+
+Limits:
+- Outline entries that are URL/action links (no destination) stay inert, as
+  before.
+- The tree doesn't yet auto-reveal the entry for the current page when it is
+  inside a collapsed branch.
+- The thumbnail list still mounts one (unrendered) button per page.
+- Chromium desktop only. No Safari/Firefox, screen-reader or
+  physical-device testing.
+
+Previous update — 2026-09-28 (A04 diagram mode parity and bounded Stepped stage)
 
 Completed A04 / Package 5's diagram item. Raw and Stepped now use one
 renderer decision for each diagram. Stepped plays in a stage one screenful
@@ -877,7 +987,7 @@ Pending (not started, or started but not committed)
 
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
-- Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), and A04's diagram mode parity and bounded Stepped stage is done (latest update); R03's outline work remains pending. A05 (3,000-section Markdown), R01–R02 and R04 remain pending.
+- Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. A05 (3,000-section Markdown), R01–R02 and R04 remain pending.
 - Package 6: B01 is done (latest update above); B02–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).

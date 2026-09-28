@@ -8,12 +8,12 @@ import { PdfPageArea } from "./PdfPageArea";
 import { PdfSidebar } from "./PdfSidebar";
 import { PdfSearchOverlay } from "./PdfSearchOverlay";
 import { usePdfSearch } from "./use-pdf-search";
-import type { PdfOutlineNode, PdfSearchMatch } from "./types";
+import { buildOutline, PdfOutlineResolver } from "./pdf-outline";
+import type { PdfSearchMatch } from "./types";
 import "./pdf-viewer.css";
 
 type PdfjsModule = typeof import("pdfjs-dist");
 type PdfTextContent = Awaited<ReturnType<PDFPageProxy["getTextContent"]>>;
-type RawOutline = NonNullable<Awaited<ReturnType<PDFDocumentProxy["getOutline"]>>>;
 
 /**
  * Page proxies kept warm. pdf.js keeps every proxy itself; what grows is each
@@ -74,34 +74,11 @@ function usePdfjsModule() {
   return pdfjs;
 }
 
-async function resolveOutline(doc: PDFDocumentProxy, items: RawOutline): Promise<PdfOutlineNode[]> {
-  return Promise.all(
-    items.map(async (item) => ({
-      title: item.title,
-      pageNumber: await resolveDestPage(doc, item.dest),
-      items: item.items?.length ? await resolveOutline(doc, item.items) : [],
-    })),
-  );
-}
-
-async function resolveDestPage(
-  doc: PDFDocumentProxy,
-  dest: RawOutline[number]["dest"],
-): Promise<number | null> {
-  if (!dest) return null;
-  try {
-    const explicit = typeof dest === "string" ? await doc.getDestination(dest) : dest;
-    const ref = explicit?.[0];
-    if (!ref) return null;
-    return (await doc.getPageIndex(ref)) + 1;
-  } catch {
-    // A destination that doesn't resolve (a malformed PDF, a ref to a page
-    // that isn't there) just becomes an inert outline entry, not an error.
-    return null;
-  }
-}
-
-/** Loads the document, resolves its outline, and keeps bounded caches of page proxies + text content for the rest of the reader. */
+/**
+ * Loads the document and its outline (unresolved; see `pdf-outline.ts`),
+ * and keeps bounded caches of page proxies + text content for the rest of
+ * the reader.
+ */
 function usePdfDocument(
   file: PdfBookProps["file"],
   pdfjs: PdfjsModule | null,
@@ -142,14 +119,12 @@ function usePdfDocument(
     });
 
     void (async () => {
+      let doc: PDFDocumentProxy;
       try {
-        const doc = await loadingTask.promise;
+        doc = await loadingTask.promise;
         if (!alive) return;
         setPdfDocument(doc);
         setNumPagesRef.current(doc.numPages);
-        const rawOutline = await doc.getOutline();
-        if (!alive) return;
-        setOutlineRef.current(rawOutline ? await resolveOutline(doc, rawOutline) : []);
       } catch (err) {
         if (!alive) return;
         if (err instanceof pdfjs.PasswordException) {
@@ -159,6 +134,14 @@ function usePdfDocument(
         } else {
           setLoadErrorRef.current("This PDF could not be read in the browser.");
         }
+        return;
+      }
+      try {
+        const rawOutline = await doc.getOutline();
+        if (alive) setOutlineRef.current(rawOutline ? buildOutline(rawOutline) : []);
+      } catch {
+        // A broken outline only costs the Contents tab; the pages still read.
+        if (alive) setOutlineRef.current([]);
       }
     })();
 
@@ -183,7 +166,14 @@ function usePdfDocument(
     [getPage, textCache],
   );
 
-  return { pdfDocument, getPage, getTextContent };
+  // One per document, so its cache never answers for another file.
+  const outlineResolver = useMemo(
+    () => (pdfDocument ? new PdfOutlineResolver(pdfDocument) : null),
+    [pdfDocument],
+  );
+  useEffect(() => () => outlineResolver?.dispose(), [outlineResolver]);
+
+  return { pdfDocument, getPage, getTextContent, outlineResolver };
 }
 
 function PdfMessage({ children }: { children: React.ReactNode }) {
@@ -196,7 +186,11 @@ function PdfMessage({ children }: { children: React.ReactNode }) {
 
 export function PdfReader({ file, reader }: PdfBookProps) {
   const pdfjs = usePdfjsModule();
-  const { pdfDocument, getPage, getTextContent } = usePdfDocument(file, pdfjs, reader);
+  const { pdfDocument, getPage, getTextContent, outlineResolver } = usePdfDocument(
+    file,
+    pdfjs,
+    reader,
+  );
   const search = usePdfSearch({
     active: reader.searchOpen,
     numPages: reader.numPages,
@@ -226,7 +220,9 @@ export function PdfReader({ file, reader }: PdfBookProps) {
 
   return (
     <div className="flex h-[calc(100dvh-7.5rem)] w-full overflow-hidden">
-      {reader.sidebarOpen && <PdfSidebar reader={reader} getPage={getPage} />}
+      {reader.sidebarOpen && outlineResolver && (
+        <PdfSidebar reader={reader} getPage={getPage} outlineResolver={outlineResolver} />
+      )}
       <div className="relative flex min-w-0 flex-1 flex-col">
         <PdfPageArea
           reader={reader}
