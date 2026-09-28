@@ -1,7 +1,7 @@
 import { ConversionContext } from "@/services/doc-conversion/ConversionContext";
 import { ensureEmbedMediaFolder } from "@/lib/workspace/embed-media";
 import type { DocumentUpdate } from "@/services/office-editing";
-import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { Menu, X, Search, Undo2, Settings } from "lucide-react";
 
@@ -32,6 +32,7 @@ import { toMdFile, uniqueFileName, findDuplicate } from "./docs-app/file-helpers
 import { availableWorkspaceName, resolveWorkspaceName } from "./docs-app/workspace-naming";
 import { ConflictBanner } from "./docs-app/ConflictBanner";
 import { SaveErrorBanner } from "./docs-app/SaveErrorBanner";
+import { ChunkFailedNotice, LazyBoundary } from "./docs-app/LazyBoundary";
 import { SaveIndicator, type SaveState } from "./docs-app/SaveIndicator";
 import { DraftRecoveryBanner, type RecoveredDraft } from "./docs-app/DraftRecoveryBanner";
 import { DraftJournalContext } from "./editor/draft-journal-context";
@@ -123,6 +124,7 @@ import {
 import { clearArtifactResolutionCache } from "@/lib/workspace/workspace-artifacts";
 import { warmAppFonts } from "@/lib/fonts/fonts";
 import { toast } from "sonner";
+import { holdReload, registerReloadGuard, reloadConfirmed } from "@/lib/app/safe-reload";
 import { useHistory } from "@/hooks/use-history";
 import {
   isEditableTarget,
@@ -714,6 +716,8 @@ export function DocsApp() {
         baseRecordRef.current = merging ? mine : record;
         savedMutationRef.current = Math.max(savedMutationRef.current, pending);
         if (pending === mutationRef.current) setSaveStatus("saved");
+        // The ref too, now: a reload may be decided before the next render.
+        saveErrorRef.current = null;
         setSaveError(null);
         // Show the other tab's changes here too, unless the reader has changed
         // something since this snapshot was taken; the next save merges again.
@@ -764,6 +768,7 @@ export function DocsApp() {
       baseRecordRef.current = ws;
       workspaceConflictRef.current = false;
       setConflict(null);
+      saveErrorRef.current = null;
       setSaveError(null);
       if (saveTimer.current) clearTimeout(saveTimer.current);
       const wsFolders = ws.folders ?? [];
@@ -943,7 +948,8 @@ export function DocsApp() {
       if (!hydratedRef.current) return;
       const id = workspaceIdRef.current;
       if (id) saveScrollTop(id, scrollRef.current);
-      void persistNow(true);
+      // Held so a reload that starts meanwhile waits for it (safe-reload.ts).
+      holdReload(persistNow(true));
     };
     const onVisibility = () => {
       if (document.visibilityState === "hidden") flush();
@@ -953,7 +959,9 @@ export function DocsApp() {
       // Only when storage is known not to hold the latest state. Ordinary
       // pending edits are journalled or about to be written, and prompting on
       // every close would teach readers to ignore the prompt.
-      if (saveErrorRef.current || workspaceConflictRef.current) event.preventDefault();
+      // A reload the reader already confirmed (safe-reload.ts) isn't asked twice.
+      if ((saveErrorRef.current || workspaceConflictRef.current) && !reloadConfirmed())
+        event.preventDefault();
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     document.addEventListener("visibilitychange", onVisibility);
@@ -2138,6 +2146,29 @@ flowchart LR
     [],
   );
 
+  // Anything that reloads the page (stale-chunk recovery) saves through here
+  // first, and learns what a reload would still cost. See safe-reload.ts.
+  useEffect(() => {
+    let journalled = true;
+    return registerReloadGuard({
+      flush: () => {
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        if (journalTimer.current) clearTimeout(journalTimer.current);
+        journalled = journal.flush();
+        return persistNow(false);
+      },
+      idle: () => !hasUnsavedWork() && !saveErrorRef.current && !workspaceConflictRef.current,
+      // Editor text is in the draft journal, which offers it back after the
+      // reload; everything else unsaved exists only in this tab.
+      atRisk: () =>
+        mutationRef.current !== savedMutationRef.current ||
+        officeDirtyPanes.current.size > 0 ||
+        !!saveErrorRef.current ||
+        workspaceConflictRef.current ||
+        (editorDirtyRef.current && !journalled),
+    });
+  }, [hasUnsavedWork, journal, persistNow]);
+
   useEffect(
     () =>
       persistence.subscribe((change) => {
@@ -3110,7 +3141,7 @@ flowchart LR
   const shareDialog = (
     <>
       {incomingShare && (
-        <Suspense fallback={null}>
+        <LazyBoundary>
           <SharedFilesDialog
             open
             files={incomingShare.files}
@@ -3122,10 +3153,10 @@ flowchart LR
               void acceptSharedFiles(target, ids, name)
             }
           />
-        </Suspense>
+        </LazyBoundary>
       )}
       {shareRequest && (
-        <Suspense fallback={null}>
+        <LazyBoundary>
           <SharePreviewDialog
             request={shareRequest}
             onDismiss={() => setShareRequest(null)}
@@ -3133,7 +3164,7 @@ flowchart LR
             onCopy={copyLink}
             onDownload={downloadJson}
           />
-        </Suspense>
+        </LazyBoundary>
       )}
     </>
   );
@@ -3192,7 +3223,7 @@ flowchart LR
     : null;
 
   const savedPage = showSaved ? (
-    <Suspense fallback={null}>
+    <LazyBoundary>
       <SavedPage
         saved={savedEntries}
         highlights={highlights}
@@ -3202,7 +3233,7 @@ flowchart LR
         onOpenHighlight={(hl) => handleSelect(hl.fileId, hl.subtopicId || undefined)}
         onRemoveHighlight={removeHighlight}
       />
-    </Suspense>
+    </LazyBoundary>
   ) : null;
 
   // Settings is a dialog over the reader rather than a page of its own, so the
@@ -3230,7 +3261,7 @@ flowchart LR
   // works — it just opens the dialog on top. Rendered from both the empty state
   // and the reader, so that link resolves even before any document is open.
   const settingsDialog = showSettings ? (
-    <Suspense fallback={null}>
+    <LazyBoundary>
       <SettingsPage
         workspaces={workspaces}
         currentWorkspaceId={workspaceId}
@@ -3291,7 +3322,7 @@ flowchart LR
         initialTab={pendingSettingsTab}
         onClose={closeSettings}
       />
-    </Suspense>
+    </LazyBoundary>
   ) : null;
 
   // ---- durability surface ----
@@ -3658,7 +3689,11 @@ flowchart LR
                 onOpen: handleSelect,
               }}
             >
-              <Suspense fallback={<main className="min-w-0 flex-1" aria-busy />}>
+              <LazyBoundary
+                loading={<main className="min-w-0 flex-1" aria-busy />}
+                failed={<ChunkFailedNotice />}
+                resetKey={`${activeFileId}:${showSaved}`}
+              >
                 {/* In split view the column is pinned to the viewport and each pane
                 scrolls itself. Without a real height here the group resolves
                 `h-full` against an auto-height parent, every pane grows to its
@@ -3882,7 +3917,7 @@ flowchart LR
                     />
                   ) : null}
                 </main>
-              </Suspense>
+              </LazyBoundary>
             </ConversionContext.Provider>
           </div>
 
@@ -3902,7 +3937,7 @@ flowchart LR
           are derived from every document in the workspace; keeping it out of
           the tree until it is asked for saves that work on every render. */}
           {aiOpen && aiEnabled && (
-            <Suspense fallback={null}>
+            <LazyBoundary>
               <AskAiPanel
                 open
                 onClose={closeAskAi}
@@ -3914,7 +3949,7 @@ flowchart LR
                 onInsert={insertAiOutput}
                 onCreateDoc={createAiDoc}
               />
-            </Suspense>
+            </LazyBoundary>
           )}
 
           {settingsDialog}

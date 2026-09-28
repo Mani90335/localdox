@@ -12,28 +12,13 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { applyDeviceTier } from "@/lib/platform/device-tier";
 import { registerOfflineShell } from "@/lib/offline/offline-shell";
+import { installChunkRecovery } from "@/lib/app/install-chunk-recovery";
 import { THEME_COLOR_DARK, THEME_COLOR_LIGHT } from "@/lib/theme-color";
 
-// Mermaid loads each diagram type (flowchart, ERD, etc.) in a separate Vite
-// chunk. After a deployment, an already-open tab can still reference a chunk
-// from the previous release. Vite emits this event for that failed import;
-// reload once to fetch the current app shell and its matching asset manifest.
-if (typeof window !== "undefined") {
-  window.addEventListener("vite:preloadError", (event) => {
-    event.preventDefault();
-
-    const payload = (event as Event & { payload?: unknown }).payload;
-    const failure = payload instanceof Error ? payload.message : String(payload ?? "unknown");
-    const reloadKey = "localdox:preload-error";
-
-    // Do not get caught in a reload loop if the new release has a real asset
-    // configuration problem rather than a stale browser cache.
-    if (sessionStorage.getItem(reloadKey) === failure) return;
-
-    sessionStorage.setItem(reloadKey, failure);
-    window.location.reload();
-  });
-}
+// Every optional feature is its own build chunk. After a deployment an open
+// tab can ask for a chunk that no longer exists, or the network can be gone.
+// Recover without reloading over unsaved work; see src/lib/app/stale-chunk.ts.
+installChunkRecovery();
 
 function NotFoundComponent() {
   return (

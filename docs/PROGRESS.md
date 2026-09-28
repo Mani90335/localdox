@@ -1,4 +1,91 @@
-Latest update — 2026-09-28 (R04 spreadsheet viewer off the main thread)
+Latest update — 2026-09-28 (B04 stale-chunk recovery without losing work)
+
+Completed B04 (Package 8). When a lazily loaded chunk fails, the page no
+longer reloads straight away. It finds out why, saves first, and reloads by
+itself only when nothing could be lost.
+
+Before (HEAD c93cc27, production build, Playwright; the DocumentViewer chunk
+routed to the host's HTML fallback, or the context set offline):
+- Save failing (files store throwing QuotaExceededError): the page still
+  reloaded, behind a beforeunload prompt. Accepting it lost the imported
+  data.csv, which had never been stored.
+- Offline: it reloaded into the browser's offline error page (empty body).
+- Same failure after one reload: the loop guard stopped the reload, the import
+  resolved to `undefined`, and the root "This page didn't load" screen
+  replaced the whole app.
+- The loop guard was keyed by error message, so differing messages were not
+  bounded.
+
+Fix:
+- src/lib/app/stale-chunk.ts (pure): recognises chunk errors (Chromium,
+  Firefox, Safari wording, and Vite's CSS preload message) and extracts the
+  failed same-origin URL. The probe sends HEAD with `cache: "no-store"`, which
+  the service worker doesn't answer. It reads offline / missing (error status
+  or text/html) / present, with a 4 s timeout that counts as offline.
+  `planRecovery` reloads by itself only when the page is idle after saving
+  and there was no automatic reload in the last 5 minutes (any message).
+  Otherwise it offers the reload.
+- src/lib/app/safe-reload.ts (pure): DocsApp registers a guard (flush, idle,
+  atRisk). `prepareReload` writes first, with a 5 s cap, and also waits for
+  an unmounted page's final write (`holdReload`). It returns clean,
+  recoverable (only journalled editor text left) or at-risk. `reloadSafely`
+  saves first and asks before dropping at-risk changes. Once confirmed,
+  DocsApp's beforeunload prompt stands down, so the reader isn't asked twice.
+- src/lib/app/install-chunk-recovery.ts: the listener no longer calls
+  preventDefault, so the import rejects honestly. Concurrent failures fold
+  into one run, and the toast has a fixed id. Offline, it waits for the
+  `online` event (or "Try again"), then re-runs.
+- src/components/docs/docs-app/LazyBoundary.tsx: Suspense plus a boundary
+  that catches only chunk errors. It wraps DocsApp's six lazy surfaces: the
+  main viewer area, Saved, Settings, the AI panel and both share dialogs. The
+  viewer area shows an inline "didn't load" notice with Reload. `resetKey`
+  clears it when the reader opens something else. Other errors still reach
+  the root boundary.
+- DocsApp.tsx: registers the guard. `saveErrorRef` is cleared when a write
+  commits, not on the next render, so a reload decided right after a
+  successful retry doesn't see a stale error.
+- build/offline-sw.js: the worker never caches a text/html answer for a
+  non-HTML build file. After a deploy, the host's SPA fallback for an old
+  chunk used to be cached as that script.
+- documentation/stale-chunk-recovery.md: the model, flow, decisions and
+  debugging.
+
+After (same production build):
+- tests/e2e/stale-chunk.spec.ts, 3 tests: nothing unsaved (pending import
+  written, then exactly one reload, then an offer instead of a loop, the rest
+  of the app still mounted, and the offered Reload fixes the viewer).
+  Unsaveable changes (no automatic reload; Reload asks once and staying keeps
+  everything; after space returns it saves and reloads with no prompt).
+  Offline (no reload, toast plus inline notice, and recovery by itself on
+  `online`). All 3 fail on HEAD. Passed 3/3, then 2 more times with
+  --repeat-each=2.
+- tests/chunk-recovery.test.ts: 12 unit tests (error recognition, URL
+  extraction, probe outcomes and request shape, plan matrix, guard ordering,
+  timeout, held writes, unregister, confirm and stay).
+- DevTools MCP on a separate preview (port 4197): imported note.md and
+  data.csv, deleted the DocumentViewer chunk from .output (the server answered
+  500), then opened data.csv. The page saved and reloaded once
+  (navigation type "reload", sessionStorage stamp set). It then showed the
+  inline notice and the "Localdox has been updated" toast, and did not
+  reload again. With the chunk restored, Reload rendered the CSV.
+- npm run typecheck passed; npm test 371/371 (worktree run); npm run build
+  passed. Full production e2e run in an isolated worktree (port 4191): 107
+  passed, 6 failed, 1 skipped. Three failures fail on plain HEAD too
+  (mobile-navigation drawer close, both sharing.spec previews). The other
+  three (ai-streaming blocked answer, conversion convert/repeat and scanned
+  PDF) passed in isolation and 2/2 on repeat, so they were load flakes in
+  the 51-minute run.
+- eslint: new files clean; DocsApp.tsx has the same 12 warnings as HEAD.
+
+Limits: keeping the previous release's /assets/ on the host during a
+rollout is a deployment change and isn't done here. An open tab already
+keeps chunks its service worker cached, which includes the shell, Settings
+and the document viewer. Office editors aren't journalled, so a dirty one
+makes Reload ask first rather than recover. The SW's HTML check was reviewed
+but not exercised end to end: the local preview answers missing files with
+500, not an HTML 200. Chromium only.
+
+Previous update — 2026-09-28 (R04 spreadsheet viewer off the main thread)
 
 Completed R04's viewer half (Package 5). Spreadsheets are now parsed,
 filtered and sorted in a worker, one sheet at a time. The grid renders only
@@ -1413,7 +1500,7 @@ Pending (not started, or started but not committed)
 - Package 6: B01 is done (latest update above); B02–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
-- Package 8: R06 is done (latest update). A12 (Gemini models, not yet checked against Google's current list), B04, B05, R05 and the lint debt (76 errors) remain.
+- Package 8: R06 is done (latest update). B04 is done (latest update). A12 (Gemini models, not yet checked against Google's current list), B05, R05 and the lint debt (76 errors) remain.
 
 None of PLAN.md's release gates are formally met yet. A01–A03 and A09/A10 now have passing reproductions, which is what the reliability gate asks for, and Package 3's offline criterion now has a passing reproduction too.
 

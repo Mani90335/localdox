@@ -35,6 +35,17 @@ for (const [url, bytes, tag] of MANIFEST.files) {
 
 const absolute = (url) => new URL(url, self.location.origin).href;
 
+/**
+ * Whether a 200 answer is really the file asked for. The host rewrites unknown
+ * paths to the SPA shell, so after a deployment an old chunk comes back as
+ * HTML with status 200. Cached, that would answer every later request for the
+ * script with a page.
+ */
+const isFile = (url, response) =>
+  response.status === 200 &&
+  response.type === "basic" &&
+  (url.endsWith(".html") || !/text\/html/i.test(response.headers.get("content-type") ?? ""));
+
 /** Runs `task` over `items`, `limit` at a time. Stops starting new ones after a failure. */
 async function pool(items, limit, task) {
   let next = 0;
@@ -56,7 +67,7 @@ async function pool(items, limit, task) {
 /** Fetches a file for caching; hashed assets may come from the HTTP cache. */
 async function fetchForCache(url) {
   const response = await fetch(url, { cache: url.startsWith("/assets/") ? "default" : "no-cache" });
-  if (response.status !== 200 || response.type !== "basic") {
+  if (!isFile(url, response)) {
     throw new Error(`${url} returned HTTP ${response.status}`);
   }
   // A redirected response can't answer a navigation; keep only its content.
@@ -139,7 +150,7 @@ async function fromCache(event, request, file) {
   const cached = await caches.match(file.key);
   if (cached) return cached;
   const response = await fetch(request);
-  if (response.status === 200 && response.type === "basic") {
+  if (isFile(new URL(request.url).pathname, response)) {
     const copy = response.clone();
     event.waitUntil(
       caches
