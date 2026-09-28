@@ -1,4 +1,175 @@
-Latest update — 2026-09-28 (PDF follow-ups: pinch zoom rate, current Contents entry, windowed thumbnails, spreadsheet e2e)
+Latest update — 2026-09-28 (R04 spreadsheet viewer off the main thread)
+
+Completed R04's viewer half (Package 5). Spreadsheets are now parsed,
+filtered and sorted in a worker, one sheet at a time. The grid renders only
+the rows and columns in view. The bounded mass-import queue is not done
+(see Limits).
+
+Before (HEAD 4178f45, production build, 1280×800, Playwright + long-task
+observer, same script both sides; fixtures generated with SheetJS):
+- 100,000 × 10 workbook (18 MiB): one 860 ms main-thread task to open
+  (832 ms on reopen). The main-thread JS heap was 80 MiB after open and
+  103 MiB after reopen. Sorting was an 84 ms task.
+- 6 sheets × 25,000 × 8 (22 MiB): every sheet was parsed up front, a
+  1,072 ms task, and 2,175 ms to first rows. Heap 87 / 115 MiB.
+- 1,000 × 300: 8,128 cells mounted (every column of each rendered row),
+  with a 281 ms task on open.
+- In the browser test below, a 60,000 × 8 workbook opened with one 316 ms
+  task.
+
+Fix:
+- src/lib/spreadsheet/engine.ts (SpreadsheetEngine, pure and injectable):
+  - open() reads only the sheet names (bookSheets). A sheet is parsed with
+    SheetJS's `sheets: [name]` the first time it is shown, then cached. In
+    node on the 6-sheet file that is 130 ms for the names and 340 ms for one
+    sheet, against 1,255 ms for the whole workbook.
+  - Filter and sort keep the old viewer's semantics exactly: per-cell,
+    case-insensitive and trimmed matching, numbers before text, one shared
+    collator, and ties in sheet order in both directions.
+  - Sort keys are read once per row, and sorted orders are cached per
+    (sheet, column, direction), four at most. A filtered view walks the
+    cached order instead of re-sorting.
+  - A query that extends the previous one re-checks only its matches.
+  - Filtering and sorting run in 12 ms slices. A newer view request stops
+    an older one at its next slice (ViewSupersededError).
+  - Rows are handed out in windows, by view position and column range. Only
+    the latest two views are kept; an older one answers StaleViewError.
+  - Column types are sampled from the first 200 rows, as before. Widths come
+    from every cell's length, recorded in the stringify pass the engine
+    already makes, so sorting never brings a clipped value to the top.
+- protocol.ts / spreadsheet.worker.ts / client.ts: the same request/reply
+  shape as the A07 search protocol.
+  - Every request gets one reply: result, superseded, stale or error.
+  - A worker error or messageerror terminates the worker, rejects everything
+    pending and reports once. close() rejects work still in flight.
+  - The local client runs the same engine on the main thread.
+- connect.ts: one worker per open spreadsheet, closed (terminated) when the
+  file changes or the viewer unmounts. It falls back to the local client
+  where workers can't be created. The module is dynamically imported, so
+  the worker and SheetJS inside it stay optional downloads. The offline
+  shell list is unchanged (checked in the emitted sw.js).
+- grid-window.ts: row and column windows, column fitting and block
+  arithmetic.
+  - A sheet narrower than the view stretches its columns in proportion, as
+    the auto table layout used to.
+  - A wider one keeps natural widths (64–360 px) and scrolls.
+- use-spreadsheet.ts: drives the client.
+  - Rows are fetched in 128-row × 48-column blocks, with 64 rows of
+    prefetch; at most 48 blocks are kept on the main thread.
+  - A new view (filter, sort or sheet) replaces the old one only once its
+    first screen has arrived, so the table never flashes empty.
+- SpreadsheetViewer.tsx:
+  - Fixed table layout with a colgroup. Only the visible columns (plus 3 on
+    each side) are rendered, with spacer columns for the rest; the sticky
+    header and # column are unchanged.
+  - Long cells are truncated with an ellipsis and a title.
+  - aria-rowcount/colcount and aria-rowindex/colindex give the full size.
+  - "Filtering…" / "Sorting…" status and aria-busy while the worker works.
+  - A crashed worker shows an alert with Try again, which starts a new
+    worker.
+  - The filter input now has a name (a DevTools issue).
+
+After (same script and fixtures; results identical over the runs made):
+- 100,000 × 10: no main-thread task over 50 ms on open, reopen, filter or
+  sort. Heap 6.2 MiB after open, 29.8 MiB after reopen.
+- 6 sheets: no long task, 1,302 ms to first rows (reopen 1,324 ms, was
+  1,966). Heap 6.2 / 34.9 MiB. Switching to an unparsed sheet now takes
+  about 305 ms, off the main thread (it was 44 ms, because every sheet had
+  been parsed at open).
+- 1,000 × 300: 325 cells mounted, 433 after scrolling to the middle. No
+  long task.
+- Match counts and first sorted rows are identical to HEAD: 771 / 9 / 28
+  matches; first sorted rows 78331 / 354 / 13689.
+
+Validation:
+- Unit, 22 new tests:
+  - tests/spreadsheet-engine.test.ts, 12 tests:
+    - Filter and sort compared against a verbatim copy of the old viewer's
+      algorithm: 12 random sheets × 8 queries × 11 sorts, with accents,
+      mixed and empty cells, short rows and an out-of-range column.
+    - Lazy per-sheet reads, recorded through a SheetJS wrapper.
+    - Narrowing equals a fresh filter.
+    - Supersession counts yields, so an older view must stop at its first
+      slice.
+    - View eviction, column windows, and widths from rows beyond the
+      sample.
+    - Mutation checks: reversing the tie order, inverting the narrowing
+      test, dropping the slice check, or sampling widths again each fail a
+      test.
+  - tests/spreadsheet-client.test.ts, 10 tests: protocol replies, the
+    worker client on a fake worker (round trip, error/messageerror, close,
+    late replies), the local client, and grid arithmetic.
+  - npm test: 296/296.
+- Browser: tests/e2e/spreadsheet-worker.spec.ts, 8 tests, production
+  preview.
+  - A 400 × 300 sheet: fewer than 900 cells mounted, correct cells in the
+    middle and at the far end, full aria counts, and no page overflow.
+  - A held "view" reply: "Filtering…", aria-busy, and the old rows stay;
+    the latest query wins.
+  - Sorting across 3,000 virtual rows, bottom row included.
+  - No clipped cell after sorting a long value to the top.
+  - Switching sheets after scrolling right: a MutationObserver checks that
+    no row is ever rendered blank.
+  - A crashed worker: alert, Try again, and a new worker.
+  - No Worker: the main-thread fallback reads, filters and sorts.
+  - A 60,000 × 8 upload with no task over 150 ms (0 measured in 5/5 runs);
+    leaving the file terminates its worker.
+  - 18/18 with --repeat-each=3 before the last two tests were added.
+  - Against the HEAD build, the tests fail on substance: 7,225 cells, no
+    "Filtering…" state, no worker to crash, a 316 ms long task. The
+    no-worker test passes on HEAD, as it should.
+- Existing spreadsheet tests pass: viewers.spec, including "spreadsheet
+  controls…" (its selector fix landed in 0a06df2), and editing.spec (CSV
+  and XLSX editing, the wide-sheet editor, the formula save error).
+- Chrome DevTools MCP, production preview, isolated contexts, fixtures
+  loaded through DataTransfer:
+  - 6-sheet workbook: rows in 1,130 ms with no long task. Sheet 5, filter
+    "golf 7" (1,391 rows), then sort ascending by Amount 4: rows correct
+    and ascending, still no long task.
+  - A screenshot showed the Id column clipping 5-digit ids ("226…") after a
+    sort, because widths came from a 200-row sample. That is fixed
+    (full-column lengths) and regression-tested.
+  - Wide sheet sorted descending and scrolled to the middle: 406 cells,
+    nothing clipped. At 390 px wide, no page overflow.
+  - Console: only the unnamed filter-field issue, now fixed.
+- npm run typecheck, npm run build (same warnings as HEAD), ESLint (0
+  errors) and Prettier on every changed file pass.
+- Full production browser suite (built on 4178f45 plus this change): 87
+  passed, 1 skipped (dev-only), 5 failed.
+  - Four were the known failures on that HEAD: the mobile-navigation drawer
+    close, both sharing.spec previews, and viewers.spec spreadsheet controls
+    (now fixed upstream).
+  - The fifth, offline "deep link opens Settings", is flaky on both builds.
+    Run ×8 each: HEAD failed 2/8, this build 1/16 (over two batches). It
+    fails at the Storage tab click (line 167) or on a doubled /settings
+    navigation, as the A07 entry recorded.
+- Rebased onto 0a06df2 (A04, R03, R06 and PDF follow-ups; only PROGRESS.md
+  overlaps): typecheck, npm test 355/355 and the build pass. Spreadsheet,
+  viewers and editing specs: 17/17.
+
+Environment: all validation ran in a detached worktree with its own
+node_modules, on port 4391. Peer sessions were editing search, PDF outline,
+Mermaid and AI files in the shared tree. This commit contains only the
+spreadsheet files, their tests and this log.
+
+Limits:
+- Mass import still maps every picked file through one unbounded
+  Promise.all in DocsApp.tsx (the rest of R04). That file has another
+  session's uncommitted edits, so it was left alone.
+- The row count is not capped for the browser's maximum element height.
+  Above about 930,000 rows (36 px each) the bottom rows can't be scrolled
+  to. That limit was already there.
+- The status prompt still says "Select a column heading to sort" while a
+  sort is active, as before.
+- Column widths are estimated from character counts, not measured. Very
+  wide glyphs outside the 200-row sample may still be truncated (the full
+  text is in the title).
+- The worker keeps every visited sheet's rows in memory until the file is
+  closed. Nothing is measured on real phones, Safari or Firefox.
+- The Office editor (OfficeEditor.tsx) still parses on the main thread; it
+  was out of scope.
+
+Previous update — 2026-09-28 (PDF follow-ups: pinch zoom rate, current Contents entry, windowed thumbnails, spreadsheet e2e)
 
 Four follow-ups to R03/A08, requested by the user.
 
@@ -1238,7 +1409,7 @@ Pending (not started, or started but not committed)
 
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
-- Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. A05 (3,000-section Markdown), R01–R02 and R04 remain pending.
+- Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04's spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) is done (latest update); its bounded mass-import queue in DocsApp.tsx remains. A05 (3,000-section Markdown) and R01–R02 remain pending.
 - Package 6: B01 is done (latest update above); B02–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
