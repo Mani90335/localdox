@@ -27,8 +27,18 @@ export interface AIRequest {
 }
 
 // Categorized failure so the agent can decide whether to fall back to another
-// provider's key (quota/auth) or surface the error as-is (other).
-export type AIErrorKind = "auth" | "quota" | "network" | "other";
+// provider's key (quota/auth) or surface the error as-is (the rest). "blocked"
+// means the provider refused the prompt or withheld the answer.
+export type AIErrorKind = "auth" | "quota" | "network" | "blocked" | "other";
+
+/**
+ * How a stream ended, returned by streamChat once its last chunk is yielded.
+ * "length": the model hit its output limit, so the answer is cut short.
+ * "interrupted": the stream closed without the provider saying it was done.
+ */
+export interface StreamFinish {
+  reason: "stop" | "length" | "interrupted";
+}
 
 export class AIError extends Error {
   kind: AIErrorKind;
@@ -47,6 +57,10 @@ export interface AIProvider {
   models: AIModel[];
   /** Cheap round-trip that resolves true when the key is usable. */
   validateKey(key: string): Promise<boolean>;
-  /** Stream assistant text as it arrives. Yields incremental chunks. */
-  streamChat(req: AIRequest, key: string): AsyncIterable<string>;
+  /**
+   * Stream assistant text as it arrives. Yields incremental chunks and returns
+   * how the stream ended. Throws AIError("blocked") for a refused prompt or a
+   * withheld answer, and an AbortError once `req.signal` aborts.
+   */
+  streamChat(req: AIRequest, key: string): AsyncGenerator<string, StreamFinish>;
 }

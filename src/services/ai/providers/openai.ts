@@ -1,5 +1,5 @@
-import { AIError, type AIProvider, type AIRequest } from "../types";
-import { readSSE } from "../sse";
+import { AIError, type AIProvider, type AIRequest, type StreamFinish } from "../types.ts";
+import { readSSE } from "../sse.ts";
 
 const BASE = "https://api.openai.com/v1";
 
@@ -25,7 +25,7 @@ export const openaiProvider: AIProvider = {
     }
   },
 
-  async *streamChat(req: AIRequest, key: string): AsyncIterable<string> {
+  async *streamChat(req: AIRequest, key: string): AsyncGenerator<string, StreamFinish> {
     const res = await fetch(`${BASE}/chat/completions`, {
       method: "POST",
       headers: {
@@ -45,18 +45,52 @@ export const openaiProvider: AIProvider = {
       throw await toError(res);
     }
 
+    let sawText = false;
+    let finishReason = "";
+    let done = false;
     for await (const data of readSSE(res, req.signal)) {
-      if (data === "[DONE]") return;
-      try {
-        const json = JSON.parse(data);
-        const delta = json?.choices?.[0]?.delta?.content;
-        if (typeof delta === "string" && delta) yield delta;
-      } catch {
-        // Ignore keep-alive / partial fragments.
+      if (data === "[DONE]") {
+        done = true;
+        break;
       }
+      let json: OpenAIChunk;
+      try {
+        json = JSON.parse(data);
+      } catch {
+        continue; // Ignore keep-alive / partial fragments.
+      }
+      if (json?.error) {
+        throw new AIError("other", `OpenAI: ${json.error.message ?? "the request failed."}`);
+      }
+      const choice = json?.choices?.[0];
+      const delta = choice?.delta?.content;
+      if (typeof delta === "string" && delta) {
+        sawText = true;
+        yield delta;
+      }
+      if (choice?.finish_reason) finishReason = choice.finish_reason;
     }
+
+    if (finishReason === "content_filter") {
+      throw new AIError("blocked", "OpenAI withheld the answer (content filter).");
+    }
+    if (!sawText) {
+      throw new AIError(
+        "other",
+        finishReason === "length"
+          ? "OpenAI reached its output limit before answering."
+          : "OpenAI returned an empty answer.",
+      );
+    }
+    if (finishReason === "length") return { reason: "length" };
+    return { reason: done || finishReason === "stop" ? "stop" : "interrupted" };
   },
 };
+
+interface OpenAIChunk {
+  error?: { message?: string };
+  choices?: { delta?: { content?: unknown }; finish_reason?: string | null }[];
+}
 
 async function toError(res: Response): Promise<AIError> {
   let detail = "";

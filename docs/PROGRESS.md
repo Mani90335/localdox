@@ -1,4 +1,152 @@
-Latest update — 2026-09-28 (R03 lazy PDF outline and bounded Contents tree)
+Latest update — 2026-09-28 (R06 Ask AI streaming ownership)
+
+Completed R06 (Package 8). An Ask AI request can only change the answer it
+started. Closing the panel cancels the request, streamed text reaches React
+in batches, and blocked or cut-off answers are reported.
+
+Before (HEAD 4178f45, production build, Chrome, Gemini's streaming endpoint
+stubbed in the page so the test controls every chunk):
+- Every token was a React state update, and each update re-rendered the whole
+  answer as Markdown. 300 tokens meant 300 renders, and 2,000 tokens meant
+  2,000.
+- With 6× CPU throttling, a 2,000-token answer paced at 5 ms per token
+  saturated the main thread: 48–50 s of main-thread task time (41–42 s
+  scripting), and a stream paced to take about 12 s took 48.5–50.5 s.
+  Results were consistent over 3 runs.
+- Closing the panel unmounts it, but nothing aborted the request. The stream
+  kept running and using the user's API quota for an answer nobody could see.
+- `ask()`'s `finally` always set isStreaming=false. An older, superseded
+  request finishing late therefore ended a newer request's streaming state:
+  its Stop button disappeared and the action buttons re-enabled mid-answer.
+  Its late tokens could also reach the new answer.
+- Gemini ignored `promptFeedback.blockReason` and `finishReason`. A blocked
+  prompt or withheld answer (SAFETY, RECITATION, PROHIBITED_CONTENT, …)
+  showed as an empty or partial answer with Copy/Insert buttons. A
+  MAX_TOKENS cut-off looked complete. Mid-stream error events were
+  swallowed. OpenAI likewise ignored `length` and `content_filter`.
+- readSSE ended quietly on abort, so a cancelled stream could be returned by
+  runAgent as a complete result. Events already buffered were still yielded
+  after an abort.
+
+Fix:
+- src/services/ai/ask-session.ts (new): a React-free controller behind
+  useAI.
+  - Every request has a generation. Starting, stopping, resetting and
+    unmounting bump it, and a request changes state only while it owns the
+    current generation.
+  - Streamed text is delivered at most every 50 ms. The first chunk shows
+    immediately, and completion delivers the tail in the same update.
+  - Stop keeps the text received so far, marks the answer "stopped" and
+    ignores anything later. Any error from an aborted request reads as
+    stopped, not as a failure.
+  - dispose() (unmount) aborts and ignores all later events. It also refuses
+    requests (e.g. the panel's deferred quick-action auto-run) until
+    activate(), which covers StrictMode remounts.
+- use-ai.ts: a thin binding over the session. It exposes `status` and
+  `notice`, and `abort`/`reset` map to stop/reset.
+- types.ts: streamChat now returns a StreamFinish. `reason` is "stop",
+  "length" or "interrupted" (the stream closed with no finish reason). Adds
+  the AIError kind "blocked".
+- providers/gemini.ts:
+  - promptFeedback.blockReason → "Gemini declined this request (…)".
+  - Withholding finish reasons (checked against Google's current
+    FinishReason list) → "Gemini withheld the answer (…)".
+  - MAX_TOKENS → length. No finish reason → interrupted. No text → an error.
+  - Mid-stream error events surface. Thought parts are skipped.
+- providers/openai.ts: `length`, `content_filter` (blocked), empty answers,
+  mid-stream errors, and a stream with no [DONE] and no finish reason
+  (interrupted).
+- agent.ts:
+  - Reads the provider's finish result into AgentResult.finish.
+  - Once the signal has aborted, any error (e.g. a fetch TypeError) is the
+    cancellation. It never falls back to another provider, and a stream that
+    ends after an abort is not returned as a result.
+  - "blocked" is not retried with another key.
+- sse.ts: throws the abort reason instead of ending quietly. It checks the
+  signal before each buffered event and keeps a final line that has no
+  trailing newline.
+- AskAiPanel.tsx:
+  - Shows "Stopped. The answer above is incomplete." for a stopped answer,
+    and the length/interrupted notice, in a role="status" line.
+  - Clears the deferred quick-action timer on close.
+- agent.ts, registry.ts and the providers now import with .ts extensions (as
+  keys.ts already did), so Node's test runner can load them.
+
+After (same setup):
+- 300 tokens: 27 renders. 2,000 tokens: 206 renders (206/195/196 across
+  the 3 throttled runs).
+- With 6× CPU throttling, the 2,000-token answer took 5.7–5.8 s of
+  main-thread task time (4.4–4.5 s scripting, layout 1.4–1.6 s → 0.2 s).
+  The stream finished in 15.7–15.9 s. That is 8.4× less main-thread work.
+- Closing the panel mid-stream aborts the request. Stop keeps the partial
+  answer, and later chunks are ignored.
+- A SAFETY/RECITATION finish shows "Gemini withheld the answer (…)". A
+  MAX_TOKENS cut-off keeps the text and adds "The answer reached the model's
+  length limit and may be cut off."
+
+Tests:
+- tests/ai-streaming.test.ts (29 new unit tests):
+  - A superseded request's late tokens, abort, error or success cannot touch
+    the newer answer.
+  - Stop keeps pending text and ignores late events.
+  - An abort surfacing as TypeError still reads as stopped.
+  - 500 tokens → 7 updates (manual flush clock), with the tail delivered on
+    completion.
+  - Length/interrupted notices. dispose aborts, goes quiet and refuses new
+    requests until activated. reset.
+  - readSSE: abort mid-buffer, and a final unterminated line.
+  - Gemini: stop, thought parts, MAX_TOKENS, interrupted, 5 withholding
+    reasons, blocked prompt, empty answer, mid-stream error.
+  - OpenAI: stop, length, content_filter, interrupted.
+  - runAgent (both providers keyed): abort mid-stream rejects with
+    AbortError and makes no fallback request. An abort surfacing as a fetch
+    TypeError is a cancellation. The finish reason reaches the result and
+    quota still falls back. Blocked is not retried.
+  - Against HEAD's sse.ts and providers, all 17 SSE/provider tests fail.
+- tests/e2e/ai-streaming.spec.ts (4 browser tests; key saved through
+  Settings; Ask AI opened from the real selection menu):
+  - 300 tokens render in fewer than 60 updates.
+  - Stop keeps the partial answer and ignores later chunks.
+  - Closing the panel aborts the request.
+  - A blocked answer and a length cut-off are reported.
+  - All 4 fail on a clean HEAD build (300/300 renders, not aborted, no
+    reporting) and pass with the fix.
+- Checked by hand in Chrome via DevTools MCP (production preview, stubbed
+  streaming endpoint): streamed Markdown renders, and the real Stop button
+  aborts, keeps the text and ignores a late chunk. Copy/Insert remain
+  available. A RECITATION finish shows the withheld message, and closing the
+  panel mid-stream aborts. No console errors or warnings.
+- Validated on HEAD 85aee16 plus these files only:
+  - typecheck and build pass.
+  - Unit suite 323/323 pass.
+  - eslint is clean on src/services/ai and the new tests. This also fixes
+    one existing prettier error there.
+  - ai-streaming and ai-keys specs: 6 passed, 1 dev-only skipped.
+- Full production browser suite (on 4178f45 plus these files): 85 passed,
+  1 skipped, 4 failed. The 4 failures are the ones that already fail on
+  plain HEAD: the mobile-navigation drawer close, both sharing.spec
+  previews, and the viewers.spec spreadsheet controls.
+
+Environment:
+- A peer session's uncommitted search/MarkdownViewer/DocsApp edits were in
+  the shared tree, and A04/R03 landed during this work.
+- All validation therefore ran in a detached worktree with its own
+  node_modules, on private ports and output directories.
+- This commit contains only the Ask AI files, their tests and this log.
+
+Limits:
+- Streaming is still shown as re-rendered Markdown every 50 ms. For very
+  long answers each render still parses the whole text. There is one
+  ~50 ms long task at 6× throttling.
+- Gemini keys still travel in the URL query string rather than the
+  x-goog-api-key header. This is left for A12, which also covers retired
+  model IDs.
+- A stopped answer is not resumable.
+- There are no real provider calls; all streams are stubbed. Chromium only.
+- The floating AskAiButton is still dead code. Ask AI is reachable only from
+  the reader's selection menu. That is unchanged here.
+
+Previous update — 2026-09-28 (R03 lazy PDF outline and bounded Contents tree)
 
 Completed R03's outline work (Package 5), so R03 is now done. Opening a PDF no
 longer resolves its outline. The Contents tab resolves only the entries it
@@ -991,7 +1139,7 @@ Pending (not started, or started but not committed)
 - Package 6: B01 is done (latest update above); B02–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
-- Package 8: A12 (Gemini models, not yet checked against Google's current list), B04, B05, R05, R06, and the lint debt (76 errors).
+- Package 8: R06 is done (latest update). A12 (Gemini models, not yet checked against Google's current list), B04, B05, R05 and the lint debt (76 errors) remain.
 
 None of PLAN.md's release gates are formally met yet. A01–A03 and A09/A10 now have passing reproductions, which is what the reliability gate asks for, and Package 3's offline criterion now has a passing reproduction too.
 

@@ -1,5 +1,11 @@
-import { AIError, type AIProvider, type AIRequest, type ChatMessage } from "../types";
-import { readSSE } from "../sse";
+import {
+  AIError,
+  type AIProvider,
+  type AIRequest,
+  type ChatMessage,
+  type StreamFinish,
+} from "../types.ts";
+import { readSSE } from "../sse.ts";
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -42,7 +48,7 @@ export const geminiProvider: AIProvider = {
     }
   },
 
-  async *streamChat(req: AIRequest, key: string): AsyncIterable<string> {
+  async *streamChat(req: AIRequest, key: string): AsyncGenerator<string, StreamFinish> {
     const url = `${BASE}/models/${encodeURIComponent(req.model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(key)}`;
     const res = await fetch(url, {
       method: "POST",
@@ -58,21 +64,89 @@ export const geminiProvider: AIProvider = {
       throw await toError(res);
     }
 
+    let sawText = false;
+    let finishReason = "";
     for await (const data of readSSE(res, req.signal)) {
+      let json: GeminiChunk;
       try {
-        const json = JSON.parse(data);
-        const parts = json?.candidates?.[0]?.content?.parts;
-        if (Array.isArray(parts)) {
-          for (const p of parts) {
-            if (typeof p?.text === "string" && p.text) yield p.text;
+        json = JSON.parse(data);
+      } catch {
+        continue; // Ignore partial fragments.
+      }
+      if (json?.error) {
+        throw new AIError("other", `Gemini: ${json.error.message ?? "the request failed."}`);
+      }
+      const blockReason = json?.promptFeedback?.blockReason;
+      if (blockReason) {
+        throw new AIError("blocked", `Gemini declined this request (${describe(blockReason)}).`);
+      }
+      const candidate = json?.candidates?.[0];
+      const parts = candidate?.content?.parts;
+      if (Array.isArray(parts)) {
+        for (const p of parts) {
+          // Thinking models may send their reasoning as thought parts.
+          if (typeof p?.text === "string" && p.text && !p.thought) {
+            sawText = true;
+            yield p.text;
           }
         }
-      } catch {
-        // Ignore partial fragments.
       }
+      if (candidate?.finishReason) finishReason = candidate.finishReason;
     }
+    return finish(finishReason, sawText);
   },
 };
+
+interface GeminiChunk {
+  error?: { message?: string };
+  promptFeedback?: { blockReason?: string };
+  candidates?: {
+    content?: { parts?: { text?: unknown; thought?: boolean }[] };
+    finishReason?: string;
+  }[];
+}
+
+// Finish reasons meaning the answer was withheld or cut off by a content
+// filter. https://ai.google.dev/api/generate-content#FinishReason
+const WITHHELD = new Set([
+  "SAFETY",
+  "RECITATION",
+  "LANGUAGE",
+  "BLOCKLIST",
+  "PROHIBITED_CONTENT",
+  "SPII",
+  "IMAGE_SAFETY",
+  "IMAGE_PROHIBITED_CONTENT",
+  "IMAGE_RECITATION",
+  "ESCALATION",
+  "PUP_LIMITED_DISABLED",
+]);
+
+function finish(reason: string, sawText: boolean): StreamFinish {
+  if (WITHHELD.has(reason)) {
+    throw new AIError("blocked", `Gemini withheld the answer (${describe(reason)}).`);
+  }
+  if (reason === "MAX_TOKENS") {
+    if (!sawText) throw new AIError("other", "Gemini reached its output limit before answering.");
+    return { reason: "length" };
+  }
+  if (!sawText) {
+    throw new AIError(
+      "other",
+      reason && reason !== "STOP"
+        ? `Gemini stopped without an answer (${describe(reason)}).`
+        : "Gemini returned an empty answer.",
+    );
+  }
+  // STOP is the one normal ending. Anything else (a malformed response, an
+  // unexpected tool call, a dropped connection) leaves partial text.
+  return { reason: reason === "STOP" ? "stop" : "interrupted" };
+}
+
+// "PROHIBITED_CONTENT" -> "prohibited content"
+function describe(reason: string): string {
+  return reason.toLowerCase().replace(/_/g, " ");
+}
 
 async function toError(res: Response): Promise<AIError> {
   let detail = "";

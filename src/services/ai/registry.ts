@@ -2,8 +2,8 @@
 // Implement AIProvider, import it here, and add it to PROVIDERS.
 
 import type { AIProvider, ProviderId, AIModel } from "./types";
-import { openaiProvider } from "./providers/openai";
-import { geminiProvider } from "./providers/gemini";
+import { openaiProvider } from "./providers/openai.ts";
+import { geminiProvider } from "./providers/gemini.ts";
 
 export const PROVIDERS: Record<string, AIProvider> = {
   [openaiProvider.id]: openaiProvider,
