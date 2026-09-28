@@ -7,6 +7,7 @@ import { nitro } from "nitro/vite";
 import path from "path";
 import { mathjaxAsset } from "./build/vite-mathjax-asset";
 import { pdfjsAssets } from "./build/vite-pdfjs-assets";
+import { offlineShell } from "./build/vite-offline-shell";
 
 export default defineConfig({
   plugins: [
@@ -28,6 +29,16 @@ export default defineConfig({
     // for the consumer.
     mathjaxAsset(),
     pdfjsAssets(),
+    // Emits /sw.js so the app reopens offline. See the plugin's header.
+    offlineShell({
+      // Lazy, but needed offline without a download: opening local files of
+      // any kind, Settings (including the offline status) and Saved.
+      core: [
+        "src/components/docs/viewer/DocumentViewer.tsx",
+        "src/components/docs/pages/SettingsPage.tsx",
+        "src/components/docs/pages/SavedPage.tsx",
+      ],
+    }),
     nitro({ preset: "node-server" }),
   ],
   resolve: {

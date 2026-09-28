@@ -1,4 +1,119 @@
-Latest update — 2026-09-28 (B01 lazy HTML-export renderer)
+Latest update — 2026-09-28 (A11 offline shell and offline readiness)
+
+Completed A11's offline half, and with it Package 3's offline criterion. On a
+production build, a populated workspace reopens with no network and the HTTP
+cache disabled. At the audit baseline this reload failed with
+ERR_INTERNET_DISCONNECTED and no service worker.
+- Build: build/vite-offline-shell.ts (client build only) emits /sw.js. The
+  worker logic is in build/offline-sw.js; build/offline-manifest.ts prepends a
+  manifest of every file the app can request (795 files, 32.4 MB).
+  - The shell is precached at install: 32 files, about 1.4 MB. It covers the
+    client entry and every route chunk plus their static imports and CSS, and
+    workers they reference by URL (search, conversion). It also covers the
+    lazy core modules named in vite.config.ts (DocumentViewer, SettingsPage,
+    SavedPage), and the build fails if one of those matches no chunk.
+  - Dynamic imports (PDF, math, diagrams, conversion WASM, Babel…) stay
+    optional.
+  - The version hashes every file's bytes, the precached set and the worker
+    code.
+- Worker behaviour:
+  - Navigations go network-first, so an online reload always gets the current
+    deployment. With no network (or no answer within 5 s) the cached
+    /_shell.html answers. The SSR preview and Firebase's rewrite both serve
+    that file.
+  - Build files are served cache-first and cached on first use. Files already
+    loaded before the worker took control are cached too.
+  - Hashed names are their own cache key; other files carry a content tag.
+  - Documents never pass through it (they are in IndexedDB). Other origins
+    (AI providers, the share service), non-GET and Range requests are left
+    alone.
+- Updates: the worker never calls skipWaiting. A new version installs and
+  waits while any tab is open; a reload keeps the old one. It activates once
+  every tab has closed, then deletes the old shell cache and prunes assets
+  that are no longer part of the build.
+- Settings → Storage → "Offline access" reads the worker's actual caches. It
+  shows checking / preparing / ready / incomplete / failed with retry /
+  unsupported / off in dev, and how much is stored. "Download all features
+  (N MB)" fetches the rest in the worker, with a progress bar. The polite
+  status region announces the start and the outcome, not every byte count.
+  It reports partial and storage-full failures. Opening another panel joins a
+  running download.
+- Dev builds register nothing and unregister a stale /sw.js left by a
+  production preview on the same host and port.
+- firebase.json serves /sw.js with no-cache.
+
+Validation:
+- Before/after, the audit's reproduction (populated workspace, offline
+  emulation, Network.setCacheDisabled, normal reload): HEAD had 0 service
+  workers and the reload failed with net::ERR_INTERNET_DISCONNECTED. After the
+  change there is 1 worker and the document is visible 816 ms after an
+  offline reload.
+- tests/e2e/offline.spec.ts adds 7 production tests; all 7 fail against a HEAD
+  build. Offline means offline emulation, the HTTP cache disabled, and every
+  request that still reaches the network aborted, including the worker's own
+  fetches (asserted with an uncached file).
+  1. Reopen, edit and save offline, then reload offline and online.
+  2. An offline deep link to /settings without Settings ever opened online;
+     the navigation is served by the worker.
+  3. A fresh install imports and reads Markdown and JSON offline, having never
+     opened a document online.
+  4. Download all features: the progress bar, the status not announcing
+     bytes, every manifest file cached, then a PDF opens offline.
+  5. A new version waits while a tab is open, survives that tab's reload, and
+     takes over after close, with the old shell cache deleted and offline
+     reload working. Playwright can't intercept the browser's worker-script
+     fetch, so this test serves .output/public from its own static host with
+     Firebase-style rewrites.
+  6. A failed first install is reported and can be retried.
+  7. Browsers without service workers get an honest unavailable state.
+- tests/offline-manifest.test.ts adds 8 unit tests for the shell planner:
+  routes and core modules, dynamic imports staying optional, whole-path
+  matching, missing-core detection, keys and tags, and versioning. One test
+  caught that the version first ignored the precached set; that is fixed.
+- npm run typecheck, npm test (249/249), npm run build, focused ESLint on every
+  changed file, Prettier and git diff --check pass.
+- Full production Playwright suite: 72 passed, 1 skipped (dev-only), 2
+  failed. The 2 failures (mobile-navigation "close button and backdrop",
+  viewers "spreadsheet controls…") fail identically on a HEAD build without
+  this change, and match earlier notes here.
+  tests/e2e/conversion.spec.ts's WASM hold moved from page.route to
+  context.route so it still applies when the worker handles that fetch.
+- Chrome DevTools MCP, in an isolated context against the production preview,
+  independently confirmed: the worker activated and controlling; offline
+  navigation to / and /settings served by it; the note and the "Ready
+  offline" status rendered; the download going from progress to "Every
+  feature is available offline (32.37 MB stored)", with 763 asset entries
+  cached; and no console warnings or errors. It also caught the
+  announce-every-tick live-region problem, which was fixed and put under
+  test.
+
+Environment: node_modules lacked @orama/orama and @firecrawl/anydoc-wasm, and
+bun.lock did not list @orama/orama or github-slugger although package.json
+does. `bun install` with bun 1.4 added only those two entries (4 lines). This is
+committed separately, because the local bun 1.3 downgraded the lockfile format
+and re-resolved every package. Playwright's Chromium was installed. The
+bench/audit harness scripts are not in this checkout, so the before/after used
+an equivalent probe.
+
+Limits:
+- A hard reload (Shift+Reload / "ignore cache") bypasses service workers by
+  browser design, so it still fails offline.
+- Interactive React blocks run in a sandboxed opaque-origin iframe, which no
+  service worker controls, so they need a network.
+- Optional features open offline only after first use online or the explicit
+  download.
+- Workers are not guaranteed to outlive a very long download on a slow link.
+  The page then reports that the download stopped, and a retry skips files
+  already stored.
+- The worker's caches count toward origin storage (the Settings usage figure),
+  a D03 accounting question left open.
+- B04 is unchanged: an offline tab that needs an uncached chunk still hits the
+  reload-once handler.
+- Chromium desktop only; no Safari/Firefox, physical-device or screen-reader
+  test. Firebase hosting itself was not deployed; the static-host test mimics
+  its rewrite.
+
+Previous update — 2026-09-28 (B01 lazy HTML-export renderer)
 
 Completed B01 / Package 6. vite.config.ts's manualChunks put react-dom/server
 into the long-lived "react" chunk, so every startup downloaded the renderer
@@ -368,7 +483,7 @@ Limits: everything ran on Chromium on this machine. I haven't tested Safari, Fir
 
 Pending (not started, or started but not committed)
 
-- Package 3: A03 and A10 are done (above). A11's persistent-storage request, capability state and backup reminder are done (A11 update above); offline shell, cached capabilities and offline-readiness state remain pending.
+- Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4: A06 is done (2026-09-28 update above). A07's unchanged-query refresh is covered; its remaining worker protocol/lifecycle work is pending.
 - Package 5: R03's PDF keyboard isolation is done (R03 update above); its outline work remains pending. A04 (500-edge Stepped diagram makes a 52,311 px page), A05 (3,000-section Markdown), A08 (PDF zoom memory), R01–R02 and R04 remain pending.
 - Package 6: B01 is done (latest update above); B02–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
@@ -376,7 +491,7 @@ Pending (not started, or started but not committed)
 - Package 2 is now complete (A01, D04, D06).
 - Package 8: A12 (Gemini models, not yet checked against Google's current list), B04, B05, R05, R06, and the lint debt (76 errors).
 
-None of PLAN.md's release gates are formally met yet. A01–A03 and A09/A10 now have passing reproductions, which is what the reliability gate asks for; A11 and the Package 3 offline criterion remain before calling Package 3 complete.
+None of PLAN.md's release gates are formally met yet. A01–A03 and A09/A10 now have passing reproductions, which is what the reliability gate asks for, and Package 3's offline criterion now has a passing reproduction too.
 
 Historical working-tree note (superseded by the clean-tree check on 2026-09-28)
 

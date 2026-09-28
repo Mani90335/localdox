@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { applyDeviceTier } from "@/lib/platform/device-tier";
+import { registerOfflineShell } from "@/lib/offline/offline-shell";
 import { THEME_COLOR_DARK, THEME_COLOR_LIGHT } from "@/lib/theme-color";
 
 // Mermaid loads each diagram type (flowchart, ERD, etc.) in a separate Vite
@@ -155,6 +156,8 @@ function RootComponent() {
   // Tag <html> with what this device can afford to composite, before anything
   // translucent is on screen. See `src/lib/device-tier.ts`.
   useEffect(applyDeviceTier, []);
+  // Cache the app shell so a local workspace reopens without a network.
+  useEffect(registerOfflineShell, []);
 
   return (
     <QueryClientProvider client={queryClient}>
