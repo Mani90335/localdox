@@ -10,6 +10,7 @@ import {
   destKey,
   flattenOutline,
   initialExpanded,
+  locateOutlinePath,
   OUTLINE_INITIAL_ROWS,
   PdfOutlineResolver,
   windowRange,
@@ -261,4 +262,148 @@ test("dispose stops work and notifications; late results aren't cached", async (
   assert.equal(calls.getPageIndex, 2);
   assert.equal(resolver.peek(outline[0].dest), undefined);
   assert.equal(await resolver.resolve(outline[5].dest), null);
+});
+
+// ── The current page's entry ────────────────────────────────────────────────
+
+interface Spec {
+  title: string;
+  page: number | null;
+  items?: Spec[];
+}
+/** An outline whose entries point at explicit 0-based page indexes. */
+const outlineOf = (specs: Spec[]) =>
+  buildOutline(
+    (function map(list: Spec[]): RawOutlineEntry[] {
+      return list.map((s) => ({
+        title: s.title,
+        dest: s.page === null ? null : [s.page - 1, { name: "Fit" }],
+        items: map(s.items ?? []),
+      }));
+    })(specs),
+  );
+/** Counts look-ups; pages come straight from the destinations. */
+function counter() {
+  const seen: string[] = [];
+  const pageOf = async (node: { title: string; dest: unknown }) => {
+    seen.push(node.title);
+    const target = Array.isArray(node.dest) ? node.dest[0] : null;
+    return typeof target === "number" ? target + 1 : null;
+  };
+  return { seen, pageOf };
+}
+const titles = (path: { title: string }[]) => path.map((n) => n.title);
+
+const textbook = outlineOf([
+  { title: "Preface", page: 3 },
+  {
+    title: "Chapter 1",
+    page: 5,
+    items: [
+      { title: "1.1", page: 5 },
+      { title: "1.2", page: 8, items: [{ title: "1.2.1", page: 9 }] },
+      { title: "1.3", page: 12 },
+    ],
+  },
+  {
+    title: "Chapter 2",
+    page: 20,
+    items: [
+      { title: "2.1", page: 21 },
+      { title: "2.2", page: 21 },
+      { title: "2.3", page: 30 },
+    ],
+  },
+]);
+
+test("locateOutlinePath: latest entry at or before the page, shallowest on ties", async () => {
+  const locate = async (page: number) =>
+    titles(await locateOutlinePath(textbook, page, counter().pageOf));
+  assert.deepEqual(await locate(1), [], "before the first entry");
+  assert.deepEqual(await locate(3), ["Preface"]);
+  assert.deepEqual(await locate(4), ["Preface"]);
+  assert.deepEqual(await locate(5), ["Chapter 1"], "a chapter beats its first section");
+  assert.deepEqual(await locate(7), ["Chapter 1"]);
+  assert.deepEqual(await locate(8), ["Chapter 1", "1.2"]);
+  assert.deepEqual(await locate(10), ["Chapter 1", "1.2", "1.2.1"]);
+  assert.deepEqual(await locate(15), ["Chapter 1", "1.3"]);
+  assert.deepEqual(await locate(20), ["Chapter 2"]);
+  assert.deepEqual(await locate(21), ["Chapter 2", "2.1"], "the first of two entries on a page");
+  assert.deepEqual(await locate(99), ["Chapter 2", "2.3"]);
+});
+
+test("locateOutlinePath skips entries that don't resolve", async () => {
+  const outline = outlineOf([
+    { title: "A", page: 1 },
+    { title: "link", page: null },
+    { title: "B", page: 5, items: [{ title: "broken", page: null }] },
+    { title: "link 2", page: null },
+    { title: "link 3", page: null },
+  ]);
+  const locate = async (page: number) =>
+    titles(await locateOutlinePath(outline, page, counter().pageOf));
+  assert.deepEqual(await locate(3), ["A"]);
+  assert.deepEqual(await locate(9), ["B"]);
+  assert.deepEqual(
+    await locateOutlinePath(outlineOf([{ title: "x", page: null }]), 4, counter().pageOf),
+    [],
+  );
+});
+
+test("locateOutlinePath binary-searches: a 10,000-entry level costs a few dozen look-ups", async () => {
+  const flat = outlineOf(
+    Array.from({ length: 10_000 }, (_, i) => ({ title: `E${i + 1}`, page: i + 1 })),
+  );
+  const { seen, pageOf } = counter();
+  assert.deepEqual(titles(await locateOutlinePath(flat, 7777, pageOf)), ["E7777"]);
+  assert.ok(seen.length <= 40, `${seen.length} look-ups`);
+
+  // 20 × 50 × 5, as in the browser test: three levels, still a few dozen.
+  const book3 = outlineOf(
+    Array.from({ length: 20 }, (_, c) => ({
+      title: `Chapter ${c + 1}`,
+      page: c * 50 + 1,
+      items: Array.from({ length: 50 }, (_, s) => ({
+        title: `Section ${c + 1}.${s + 1}`,
+        page: c * 50 + s + 1,
+        items: Array.from({ length: 5 }, (_, t) => ({
+          title: `Topic ${c + 1}.${s + 1}.${t + 1}`,
+          page: c * 50 + s + 1,
+        })),
+      })),
+    })),
+  );
+  const deep = counter();
+  assert.deepEqual(titles(await locateOutlinePath(book3, 777, deep.pageOf)), [
+    "Chapter 16",
+    "Section 16.27",
+  ]);
+  assert.ok(deep.seen.length <= 40, `${deep.seen.length} look-ups`);
+});
+
+test("locateOutlinePath: a short out-of-order level is exact; a long one stays at or before the page", async () => {
+  const shuffled = outlineOf([
+    { title: "A", page: 10 },
+    { title: "B", page: 2 },
+    { title: "C", page: 30 },
+    { title: "D", page: 5 },
+  ]);
+  const locate = async (page: number) =>
+    titles(await locateOutlinePath(shuffled, page, counter().pageOf));
+  assert.deepEqual(await locate(1), []);
+  assert.deepEqual(await locate(2), ["B"]);
+  assert.deepEqual(await locate(7), ["D"]);
+  assert.deepEqual(await locate(12), ["A"]);
+  assert.deepEqual(await locate(40), ["C"]);
+
+  // 40 entries, pages scrambled (a permutation of 1..40).
+  const long = outlineOf(
+    Array.from({ length: 40 }, (_, i) => ({ title: `E${i}`, page: ((i * 17) % 40) + 1 })),
+  );
+  const { pageOf } = counter();
+  for (const page of [1, 5, 13, 22, 40]) {
+    const entry = (await locateOutlinePath(long, page, pageOf)).at(-1);
+    assert.ok(entry, `page ${page}`);
+    assert.ok((await pageOf(entry))! <= page, `page ${page} → ${entry.title}`);
+  }
 });

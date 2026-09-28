@@ -8,10 +8,8 @@ import {
 } from "./pdf-book-pagination";
 import { loadLastPage, saveLastPage, loadLayoutMode, saveLayoutMode } from "./pdf-last-page-store";
 import type { PdfOutlineNode } from "./types";
+import { clampZoom, ZOOM_STEP } from "./pdf-zoom";
 
-const MIN_ZOOM = 0.25;
-const MAX_ZOOM = 4;
-const ZOOM_STEP = 1.25;
 /** Written to localStorage well after a flip settles, not on every page turn. */
 const SAVE_DEBOUNCE_MS = 300;
 
@@ -42,6 +40,8 @@ export interface PdfReaderState {
   zoom: number;
   zoomIn: () => void;
   zoomOut: () => void;
+  /** Multiplies the zoom by `factor`, within the zoom limits (pinch/wheel zoom). */
+  zoomBy: (factor: number) => void;
   resetZoom: () => void;
   rotation: PdfRotation;
   rotate: () => void;
@@ -153,8 +153,9 @@ export function usePdfReaderState(fileId: string): PdfReaderState {
     });
   }, []);
 
-  const zoomIn = useCallback(() => setZoom((z) => Math.min(MAX_ZOOM, z * ZOOM_STEP)), []);
-  const zoomOut = useCallback(() => setZoom((z) => Math.max(MIN_ZOOM, z / ZOOM_STEP)), []);
+  const zoomIn = useCallback(() => setZoom((z) => clampZoom(z * ZOOM_STEP)), []);
+  const zoomOut = useCallback(() => setZoom((z) => clampZoom(z / ZOOM_STEP)), []);
+  const zoomBy = useCallback((factor: number) => setZoom((z) => clampZoom(z * factor)), []);
   const resetZoom = useCallback(() => setZoom(1), []);
   const rotate = useCallback(() => setRotation((r) => ((r + 90) % 360) as PdfRotation), []);
 
@@ -189,6 +190,7 @@ export function usePdfReaderState(fileId: string): PdfReaderState {
     zoom,
     zoomIn,
     zoomOut,
+    zoomBy,
     resetZoom,
     rotation,
     rotate,

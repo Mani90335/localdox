@@ -44,14 +44,13 @@ export function PdfSidebar({
           resolver={outlineResolver}
         />
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <PdfThumbnailList
-            numPages={reader.numPages ?? 0}
-            currentPages={reader.visiblePages}
-            getPage={getPage}
-            onSelect={reader.goToPage}
-          />
-        </div>
+        // Also its own scroll container, windowed by scroll position.
+        <PdfThumbnailList
+          numPages={reader.numPages ?? 0}
+          currentPages={reader.visiblePages}
+          getPage={getPage}
+          onSelect={reader.goToPage}
+        />
       )}
     </aside>
   );

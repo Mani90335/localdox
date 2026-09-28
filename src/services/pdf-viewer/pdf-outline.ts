@@ -141,6 +141,140 @@ export function windowRange(
   return { first: Math.min(first, last), last };
 }
 
+type PageOf = (node: PdfOutlineNode) => Promise<number | null>;
+
+/**
+ * The path (ancestors first) to the outline entry for `page`: the entry
+ * whose page is the latest at or before `page`, and among entries on that
+ * page the shallowest, then the first. A chapter beats its first section on
+ * the same page, as in pdf.js's own viewer. Empty when no entry precedes
+ * `page`.
+ *
+ * A short level is scanned in full. A long one is assumed to be in page
+ * order, which generated outlines are, and binary-searched, so it costs about
+ * log₂ n look-ups rather than resolving the whole outline. An out-of-order
+ * long level still yields an entry at or before `page`, though not
+ * necessarily the closest. Entries that don't resolve are skipped.
+ */
+export async function locateOutlinePath(
+  roots: readonly PdfOutlineNode[],
+  page: number,
+  pageOf: PageOf,
+): Promise<PdfOutlineNode[]> {
+  const path: PdfOutlineNode[] = [];
+  let siblings = roots;
+  let parentPage = -Infinity;
+  while (siblings.length > 0) {
+    const hit = await atOrBefore(siblings, page, pageOf);
+    if (!hit || hit.page <= parentPage) break;
+    // Go under the last entry on that page when something below it is closer to `page`.
+    const node = siblings[hit.last];
+    const deeper = node.items.length ? await atOrBefore(node.items, page, pageOf) : null;
+    if (deeper && deeper.page > hit.page) {
+      path.push(node);
+      parentPage = hit.page;
+      siblings = node.items;
+      continue;
+    }
+    path.push(siblings[hit.first]);
+    break;
+  }
+  return path;
+}
+
+/** Sibling lists this short are scanned in full, which is exact in any order. */
+const LINEAR_SCAN_MAX = 16;
+
+/** The latest page at or before `page` among `siblings`, and the first and last sibling on it. */
+async function atOrBefore(
+  siblings: readonly PdfOutlineNode[],
+  page: number,
+  pageOf: PageOf,
+): Promise<{ page: number; first: number; last: number } | null> {
+  if (siblings.length <= LINEAR_SCAN_MAX) {
+    let best: { page: number; first: number; last: number } | null = null;
+    for (let i = 0; i < siblings.length; i++) {
+      const p = await pageOf(siblings[i]);
+      if (p === null || p > page) continue;
+      if (!best || p > best.page) best = { page: p, first: i, last: i };
+      else if (p === best.page) best.last = i;
+    }
+    return best;
+  }
+  const last = await lastAtOrBefore(siblings, page, pageOf);
+  if (!last) return null;
+  const first = await firstOnPage(siblings, last.page, last.index, pageOf);
+  return { page: last.page, first, last: last.index };
+}
+
+/** Page of `siblings[index]`, or of the nearest entry that resolves: rightward within `hi`, then leftward to `lo`. */
+async function probe(
+  siblings: readonly PdfOutlineNode[],
+  index: number,
+  lo: number,
+  hi: number,
+  pageOf: PageOf,
+): Promise<{ index: number; page: number } | null> {
+  for (let i = index; i <= hi; i++) {
+    const page = await pageOf(siblings[i]);
+    if (page !== null) return { index: i, page };
+  }
+  for (let i = index - 1; i >= lo; i--) {
+    const page = await pageOf(siblings[i]);
+    if (page !== null) return { index: i, page };
+  }
+  return null;
+}
+
+/** The last sibling whose page is at or before `page`. */
+async function lastAtOrBefore(
+  siblings: readonly PdfOutlineNode[],
+  page: number,
+  pageOf: PageOf,
+): Promise<{ index: number; page: number } | null> {
+  let lo = 0;
+  let hi = siblings.length - 1;
+  let found: { index: number; page: number } | null = null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const hit = await probe(siblings, mid, lo, hi, pageOf);
+    if (!hit) break;
+    if (hit.page <= page) {
+      found = hit;
+      lo = hit.index + 1;
+    } else {
+      hi = Math.min(mid, hit.index) - 1;
+    }
+  }
+  return found;
+}
+
+/** The first sibling up to `last` whose page is `page` (everything before `last` is at or before it). */
+async function firstOnPage(
+  siblings: readonly PdfOutlineNode[],
+  page: number,
+  last: number,
+  pageOf: PageOf,
+): Promise<number> {
+  let lo = 0;
+  let hi = last - 1;
+  let found = last;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const hit = await probe(siblings, mid, lo, hi, pageOf);
+    if (!hit) break;
+    // Exactly `page`, not "at least": in an out-of-order outline an earlier
+    // sibling can point past it.
+    if (hit.page === page) {
+      found = hit.index;
+      hi = Math.min(mid, hit.index) - 1;
+    } else {
+      lo = hit.index + 1;
+    }
+  }
+  return found;
+}
+
 /** What the resolver needs from a pdf.js document. */
 export interface OutlineDestSource {
   getDestination(name: string): Promise<unknown[] | null>;

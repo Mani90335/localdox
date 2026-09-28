@@ -1,4 +1,107 @@
-Latest update — 2026-09-28 (R06 Ask AI streaming ownership)
+Latest update — 2026-09-28 (PDF follow-ups: pinch zoom rate, current Contents entry, windowed thumbnails, spreadsheet e2e)
+
+Four follow-ups to R03/A08, requested by the user.
+
+1. Trackpad pinch zoom was far too fast (user report). A pinch arrives as a
+   burst of small ctrl+wheel events, and each one was a full ×1.25 button
+   step, so a light pinch went from 100% straight to 400%.
+   - New pure module src/services/pdf-viewer/pdf-zoom.ts: zoom follows the
+     gesture.
+   - Chrome reports a pinch as deltaY = −100·ln(scale). pdf.js's viewer
+     applies e^(−deltaY/100) to track the fingers 1:1; this reader uses half
+     that rate (0.005 per px), a calmer pinch as asked.
+   - Line and page delta modes are converted to pixels.
+   - Each frame's change is capped at one button step, so Ctrl + a
+     mouse-wheel notch is still exactly ×1.25.
+   - PdfPageArea sums a burst of events and applies it once per animation
+     frame, through a new `zoomBy` in the reader state. Buttons and keys are
+     unchanged.
+   - Measured, the same synthetic 40-event pinch (−120 px) goes 100% → 400%
+     on HEAD and 100% → 182% now; pinching back returns to 100%. Checked in
+     Chrome via DevTools MCP as well as Playwright.
+
+2. Contents shows the current page's entry.
+   - `locateOutlinePath` in pdf-outline.ts picks the entry whose page is the
+     latest at or before the current page; on ties the shallowest wins, then
+     the first (a chapter beats its first section on the same page, as in
+     pdf.js).
+   - Levels of ≤ 16 entries are scanned exactly, in any order. Longer levels
+     are binary-searched, on the assumption that they're in page order, so a
+     10,000-entry level costs ≤ 40 look-ups and the lazy resolution of R03
+     stays intact. An out-of-order long level still yields an entry at or
+     before the page.
+   - The tree highlights that single entry (aria-current="page"; previously
+     every entry that resolved to the current page) and opens its collapsed
+     ancestors.
+   - It scrolls the entry to the centre of the tree when it's off screen
+     (keyboard moves still scroll just into view), and makes it the keyboard
+     starting point unless the tree already has focus.
+   - Page flips are debounced (120 ms).
+   - The tree now scrolls only itself (manual scrollTop, not scrollIntoView).
+   - Found by the unit tests: the "first entry on this page" search used
+     ">=" and could return a later-page entry in an out-of-order outline.
+     It now requires an exact page match.
+
+3. The Pages thumbnail list is windowed.
+   - It used to mount one button per page (300 for a 300-page PDF). Every
+     slot is the same 3:4 box, so rows are absolutely positioned at exact
+     offsets. Only the view plus 3 rows of overscan is mounted (11 at
+     1280×800), along with any thumbnail that has focus.
+   - The pitch is measured from a mounted thumbnail and follows the sidebar
+     width.
+   - The list scrolls to the current page as it changes, and carries
+     aria-posinset/-setsize and an accessible name ("Pages").
+   - Canvases still render lazily per thumbnail (IntersectionObserver), and
+     are released on unmount.
+
+4. viewers.spec "spreadsheet controls…" failed on every build since it was
+   written (779bbfa). It looked for role="menuitem" in the sidebar's file
+   menu, which has always been a popover of plain buttons. The header Export
+   menu is a Radix menu, which is why the test's other menuitem steps passed.
+   - The test now scopes to the sidebar menu panel and uses button roles.
+   - It passes on both HEAD and this build.
+   - Converting the sidebar menus to ARIA menus (roles plus arrow-key focus
+     management) would change the role of every sidebar menu action, which at
+     least five other specs rely on. That is a Package 7 UX decision, so it
+     wasn't done here.
+
+Validation (clean worktree of HEAD plus only these files, production preview
+on a private port):
+- Unit: npm test 304/304.
+  - New tests/pdf-zoom.test.ts (6).
+  - tests/pdf-outline.test.ts now has 17: current-entry rules, unresolvable
+    entries, look-up bounds on 10,000 and 20×50×5 outlines, and in-order and
+    out-of-order levels.
+- Typecheck, build, ESLint and Prettier on the changed files pass.
+- Browser: tests/e2e/pdf-thumbnails-zoom.spec.ts is new, with 2 tests
+  (windowed Pages list, and pinch rate plus mouse-notch step).
+  tests/e2e/pdf-outline.spec.ts has a new current-entry test: a collapsed
+  chapter opens and the entry is in view and is the keyboard start; the
+  highlight follows page turns; look-ups stay under 100.
+  - All 3 new tests fail on the HEAD build. Pinch: expected 182%, received
+    400%.
+  - PDF and viewer specs (pdf-outline, pdf-thumbnails-zoom, pdf-keyboard,
+    pdf-zoom-budget, viewers, highlighting): 26/26.
+  - Full suite: 93/97. Three failures also fail on HEAD: the
+    mobile-navigation drawer close and both sharing.spec previews. The
+    fourth, offline.spec "fresh install…", failed once while I was copying a
+    fixture into that same preview server's public directory and driving it
+    from DevTools MCP. It then passed 3/3 in isolation, and passes on HEAD.
+- Chrome DevTools MCP, 100-page PDF with a 6,020-entry outline:
+  - Pinch 100% → 182%.
+  - At page 73 the Pages list mounts 11 thumbnails with 73 in view.
+  - Contents opens Chapter 15 and highlights Section 15.21 (the first heading
+    on page 73), centred.
+  - No console errors.
+
+Limits:
+- Safari reports trackpad pinch as gesture events rather than ctrl+wheel, so
+  Safari pinch isn't handled by this change. Chromium desktop only.
+- The current entry is the first heading on the page. When a page opens with
+  the tail of the previous section, that section isn't the one highlighted
+  (pdf.js behaves the same).
+
+Previous update — 2026-09-28 (R06 Ask AI streaming ownership)
 
 Completed R06 (Package 8). An Ask AI request can only change the answer it
 started. Closing the panel cancels the request, streamed text reaches React

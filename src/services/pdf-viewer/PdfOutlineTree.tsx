@@ -3,6 +3,7 @@ import { ChevronRight } from "lucide-react";
 import {
   flattenOutline,
   initialExpanded,
+  locateOutlinePath,
   OUTLINE_VIRTUALIZE_ROWS,
   windowRange,
   type OutlineRow,
@@ -16,14 +17,18 @@ const LIST_PADDING = 8;
 const OVERSCAN = 12;
 /** Deeper levels stop indenting further so titles stay readable in a narrow sidebar. */
 const MAX_INDENT_LEVEL = 12;
+/** Page flips settle before the current entry is looked up. */
+const LOCATE_DELAY_MS = 120;
 
 /**
  * A PDF's table of contents as a keyboard-navigable tree. Destinations
- * resolve to pages only for rows on screen (for the current-page highlight)
- * and on click; a large outline opens collapsed to its top levels; and past
- * `OUTLINE_VIRTUALIZE_ROWS` visible rows only the rows in view are mounted.
- * Focus stays on the tree itself (`aria-activedescendant`), so a row
- * scrolling out of the mounted window never drops keyboard focus.
+ * resolve to pages only for rows on screen (disabled entries), on click, and
+ * along a binary search for the current page's entry; a large outline opens
+ * collapsed to its top levels; and past `OUTLINE_VIRTUALIZE_ROWS` visible
+ * rows only the rows in view are mounted. The current page's entry is
+ * highlighted, and its collapsed ancestors open to show it. Focus stays on
+ * the tree itself (`aria-activedescendant`), so a row scrolling out of the
+ * mounted window never drops keyboard focus.
  */
 export function PdfOutlineTree({
   outline,
@@ -73,8 +78,8 @@ export function PdfOutlineTree({
   const last = virtual ? Math.min(range.last, rows.length - 1) : rows.length - 1;
   const mounted = useMemo(() => rows.slice(first, last + 1), [rows, first, last]);
 
-  // Pages for the rows on screen: the current-page highlight and disabled
-  // (unresolvable) entries. Rows that scroll away before their turn are dropped.
+  // Pages for the rows on screen, so unresolvable entries show as disabled.
+  // Rows that scroll away before their turn are dropped.
   useEffect(() => {
     resolver.prefetch(mounted.map((row) => row.node.dest));
   }, [resolver, mounted]);
@@ -103,21 +108,57 @@ export function PdfOutlineTree({
   );
   const active: OutlineRow | undefined = rows[activeIndex];
 
-  // Keyboard moves bring the active row into view, first scrolling the window
-  // to it when it isn't mounted.
-  const revealActive = useRef(false);
+  // Scrolls the tree (only the tree) so a row is in view, once it is among
+  // the rows: just into view after a keyboard move, centred when the current
+  // entry is located off screen. Rows have a fixed height, so this works
+  // whether or not the row is mounted.
+  const reveal = useRef<{ id: string; center: boolean } | null>(null);
   useLayoutEffect(() => {
-    if (!revealActive.current || !active) return;
+    const target = reveal.current;
     const el = scrollRef.current;
-    const row = el?.querySelector<HTMLElement>(`[data-outline-id="${active.node.id}"]`);
-    if (row) {
-      revealActive.current = false;
-      row.scrollIntoView({ block: "nearest" });
-    } else if (el) {
-      el.scrollTop = LIST_PADDING + activeIndex * ROW_HEIGHT - el.clientHeight / 2;
-      measure();
-    }
-  }, [active, activeIndex, range, measure]);
+    if (target === null || !el) return;
+    const index = rows.findIndex((row) => row.node.id === target.id);
+    if (index < 0) return;
+    reveal.current = null;
+    const top = LIST_PADDING + index * ROW_HEIGHT;
+    const above = top < el.scrollTop;
+    const below = top + ROW_HEIGHT > el.scrollTop + el.clientHeight;
+    if ((above || below) && target.center)
+      el.scrollTop = top + ROW_HEIGHT / 2 - el.clientHeight / 2;
+    else if (above) el.scrollTop = top - LIST_PADDING;
+    else if (below) el.scrollTop = top + ROW_HEIGHT + LIST_PADDING - el.clientHeight;
+    measure();
+  });
+
+  // The entry for the current page: highlighted, its collapsed ancestors
+  // opened, and scrolled into view. Also where keyboard focus starts, unless
+  // the reader is already moving through the tree.
+  const [currentId, setCurrentId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void locateOutlinePath(outline, currentPage, (node) => resolver.resolve(node.dest)).then(
+        (path) => {
+          if (cancelled) return;
+          const entry = path.at(-1);
+          setCurrentId(entry?.id ?? null);
+          if (!entry) return;
+          const ancestors = path.slice(0, -1);
+          setExpanded((prev) =>
+            ancestors.every((node) => prev.has(node.id))
+              ? prev
+              : new Set([...prev, ...ancestors.map((node) => node.id)]),
+          );
+          reveal.current = { id: entry.id, center: true };
+          if (document.activeElement !== scrollRef.current) setActiveId(entry.id);
+        },
+      );
+    }, LOCATE_DELAY_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [outline, currentPage, resolver]);
 
   const toggle = (id: string, open?: boolean) =>
     setExpanded((prev) => {
@@ -148,7 +189,7 @@ export function PdfOutlineTree({
   const moveTo = (index: number) => {
     const row = rows[Math.min(Math.max(index, 0), rows.length - 1)];
     if (!row) return;
-    revealActive.current = true;
+    reveal.current = { id: row.node.id, center: false };
     setActiveId(row.node.id);
   };
 
@@ -212,7 +253,7 @@ export function PdfOutlineTree({
         const { node } = row;
         const page = resolver.peek(node.dest);
         const unavailable = page === null;
-        const isCurrent = typeof page === "number" && page === currentPage;
+        const isCurrent = node.id === currentId;
         const hasChildren = node.items.length > 0;
         const isOpen = hasChildren && expanded.has(node.id);
         const isActive = index === activeIndex;

@@ -145,8 +145,9 @@ test("every kind of destination: named, explicit, missing, none, and a closed gr
 
   await item("Named page 2").click();
   await expect(pageNumber(page)).toHaveValue("2");
+  // One current entry: the first of the two on page 2.
   await expect(item("Named page 2")).toHaveAttribute("aria-current", "page");
-  await expect(item("Closed group")).toHaveAttribute("aria-current", "page");
+  await expect(item("Closed group")).not.toHaveAttribute("aria-current", "page");
 
   await item("Ref to page 3").click();
   await expect(pageNumber(page)).toHaveValue("3");
@@ -205,7 +206,7 @@ test("a 6,020-entry outline resolves nothing up front and mounts a bounded tree"
     "aria-expanded",
     "false",
   );
-  // Page 1's entries get the current-page highlight once resolved.
+  // Page 1's entry is the chapter, not its first section on the same page.
   await expect(tree.getByRole("treeitem", { name: "Chapter 1", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
@@ -269,4 +270,51 @@ test("past 300 visible rows the list is windowed; scrolling, End and clicks stil
   await page.waitForTimeout(500);
   expect(await lookups(page)).toBeLessThanOrEqual(100);
   expect(await lookups(page)).toBeLessThan(1020);
+});
+
+test("the current page's entry is highlighted, its collapsed chapter opens, and it scrolls into view", async ({
+  page,
+}) => {
+  await openPdf(page, "Book", book, "Chapter 1");
+  // Chapter 15 (pages 71–75) starts collapsed.
+  await pageNumber(page).fill("73");
+  await pageNumber(page).press("Enter");
+  await expect(page.locator(".pdf-page-area .textLayer").first()).toContainText("Section 15.");
+
+  const tree = await openContents(page);
+  const current = tree.locator('[role="treeitem"][aria-current="page"]');
+  await expect(current).toHaveCount(1);
+  await expect(current).toHaveText(/^Section 15\.\d+$/);
+  await expect(current).toHaveAttribute("aria-level", "2");
+  await expect(current).toBeInViewport();
+  await expect(tree.getByRole("treeitem", { name: "Chapter 15", exact: true })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  // The section shown really is on (or starts before) page 73.
+  const title = (await current.textContent())!;
+  const shown = await page.locator(".pdf-page-area .textLayer").first().textContent();
+  const onPage = shown!.includes(title);
+  const n = Number(title.split(".")[1]);
+  expect(onPage || !shown!.includes(`Section 15.${n + 1}`)).toBe(true);
+  // Keyboard focus starts at the current entry.
+  await tree.focus();
+  await expect(tree).toHaveAttribute("aria-activedescendant", (await current.getAttribute("id"))!);
+
+  // Turning pages with Contents open follows along: the chapter itself on its first page.
+  await pageNumber(page).fill("96");
+  await pageNumber(page).press("Enter");
+  const chapter20 = tree.getByRole("treeitem", { name: "Chapter 20", exact: true });
+  await expect(chapter20).toHaveAttribute("aria-current", "page");
+  await expect(chapter20).toBeInViewport();
+  await expect(chapter20).toHaveAttribute("aria-expanded", "false");
+  await pageNumber(page).fill("99");
+  await pageNumber(page).press("Enter");
+  await expect(current).toHaveText(/^Section 20\.\d+$/);
+  await expect(current).toBeInViewport();
+  await expect(chapter20).toHaveAttribute("aria-expanded", "true");
+
+  // A binary search per level, not the whole outline.
+  await page.waitForTimeout(500);
+  expect(await lookups(page)).toBeLessThan(100);
 });
