@@ -133,7 +133,8 @@ export interface WorkspaceRecord {
   ui: PersistedUI;
 }
 
-export type SaveStatus = "idle" | "saving" | "saved" | "restored" | "error" | "conflict";
+export type SaveStatus =
+  "idle" | "pending" | "saving" | "saved" | "restored" | "error" | "conflict";
 
 export type ConflictReason = "changed" | "deleted" | "exists";
 

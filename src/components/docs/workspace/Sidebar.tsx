@@ -160,6 +160,8 @@ interface Props {
    * Undocked (mobile drawer) keeps the compact Ask AI hero layout.
    */
   docked?: boolean;
+  /** The workspace's save state, shown beside the history controls when docked. */
+  saveIndicator?: React.ReactNode;
   onOpenSearch?: () => void;
   onToggleSidebar?: () => void;
   /** Non-null swaps the file tree for the VS Code-style search panel. */
@@ -218,6 +220,7 @@ function SidebarImpl({
   onShareFile,
   onShareFiles,
   docked = false,
+  saveIndicator,
   onOpenSearch,
   onToggleSidebar,
   search = null,
@@ -891,6 +894,9 @@ function SidebarImpl({
             >
               <ArrowRight className="h-4 w-4" />
             </button>
+            {saveIndicator && (
+              <div className="ml-auto flex min-w-0 items-center pr-1">{saveIndicator}</div>
+            )}
           </div>
         </>
       ) : null}

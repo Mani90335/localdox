@@ -1,4 +1,73 @@
-Latest update — 2026-09-28 (A09)
+Latest update — 2026-09-28 (A10)
+
+Completed A10: saving is now a visible, durable part of the UI.
+- Save state is rendered (it was set but never shown): "Changes pending",
+  "Saving…", "Saved on this device", "Not saved". It appears in the docked
+  sidebar, the mobile header and the collapsed rail. A mutation now reads
+  as pending until its write actually starts. An editor that has not yet
+  handed its draft to the app also counts as pending.
+- A failed write no longer shows a toast and then drops back to idle. A
+  persistent alert (SaveErrorBanner) gives Retry save and Export backup.
+  It stays through further edits until a write commits. Quota errors get
+  their own message. While a save error or conflict is active, closing
+  the tab asks for confirmation.
+- Recoverable drafts: a new draft journal (src/lib/workspace/draft-journal.ts)
+  records every Markdown editor draft to localStorage. It writes
+  synchronously, 250 ms after a change and again on pagehide,
+  visibilitychange and beforeunload. An entry is removed only when a
+  committed workspace record holds exactly its text; otherwise it is
+  re-based on what storage now holds. On the next load, drafts from tabs
+  that are gone are offered via Restore or Discard. Web Locks decide which
+  tabs are still open, so an open tab's draft is never offered elsewhere.
+  Restore re-checks the saved document at click time. If the document
+  changed since, or was binned or deleted, the draft opens as
+  "name (recovered).md" instead of overwriting it. Cancel in the editor
+  discards its draft.
+
+Validation: 8 new unit tests (tests/draft-journal.test.ts) cover flushing and
+reload, settling and re-basing, discarding, quota failure and retry, oversize
+and missing storage, corrupt entries, the offer rules (dead, live and own
+sessions, stale, binned and missing files, changed since) and hashing. There
+are 6 new production-preview browser tests (tests/e2e/durability.spec.ts).
+They cover the indicator's pending→saved cycle and three flows after a
+renderer crash (CDP Page.crash, so no unload handler runs): restore, discard,
+and restore as a copy after the document changed. They also cover a live
+tab's draft not being offered to a second tab, Cancel clearing the journal,
+and an injected QuotaExceededError on every file write: the alert persists
+through edits and 3 s, Export downloads, Retry commits and clears it. All 6
+fail on the pre-fix build. The crash test on HEAD confirmed the loss:
+IndexedDB lacked the typed text.
+npm run typecheck, npm test (241/241), npm run build and git diff --check
+pass. Focused ESLint: no new errors or warnings (DocsApp still has its 12
+existing hook warnings; persistence.ts keeps its 3 existing prettier errors).
+Most of DocsApp's diff is re-indentation from the new provider wrapper; the
+whitespace-insensitive diff is about 235 lines.
+Production-preview Playwright: 33/35 across durability, persistence, editing,
+media, sharing, search and mobile-navigation. The 2 failures reproduce
+identically on clean HEAD: mobile-navigation "close button and backdrop"
+(backdrop click at 380,400 does not dismiss on the second open) and media
+"attachment picker…" (waits for an Export download that never fires).
+Chrome DevTools MCP (production preview, isolated context) independently
+confirmed the indicator in the docked sidebar, the journal entry after
+typing, the quota alert and "Not saved" state, and Retry returning to
+"Saved on this device" with the journal emptied. After reload the text was
+present with no recovery offer. The only console error was the injected
+QuotaExceededError.
+
+Limits: only Markdown source-editor drafts are journalled. Office/CSV
+editors, renames, stars and other mutations still rely on the 700 ms debounce
+plus the best-effort pagehide write. Drafts over 1,000,000 characters are
+not journalled, and localStorage quota failures silently skip the journal.
+There is a crash window of up to 250 ms after the last keystroke. Browsers
+without Web Locks offer every other tab's drafts; this is safe, because
+restore never overwrites a changed document. The indicator is deliberately
+not a live region; only the failure alert is announced. B04 (reload on
+vite:preloadError) is not changed, though the journal now keeps editor
+drafts across such a reload. A11 (offline shell, persistent storage request)
+remains pending. Chromium only; no Safari/Firefox, real device or screen
+reader testing.
+
+Previous update — 2026-09-28 (A09)
 
 Completed A09: mobile navigation now uses the existing Radix Sheet primitive
 with an accessible name, contained focus, background isolation, scroll locking,
@@ -40,7 +109,7 @@ viewers' reflow. The full browser suite and audit performance harnesses were not
 rerun. Package 7's broader UX work remains pending, and A10 still blocks the
 reliability release. This change does not claim any performance release gate.
 
-Previous update — 2026-09-28 (A06)
+Earlier update — 2026-09-28 (A06)
 
 Completed A06: search now notices filename-only changes. DocumentIndex caches
 the filename along with content and replaces both filename and content rows
@@ -180,11 +249,11 @@ doesn't double-run effects, so it may only have hit remounts there.
 
 I ran every check on a clean copy containing only my changes, because of the other session editing the same files.
 
-Limits: everything ran on Chromium on this machine. I haven't tested Safari, Firefox, real phones or a screen reader, and haven't re-run the audit's measurement scripts. A01 also has a gap. Typing the editor is still holding (its 600 ms private buffer) isn't saved or merged until it reaches the app, so if the tab closes before that it can still be lost. A10 covers this.
+Limits: everything ran on Chromium on this machine. I haven't tested Safari, Firefox, real phones or a screen reader, and haven't re-run the audit's measurement scripts. A01 also has a gap. Typing the editor is still holding (its 600 ms private buffer) isn't saved or merged until it reaches the app, so if the tab closes before that it can still be lost. A10 covers this (addressed by the draft journal in the 2026-09-28 A10 update).
 
 Pending (not started, or started but not committed)
 
-- Package 3: A03 is done (above). Still pending: A10 (save status not shown; failures only appear as a toast; the typing-loss window above), A11 (no offline support, no request for persistent storage).
+- Package 3: A03 and A10 are done (above). Still pending: A11 (no offline support, no request for persistent storage).
 - Package 4: A06 is done (2026-09-28 update above). A07's unchanged-query refresh is covered; its remaining worker protocol/lifecycle work is pending.
 - Package 5: A04 (500-edge Stepped diagram makes a 52,311 px page), A05 (3,000-section Markdown), A08 (PDF zoom memory), R01–R04.
 - Package 6: B01–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
@@ -192,7 +261,7 @@ Pending (not started, or started but not committed)
 - Package 2 is now complete (A01, D04, D06).
 - Package 8: A12 (Gemini models, not yet checked against Google's current list), B04, B05, R05, R06, and the lint debt (76 errors).
 
-None of PLAN.md's release gates are met yet. The reliability release still needs A10 as well as what's done.
+None of PLAN.md's release gates are formally met yet. A01–A03 and A09/A10 now have passing reproductions, which is what the reliability gate asks for; A11 and the Package 3 offline criterion remain before calling Package 3 complete.
 
 Historical working-tree note (superseded by the clean-tree check on 2026-09-28)
 

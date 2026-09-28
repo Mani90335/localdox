@@ -17,6 +17,7 @@ export function Header({
   currentWorkspaceId,
   onSwitchWorkspace,
   onOpenSettings,
+  saveIndicator,
 }: {
   onMenu: (() => void) | null;
   hideMenu?: boolean;
@@ -30,6 +31,8 @@ export function Header({
   currentWorkspaceId?: string | null;
   onSwitchWorkspace?: (id: string) => void;
   onOpenSettings?: (tab?: "workspace") => void;
+  /** The workspace's save state; the header is the only chrome on small screens. */
+  saveIndicator?: React.ReactNode;
 }) {
   return (
     <header
@@ -88,6 +91,7 @@ export function Header({
       )}
 
       <div className="flex items-center gap-3">
+        {saveIndicator}
         {hasFiles && (
           <button
             onClick={onOpenPalette}
