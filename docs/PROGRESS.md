@@ -1,4 +1,98 @@
-Latest update — 2026-09-29 (A12 Gemini models: current list, migration, accurate errors)
+Latest update — 2026-09-29 (D03 one storage budget for every import)
+
+Completed D03 (Package 6). The 5%-of-quota documents limit is now counted
+one way (stored bytes), across every workspace, for every import path. Room
+is held while an import is read. Settings shows the same number the check
+uses.
+
+Before (HEAD 164c4fc, production build, Playwright; quota stubbed to 20 MiB
+so the cap is 1 MiB, and the browser's usage stubbed to 48 MiB):
+- A 540,000-byte PNG is stored as a 720,022-character data URL. Uploading
+  400,000 bytes of text next was accepted (counted by file.size), leaving
+  1.12 MB stored.
+- The same upload into a second workspace was accepted; only the open
+  workspace was counted.
+- A backup with 700,000 bytes of text (claimed `size: 10`) was restored. Backup
+  restore and `#share=` workspace links had no check at all.
+- Two 600 KB uploads picked in quick succession were both stored (1.2 MB).
+- A `#share-files=` link claiming `size: 10` for 1.2 MB of text was added.
+- Settings showed "48 MB of 1 MB": origin-wide usage (offline features,
+  caches) against the documents cap.
+
+Fix:
+- src/lib/workspace/storage-limits.ts (pure): stored bytes are text as UTF-8
+  plus the data URL as stored. `size` is never read. StorageLimitError carries
+  the one message: "Not enough space. This needs X, and Y of the Z Localdox
+  can use on this device is free. Empty the Bin or remove files…".
+  `utf8Length` uses TextEncoder, which measured 1–13 ms per 10 MB of text
+  against 20–27 ms for a charCodeAt loop.
+- persistence.ts: each commit writes the workspace's total (`bytes`) on its
+  summary row in the same transaction. Unchanged files reuse their count
+  through the existing `sameFile` cache, so a save measures only what it
+  writes. `storedBytesByWorkspace()` reads the rows. A row from an older build
+  is measured once with a cursor and written back.
+- src/lib/workspace/storage-budget.ts (new): `measureStoredBytes(open)` counts
+  saved totals, but uses the open workspace from memory (unsaved edits
+  included). `reserveStorage` keeps a per-tab ledger: estimate before
+  reading, `resize` to the real size after, release once the bytes are
+  counted elsewhere. A measurement that straddles a release is retaken.
+- document-utils.ts: `estimateStoredBytes(file)`, next to importDocumentFile.
+- DocsApp.tsx: upload, conversion, shared files, backup restore and the
+  `#share=` link all reserve first. Backup restore no longer reports a storage
+  failure as "isn't a valid workspace backup"; a browser QuotaExceededError
+  gets its own message on every import path.
+- StorageTab.tsx: the meter is documents across every workspace, Bin
+  included. The browser's origin-wide figure is shown underneath as an
+  estimate.
+- Deliberately not capped: edits, draft recovery, AI-written documents and
+  "Keep both" conflict copies. They are the reader's own work, and the
+  browser quota (A10's banner) is their only limit.
+- documentation/storage-budget.md.
+
+After (same build, script and stubs):
+- tests/e2e/storage-budget.spec.ts, 6 tests. Each of the cases above is
+  refused with the message, and nothing is written. Settings reads "703.15 KB
+  of 1 MB" and shows the 48 MB separately. All 6 fail on HEAD on substance
+  (extra files stored, the backup imported, "48 MB of 1 MB"). 18/18 passed
+  with --repeat-each=3.
+
+Validation:
+- Unit: tests/storage-budget.test.ts, 8 tests: UTF-8 counts, stored bytes
+  ignoring `size`, estimate vs importer for PNG/PDF/untyped/Markdown/CSV,
+  summary totals through edit/delete/other-tab/rename, legacy backfill,
+  open-workspace substitution, the reservation ledger (hold, shrink, grow
+  refused, idempotent release, no quota), and the straddled measurement.
+  Mutation checks: removing the retry, ignoring held room, double-counting the
+  open workspace, never re-checking on resize, a stale byte memo, skipping the
+  backfill write, and counting CSV once each fail a test.
+- npm test (rebased on 554bd2d): 420 passed, 2 skipped, 0 failed. Typecheck
+  and build pass. Prettier passes on changed files except persistence.ts, which
+  has the same 3 errors as HEAD. ESLint: new files clean; DocsApp.tsx has the
+  same 12 warnings as before.
+- Related e2e specs (production preview, isolated worktree, port 4243):
+  conversion, durability, persistence, storage-persistence, editing, media,
+  offline, sharing and long-markdown pass. The only failures are sharing.spec's
+  two link-value checks, which hard-code port 4175 (received 4243).
+- Chrome DevTools MCP, production preview on a separate port:
+  - Real quota: an upload of a PNG (720,022 stored) and a note (23) wrote
+    `bytes: 720045` on the summary row. Settings reads "703.17 KB of 512.12 MB"
+    and "The browser estimates 2.33 MB…".
+  - With `bytes` stripped from the row and the page reloaded, it came back as
+    720,045.
+  - Stubbed 1 MiB cap: the second upload shows "Not enough space. This needs
+    390.63 KB, and 320.85 KB of the 1 MB … is free" and nothing is stored.
+  - No console errors.
+
+Limits:
+- Reservations are per tab. Two tabs importing at the same instant can each
+  pass. The overshoot is at most one import, and the browser quota still
+  stops real overflow.
+- Counted bytes are logical (UTF-8 + base64 string length). Chromium's
+  on-disk size differs (UTF-16 strings, compression).
+- The first save after opening a workspace measures all of its text once.
+- Chromium only.
+
+Earlier update — 2026-09-29 (A12 Gemini models: current list, migration, accurate errors)
 
 Completed A12 (Package 8). Ask AI offers only Gemini models Google still
 serves, a saved retired model moves to its replacement, Settings greys out
@@ -1841,7 +1935,7 @@ Pending (not started, or started but not committed)
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
 - Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04's spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) is done (latest update); its bounded mass-import queue in DocsApp.tsx remains. R01 (diagram players: coarse React updates, no frames while unseen, reduced motion) is done (latest update). A05 (3,000-section Markdown) is done (latest update; fold latency and the 4× CPU tasks are listed as limits there). R02 (byte-budgeted diagram caches, serialized Mermaid configuration) remains pending.
-- Package 6: B01 is done (latest update above); B02–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
+- Package 6: B01 is done (B01 update above) and D03 is done (latest update); B02–B03 (startup loading), D01–D02 (loading whole workspaces, binary storage) remain.
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
 - Package 8: R06 is done (latest update). B04 is done (B04 update above). A12 is done (latest update). B05, R05 and the lint debt (76 errors) remain.

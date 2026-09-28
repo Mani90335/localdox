@@ -16,6 +16,7 @@ import {
   validateWorkspaceImport,
 } from "./import-schema.ts";
 import { parseDerivation, remapDerivation } from "../../services/doc-conversion/types.ts";
+import { storedBytes, storedFileBytes } from "./storage-limits.ts";
 
 export interface PersistedFile {
   derivedFrom?: import("@/services/doc-conversion").Derivation;
@@ -172,24 +173,38 @@ export interface WorkspaceSummary {
   createdAt: number;
   updatedAt: number;
   docCount: number;
+  /**
+   * Stored bytes of every file, Bin included (storage-limits.ts). Written with
+   * each commit; rows from older builds lack it until storedBytesByWorkspace
+   * fills it in.
+   */
+  bytes?: number;
 }
 
 type StoredWorkspace = Omit<WorkspaceRecord, "files"> & { fileIds: string[]; revision: string };
 type StoredFile = PersistedFile & { workspaceId: string };
 
-function summaryOf(w: WorkspaceRecord): WorkspaceSummary {
+function summaryOf(w: WorkspaceRecord, bytes: number): WorkspaceSummary {
   return {
     id: w.id,
     name: w.name,
     createdAt: w.createdAt,
     updatedAt: w.updatedAt,
     docCount: w.files.length,
+    bytes,
   };
 }
 
 // Retain only the last workspace's file references, never a second copy of its
 // document bytes. The on-disk revision guards this optimization across tabs.
-let lastWrite: { id: string; revision: string; files: Map<string, PersistedFile> } | null = null;
+// `bytes` remembers each file's stored size, so a save measures only the files
+// it actually writes.
+let lastWrite: {
+  id: string;
+  revision: string;
+  files: Map<string, PersistedFile>;
+  bytes: Map<string, number>;
+} | null = null;
 
 // Every write (and every read that must observe earlier writes) issued by this
 // tab runs through one FIFO. Route changes remount the app, and the outgoing
@@ -279,7 +294,7 @@ function openDb(): Promise<IDBDatabase> {
           fileIds: documents.map((f) => f.id),
           revision: crypto.randomUUID(),
         });
-        summaries.put(summaryOf(workspace));
+        summaries.put(summaryOf(workspace, storedBytes(workspace.files)));
         row.continue();
       };
     };
@@ -381,6 +396,7 @@ export const persistence = {
           id,
           revision,
           files: new Map([...byId].map(([key, file]) => [key, { ...file }])),
+          bytes: new Map(),
         };
         resolve({ ...workspace, revision, files: files as PersistedFile[] });
       };
@@ -406,6 +422,7 @@ export const persistence = {
     if (new Set(snapshots.map((w) => w.id)).size !== snapshots.length)
       throw new Error("A workspace can only be written once per transaction");
     const db = await openDb();
+    const sizes = snapshots.map(() => new Map<string, number>());
     const revisions = await new Promise<string[]>((resolve, reject) => {
       const tx = db.transaction([STORE, FILES, SUMMARIES], "readwrite");
       const next = snapshots.map(() => crypto.randomUUID());
@@ -424,16 +441,21 @@ export const persistence = {
               throw new WorkspaceConflictError(w.id, "changed");
             const cached =
               lastWrite?.id === w.id && lastWrite.revision === previous?.revision
-                ? lastWrite.files
+                ? lastWrite
                 : undefined;
             const fileStore = tx.objectStore(FILES);
             const nextIds = new Set(w.files.map((file) => file.id));
             for (const id of previous?.fileIds ?? []) {
               if (!nextIds.has(id)) fileStore.delete([w.id, id]);
             }
+            let bytes = 0;
             for (const file of w.files) {
-              if (!sameFile(cached?.get(file.id), file))
-                fileStore.put({ ...file, workspaceId: w.id });
+              const unchanged = sameFile(cached?.files.get(file.id), file);
+              if (!unchanged) fileStore.put({ ...file, workspaceId: w.id });
+              const size =
+                (unchanged ? cached!.bytes.get(file.id) : undefined) ?? storedFileBytes(file);
+              sizes[index].set(file.id, size);
+              bytes += size;
             }
             const { files, revision: _expected, ...metadata } = w;
             tx.objectStore(STORE).put({
@@ -441,7 +463,7 @@ export const persistence = {
               fileIds: files.map((file) => file.id),
               revision: next[index],
             });
-            tx.objectStore(SUMMARIES).put(summaryOf(w));
+            tx.objectStore(SUMMARIES).put(summaryOf(w, bytes));
           } catch (error) {
             failure = error;
             tx.abort();
@@ -457,6 +479,7 @@ export const persistence = {
         id: w.id,
         revision: revisions[index],
         files: new Map(w.files.map((file) => [file.id, file])),
+        bytes: sizes[index],
       };
       announce({ type: "changed", id: w.id, revision: revisions[index] });
     });
@@ -530,6 +553,48 @@ export const persistence = {
   },
   listWorkspaceSummaries() {
     return request<WorkspaceSummary[]>("readonly", (s) => s.getAll(), SUMMARIES);
+  },
+  /**
+   * Stored bytes per workspace, from the summary rows. A row written by an
+   * older build has no total yet: its files are measured once, one row at a
+   * time through a cursor, and the total is written back in the same
+   * transaction.
+   */
+  async storedBytesByWorkspace(): Promise<Map<string, number>> {
+    const summaries = await persistence.listWorkspaceSummaries();
+    const totals = new Map<string, number>();
+    const missing: string[] = [];
+    for (const summary of summaries) {
+      if (typeof summary.bytes === "number") totals.set(summary.id, summary.bytes);
+      else missing.push(summary.id);
+    }
+    if (missing.length === 0) return totals;
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([FILES, SUMMARIES], "readwrite");
+      for (const id of missing) {
+        let bytes = 0;
+        const cursor = tx.objectStore(FILES).index("workspaceId").openCursor(id);
+        cursor.onsuccess = () => {
+          const row = cursor.result;
+          if (row) {
+            bytes += storedFileBytes(row.value as StoredFile);
+            row.continue();
+            return;
+          }
+          const summary = tx.objectStore(SUMMARIES).get(id);
+          summary.onsuccess = () => {
+            const current = summary.result as WorkspaceSummary | undefined;
+            if (!current) return;
+            tx.objectStore(SUMMARIES).put({ ...current, bytes });
+            totals.set(id, bytes);
+          };
+        };
+      }
+      tx.onabort = () => reject(tx.error ?? new Error("Could not measure local storage"));
+      tx.oncomplete = () => resolve();
+    });
+    return totals;
   },
   async listWorkspaces(): Promise<WorkspaceRecord[]> {
     const list = await persistence.listWorkspaceSummaries();

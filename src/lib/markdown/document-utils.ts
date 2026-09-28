@@ -116,7 +116,7 @@ function dataUrl(file: File): Promise<string> {
  *
  * Both the read and the data-URL branch below must agree on this, or a board
  * gets stored twice: once as text and again as base64. That matters here, where
- * the workspace enforces a hard storage cap against each file's `size`.
+ * the workspace enforces a hard storage cap against the bytes actually stored.
  */
 function isTextSourced(kind: DocumentKind) {
   return isTextKind(kind) || kind === "board";
@@ -145,6 +145,19 @@ export async function importDocumentFile(file: File): Promise<MdFile> {
     // Structure is derived on demand by `fileSubtopics`. Parsing it during an
     // upload delayed every file in the batch behind a scan of its own text.
   };
+}
+
+/**
+ * What `importDocumentFile` will store for `file`, before reading it: text as
+ * UTF-8, binaries as a base64 data URL, CSV as both. Room is held against this
+ * while the batch is read; the parsed files are then measured exactly.
+ */
+export function estimateStoredBytes(file: File): number {
+  const kind = getDocumentKind(file.name, file.type);
+  const text = isTextSourced(kind) ? file.size : 0;
+  if (isTextSourced(kind) && kind !== "csv") return text;
+  const prefix = `data:${file.type || "application/octet-stream"};base64,`.length;
+  return text + prefix + 4 * Math.ceil(file.size / 3);
 }
 
 export function dataUrlToArrayBuffer(data?: string): ArrayBuffer | null {

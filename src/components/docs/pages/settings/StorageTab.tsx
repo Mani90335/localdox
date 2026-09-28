@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Section, Group, Row } from "./primitives";
-import { STORAGE_QUOTA_FRACTION, formatBytes } from "@/lib/workspace/storage-limits";
+import { capFromQuota, formatBytes } from "@/lib/workspace/storage-limits";
+import { measureStoredBytes } from "@/lib/workspace/storage-budget";
+import type { MdFile } from "@/lib/markdown/markdown-utils";
 import { StorageProtection } from "./StorageProtection";
 import { OfflineAccess } from "./OfflineAccess";
 
@@ -9,27 +11,48 @@ const STORAGE_PRESSURE = 0.8;
 
 export function StorageSettings({
   onClearStorage,
+  workspaceId,
+  files,
   binCount,
   onEmptyBin,
 }: {
   onClearStorage: () => void;
+  /** The open workspace, counted as this tab holds it (unsaved edits too). */
+  workspaceId: string | null;
+  files: MdFile[];
   /** How many documents the Bin is holding, for the pressure prompt. */
   binCount: number;
   onEmptyBin: () => void;
 }) {
+  // Documents, measured the way every import is checked (storage-budget.ts).
   const [usage, setUsage] = useState<number | null>(null);
-  const [quota, setQuota] = useState<number | null>(null);
+  // The browser's own figures: its quota sets the cap; its usage covers the
+  // whole origin (offline features, caches) and is only an estimate.
+  const [browser, setBrowser] = useState<{ usage: number | null; quota: number | null }>();
 
   useEffect(() => {
-    if (navigator.storage && navigator.storage.estimate) {
-      navigator.storage.estimate().then((estimate) => {
-        setUsage(estimate.usage || 0);
-        setQuota(estimate.quota || 0);
-      });
-    }
+    let alive = true;
+    const estimate = navigator.storage?.estimate?.();
+    if (!estimate) setBrowser({ usage: null, quota: null });
+    estimate
+      ?.then((e) => alive && setBrowser({ usage: e.usage ?? null, quota: e.quota ?? null }))
+      .catch(() => alive && setBrowser({ usage: null, quota: null }));
+    return () => {
+      alive = false;
+    };
   }, []);
 
-  const cap = quota != null ? Math.floor(quota * STORAGE_QUOTA_FRACTION) : null;
+  useEffect(() => {
+    let alive = true;
+    measureStoredBytes(() => ({ id: workspaceId, files }))
+      .then((bytes) => alive && setUsage(bytes))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [workspaceId, files]);
+
+  const cap = browser?.quota ? capFromQuota(browser.quota) : null;
   const pct = usage != null && cap ? Math.min(100, (usage / cap) * 100) : null;
   // Warned before writes start failing, not after: at this point there is still
   // room to act, and the Bin is the one place holding files nobody asked to
@@ -44,9 +67,11 @@ export function StorageSettings({
             <div className="flex items-baseline justify-between gap-3">
               <span className="text-sm text-foreground">On this device</span>
               <span className="text-sm tabular-nums text-muted-foreground">
-                {usage !== null && cap !== null
-                  ? `${formatBytes(usage)} of ${formatBytes(cap)}`
-                  : "Calculating…"}
+                {usage === null || browser === undefined
+                  ? "Calculating…"
+                  : cap !== null
+                    ? `${formatBytes(usage)} of ${formatBytes(cap)}`
+                    : formatBytes(usage)}
               </span>
             </div>
             {pct !== null && (
@@ -58,6 +83,13 @@ export function StorageSettings({
                   style={{ width: `${Math.max(pct, 1)}%` }}
                 />
               </div>
+            )}
+            {usage !== null && (
+              <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
+                Documents in every workspace, Bin included.
+                {browser?.usage != null &&
+                  ` The browser estimates ${formatBytes(browser.usage)} for Localdox in all, including offline features.`}
+              </p>
             )}
           </div>
           {underPressure && (

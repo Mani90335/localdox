@@ -119,6 +119,7 @@ import {
   DISCARD_PROMPT,
   getDocumentKind,
   importDocumentFile,
+  estimateStoredBytes,
   SUPPORTED_ACCEPT,
 } from "@/lib/markdown/document-utils";
 import { clearArtifactResolutionCache } from "@/lib/workspace/workspace-artifacts";
@@ -169,7 +170,15 @@ import {
   type SharedFilesPayload,
 } from "@/lib/workspace/share";
 import type { ShareRequest } from "./workspace/SharePreviewDialog";
-import { MAX_UPLOAD_BYTES, getMaxStorageBytes, formatBytes } from "@/lib/workspace/storage-limits";
+import {
+  MAX_UPLOAD_BYTES,
+  StorageLimitError,
+  formatBytes,
+  isQuotaExceeded,
+  storedBytes,
+  utf8Length,
+} from "@/lib/workspace/storage-limits";
+import { reserveStorage, type StorageReservation } from "@/lib/workspace/storage-budget";
 import {
   useDocumentConversion,
   ConversionActions,
@@ -213,7 +222,12 @@ function importSharedWorkspaceOnce(key: string): Promise<WorkspaceRecord> {
       // meet before the app has even drawn.
       const already = await persistence.listWorkspaceSummaries();
       ws.name = availableWorkspaceName(`${ws.name} (Shared)`, already);
-      await persistence.serial(() => persistence.putWorkspace(ws));
+      const room = await reserveStorage(storedBytes(ws.files));
+      try {
+        await persistence.serial(() => persistence.putWorkspace(ws));
+      } finally {
+        room.release();
+      }
       toast.success("Shared workspace imported successfully!", { id: "share-import" });
       return ws;
     })();
@@ -871,7 +885,14 @@ export function DocsApp() {
             );
           } catch (e) {
             console.error("Failed to import shared workspace", e);
-            toast.error("Invalid or corrupted shared workspace link.", { id: "share-import" });
+            toast.error(
+              e instanceof StorageLimitError
+                ? `The shared workspace wasn't imported. ${e.message}`
+                : isQuotaExceeded(e)
+                  ? "The shared workspace wasn't imported. This browser is out of storage space for Localdox."
+                  : "Invalid or corrupted shared workspace link.",
+              { id: "share-import" },
+            );
           }
         }
 
@@ -983,6 +1004,12 @@ export function DocsApp() {
 
   // ---- file + navigation actions (each marks the workspace dirty) ----
 
+  /** This tab's open workspace, unsaved edits included, for storage-budget. */
+  const openWorkspace = useCallback(
+    () => ({ id: workspaceIdRef.current, files: snapshotRef.current.files }),
+    [],
+  );
+
   const addFiles = useCallback(
     async (fileList: File[], attachments = false): Promise<MdFile[]> => {
       if (fileList.length === 0) return [];
@@ -998,23 +1025,19 @@ export function DocsApp() {
       const accepted = fileList.filter((f) => f.size <= MAX_UPLOAD_BYTES);
       if (accepted.length === 0) return [];
 
-      // Enforce the hard total-storage ceiling (5% of the browser quota).
-      const maxStorage = await getMaxStorageBytes();
-      if (maxStorage != null) {
-        const usedBytes = snapshotRef.current.files.reduce((sum, f) => sum + (f.size ?? 0), 0);
-        const incomingBytes = accepted.reduce((sum, f) => sum + f.size, 0);
-        if (usedBytes + incomingBytes > maxStorage) {
-          toast.error(
-            `Storage full — this application is strictly capped at ${formatBytes(maxStorage)}. Remove some files before uploading more.`,
-          );
-          return [];
-        }
-      }
-
       const total = accepted.length;
-      const toastId = toast.loading(`Uploading ${total} file${total > 1 ? "s" : ""}...`);
+      let room: StorageReservation | undefined;
+      let toastId: string | number | undefined;
 
       try {
+        // Room is held from here until the files are in the workspace, so a
+        // second batch picked while this one is being read can't be promised
+        // the same free space.
+        room = await reserveStorage(
+          accepted.reduce((sum, f) => sum + estimateStoredBytes(f), 0),
+          openWorkspace,
+        );
+        toastId = toast.loading(`Uploading ${total} file${total > 1 ? "s" : ""}...`);
         let loaded = 0;
         const parsed: MdFile[] = await Promise.all(
           accepted.map(async (f) => {
@@ -1077,6 +1100,7 @@ export function DocsApp() {
           toast.dismiss(toastId);
           return existing;
         }
+        await room.resize(storedBytes(kept));
 
         let nextFolders = snapshotRef.current.folders;
         if (attachments) {
@@ -1108,6 +1132,8 @@ export function DocsApp() {
           folders: nextFolders,
           activeFileId: nextActiveFileId,
         };
+        // Counted as part of the open workspace from now on.
+        room.release();
         setFiles(nextFiles);
         setFolders(nextFolders);
         setActiveFileId(nextActiveFileId);
@@ -1126,13 +1152,20 @@ export function DocsApp() {
         });
         if (!attachments) navigate({ to: "/" }); // Attachments keep the editor open.
         return [...kept, ...existing];
-      } catch {
+      } catch (error) {
         setSaveStatus((status) => (status === "saving" ? "idle" : status));
-        toast.error("Could not upload the selected file(s). Please try again.", { id: toastId });
+        toast.error(
+          error instanceof StorageLimitError
+            ? error.message
+            : "Could not upload the selected file(s). Please try again.",
+          { id: toastId },
+        );
         return [];
+      } finally {
+        room?.release();
       }
     },
-    [navigate, persistNow],
+    [navigate, persistNow, openWorkspace],
   );
 
   const importAttachments = useCallback((files: File[]) => addFiles(files, true), [addFiles]);
@@ -1292,84 +1325,80 @@ export function DocsApp() {
 
   const commitConversion = useCallback(
     async (source: ConversionSource, result: ConversionResult, targetWorkspaceId: string) => {
-      const limit = await getMaxStorageBytes();
-      const current = snapshotRef.current;
-      if (
-        workspaceIdRef.current !== targetWorkspaceId ||
-        !sameSource(
-          current.files.find((f) => f.id === source.id),
-          source,
+      const size = utf8Length(result.markdown);
+      // Held before the snapshot is read, so the copy is checked against the
+      // workspace it is actually added to.
+      const room = await reserveStorage(size, openWorkspace);
+      try {
+        const current = snapshotRef.current;
+        if (
+          workspaceIdRef.current !== targetWorkspaceId ||
+          !sameSource(
+            current.files.find((f) => f.id === source.id),
+            source,
+          )
         )
-      )
-        return;
-      const size = new TextEncoder().encode(result.markdown).byteLength;
-      // Account for decoded text and stored base64, rather than trusting stale
-      // import sizes after a document has been edited.
-      const used = current.files.reduce(
-        (sum, file) =>
-          sum + new TextEncoder().encode(file.content).byteLength + (file.data?.length ?? 0),
-        0,
-      );
-      if (limit !== null && used + size > limit)
-        throw new Error(
-          "Not enough local storage for the Markdown copy. Free some space and try again.",
-        );
-      const liveSource = current.files.find((f) => f.id === source.id)!;
-      const derivative: MdFile = {
-        id: crypto.randomUUID(),
-        name: markdownCopyName(
-          source.name,
-          current.files.map((f) => f.name),
-        ),
-        content: result.markdown,
-        mimeType: "text/markdown",
-        kind: "markdown",
-        size,
-        addedAt: Date.now(),
-        folderId: liveSource.folderId,
-        derivedFrom: {
-          sourceFileId: source.id,
-          sourceName: source.name,
-          inputHash: result.inputHash,
-          converter: "anydoc",
-          converterVersion: CONVERTER_VERSION,
-          convertedAt: Date.now(),
-        },
-      };
-      const nextFiles = [...current.files];
-      nextFiles.splice(nextFiles.findIndex((f) => f.id === source.id) + 1, 0, derivative);
-      snapshotRef.current = { ...current, files: nextFiles };
-      filesRef.current = nextFiles;
-      setFiles(nextFiles);
-      markDirty();
-      if (!(await persistNow(false, true))) {
-        if (workspaceIdRef.current === targetWorkspaceId) {
-          const remaining = snapshotRef.current.files.filter((f) => f.id !== derivative.id);
-          snapshotRef.current = { ...snapshotRef.current, files: remaining };
-          filesRef.current = remaining;
-          setFiles(remaining);
-          markDirty();
-        }
-        throw new Error("The Markdown copy could not be saved. The original is unchanged.");
-      }
-      if (workspaceIdRef.current !== targetWorkspaceId) return;
-      if (
-        activeFileIdRef.current === source.id &&
-        pathnameRef.current === "/" &&
-        !editorDirtyRef.current
-      )
-        handleSelect(derivative.id);
-      toast.success(`Created ${derivative.name}`, {
-        description: "Embedded images remain in the original.",
-        action: {
-          label: "Open Markdown",
-          onClick: () => {
-            if (workspaceIdRef.current === targetWorkspaceId) handleSelect(derivative.id);
+          return;
+        const liveSource = current.files.find((f) => f.id === source.id)!;
+        const derivative: MdFile = {
+          id: crypto.randomUUID(),
+          name: markdownCopyName(
+            source.name,
+            current.files.map((f) => f.name),
+          ),
+          content: result.markdown,
+          mimeType: "text/markdown",
+          kind: "markdown",
+          size,
+          addedAt: Date.now(),
+          folderId: liveSource.folderId,
+          derivedFrom: {
+            sourceFileId: source.id,
+            sourceName: source.name,
+            inputHash: result.inputHash,
+            converter: "anydoc",
+            converterVersion: CONVERTER_VERSION,
+            convertedAt: Date.now(),
           },
-        },
-      });
+        };
+        const nextFiles = [...current.files];
+        nextFiles.splice(nextFiles.findIndex((f) => f.id === source.id) + 1, 0, derivative);
+        snapshotRef.current = { ...current, files: nextFiles };
+        filesRef.current = nextFiles;
+        room.release();
+        setFiles(nextFiles);
+        markDirty();
+        if (!(await persistNow(false, true))) {
+          if (workspaceIdRef.current === targetWorkspaceId) {
+            const remaining = snapshotRef.current.files.filter((f) => f.id !== derivative.id);
+            snapshotRef.current = { ...snapshotRef.current, files: remaining };
+            filesRef.current = remaining;
+            setFiles(remaining);
+            markDirty();
+          }
+          throw new Error("The Markdown copy could not be saved. The original is unchanged.");
+        }
+        if (workspaceIdRef.current !== targetWorkspaceId) return;
+        if (
+          activeFileIdRef.current === source.id &&
+          pathnameRef.current === "/" &&
+          !editorDirtyRef.current
+        )
+          handleSelect(derivative.id);
+        toast.success(`Created ${derivative.name}`, {
+          description: "Embedded images remain in the original.",
+          action: {
+            label: "Open Markdown",
+            onClick: () => {
+              if (workspaceIdRef.current === targetWorkspaceId) handleSelect(derivative.id);
+            },
+          },
+        });
+      } finally {
+        room.release();
+      }
     },
-    [handleSelect, markDirty, persistNow],
+    [handleSelect, markDirty, persistNow, openWorkspace],
   );
 
   const conversion = useDocumentConversion({ workspaceId, files, commit: commitConversion });
@@ -2448,8 +2477,21 @@ flowchart LR
 
   const importWorkspace = useCallback(
     async (file: File) => {
+      let ws: WorkspaceRecord;
       try {
-        const ws = parseWorkspaceImport(await file.text());
+        ws = parseWorkspaceImport(await file.text());
+      } catch (error) {
+        // Validation runs before anything is written, so nothing was imported.
+        toast.error(
+          error instanceof ImportValidationError
+            ? `Nothing was imported. ${error.message}`
+            : "Nothing was imported. That file isn't a valid workspace backup.",
+          { id: "workspace-import-error" },
+        );
+        return;
+      }
+      let room: StorageReservation | undefined;
+      try {
         const existing = await storedWorkspaces();
 
         // The same export imported twice would otherwise overwrite the copy
@@ -2476,23 +2518,39 @@ flowchart LR
         if (!finalName) return; // reader cancelled the rename — import nothing
         ws.name = finalName;
 
+        room = await reserveStorage(storedBytes(ws.files), openWorkspace);
         if (!(await persistNow(true))) return;
         await persistence.serial(() => persistence.putWorkspace(ws));
+        room.release();
         await refreshWorkspaceList();
         hydrateWorkspace(ws);
         savePrefs({ lastWorkspaceId: ws.id });
       } catch (error) {
         setSaveStatus("idle");
-        // Validation runs before anything is written, so nothing was imported.
+        if (!(error instanceof StorageLimitError))
+          console.error("Could not import workspace backup", error);
         toast.error(
-          error instanceof ImportValidationError
-            ? `Nothing was imported. ${error.message}`
-            : "Nothing was imported. That file isn't a valid workspace backup.",
+          `Nothing was imported. ${
+            error instanceof StorageLimitError
+              ? error.message
+              : isQuotaExceeded(error)
+                ? "This browser is out of storage space for Localdox."
+                : "The backup is valid, but it couldn't be saved on this device. Try again."
+          }`,
           { id: "workspace-import-error" },
         );
+      } finally {
+        room?.release();
       }
     },
-    [persistNow, refreshWorkspaceList, hydrateWorkspace, storedWorkspaces, switchWorkspace],
+    [
+      persistNow,
+      refreshWorkspaceList,
+      hydrateWorkspace,
+      storedWorkspaces,
+      switchWorkspace,
+      openWorkspace,
+    ],
   );
 
   /** Save a workspace backup (full, or a share selection) as a .json download. */
@@ -2587,6 +2645,7 @@ flowchart LR
       if (picked.length === 0) return;
 
       setImportingShare(true);
+      let room: StorageReservation | undefined;
       try {
         // The same file can arrive twice (re-shared, or shared back); fresh ids
         // keep both copies addressable.
@@ -2601,17 +2660,9 @@ flowchart LR
           folderId: null,
         }));
 
-        const incomingBytes = stamped.reduce((sum, f) => sum + (f.size ?? f.content.length), 0);
-        const maxStorage = await getMaxStorageBytes();
-        if (maxStorage != null) {
-          const usedBytes = snapshotRef.current.files.reduce((sum, f) => sum + (f.size ?? 0), 0);
-          if (usedBytes + incomingBytes > maxStorage) {
-            toast.error(
-              `Storage full — this application is strictly capped at ${formatBytes(maxStorage)}. Remove some files before importing shared ones.`,
-            );
-            return;
-          }
-        }
+        // Measured, not read from the link: a payload's `size` is the sender's
+        // claim.
+        room = await reserveStorage(storedBytes(stamped), openWorkspace);
 
         if (target === "new") {
           if (!(await persistNow(true))) return;
@@ -2620,6 +2671,7 @@ flowchart LR
           ws.ui.activeFileId = stamped[0].id;
           ws.ui.fileOrder = stamped.map((f) => f.id);
           await persistence.serial(() => persistence.putWorkspace(ws));
+          room.release();
           await refreshWorkspaceList();
           hydrateWorkspace(ws);
           savePrefs({ lastWorkspaceId: ws.id });
@@ -2650,6 +2702,7 @@ flowchart LR
             files: nextFiles,
             activeFileId: nextActiveFileId,
           };
+          room.release();
           setFiles(nextFiles);
           setActiveFileId(nextActiveFileId);
           setSaveStatus("saving");
@@ -2665,10 +2718,19 @@ flowchart LR
         );
         if (location.pathname !== "/") navigate({ to: "/" });
       } catch (e) {
-        console.error("Failed to import shared files", e);
         setSaveStatus((status) => (status === "saving" ? "idle" : status));
-        toast.error("Could not import the shared files. Please try again.");
+        if (e instanceof StorageLimitError) {
+          toast.error(e.message);
+          return;
+        }
+        console.error("Failed to import shared files", e);
+        toast.error(
+          isQuotaExceeded(e)
+            ? "This browser is out of storage space for Localdox. Nothing was added."
+            : "Could not import the shared files. Please try again.",
+        );
       } finally {
+        room?.release();
         setImportingShare(false);
       }
     },
@@ -2680,6 +2742,7 @@ flowchart LR
       buildRecord,
       location.pathname,
       navigate,
+      openWorkspace,
     ],
   );
 
