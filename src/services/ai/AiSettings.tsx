@@ -1,34 +1,127 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Eye, EyeOff, Loader2, ShieldAlert, Trash2, ExternalLink } from "lucide-react";
 import { PROVIDER_LIST, getProvider } from "./registry";
 import { getKey, setKey, removeKey, storageMode, listConfigured } from "./keys";
 import { loadAIConfig, saveAIConfig, type AIConfig } from "./config";
 import { Section, Group, IconButton } from "@/components/docs/pages/settings/primitives";
-import type { ProviderId } from "./types";
+import type { AIProvider, KeyCheck, ProviderId } from "./types";
+
+/** Model ids each saved key can use; a provider is absent while unknown. */
+type Availability = Partial<Record<ProviderId, string[]>>;
+
+// What each key's model list said, for this session. Filled when a key is
+// saved or Settings opens, and dropped when the key changes.
+const checkedKeys = new Map<ProviderId, string[] | null>();
+
+function remember(id: ProviderId, check: KeyCheck) {
+  checkedKeys.set(id, check.ok && check.available ? check.available : null);
+}
+
+async function availabilityFor(ids: ProviderId[]): Promise<Availability> {
+  await Promise.all(
+    ids
+      .filter((id) => !checkedKeys.has(id))
+      .map(async (id) => {
+        const provider = getProvider(id);
+        const key = provider && (await getKey(id));
+        // Offline or failing: leave it unknown and ask again next time.
+        if (key) {
+          const check = await provider.checkKey(key);
+          if (check.ok) remember(id, check);
+        }
+      }),
+  );
+  const out: Availability = {};
+  for (const id of ids) {
+    const available = checkedKeys.get(id);
+    if (available) out[id] = available;
+  }
+  return out;
+}
+
+const usable = (provider: AIProvider, availability: Availability) =>
+  provider.models.filter((m) => availability[provider.id]?.includes(m.id) ?? true);
+
+/**
+ * The default to use, given which providers have keys and which models those
+ * keys can use. Keeps the current choice when it works, then prefers another
+ * model from the same provider, then the first connected provider's.
+ */
+function chooseDefault(
+  prev: AIConfig,
+  connected: ProviderId[],
+  availability: Availability,
+): AIConfig {
+  const current = connected.includes(prev.defaultProvider)
+    ? getProvider(prev.defaultProvider)
+    : undefined;
+  if (current && usable(current, availability).some((m) => m.id === prev.defaultModel)) {
+    return prev;
+  }
+  const providers = [current, ...connected.map(getProvider)].filter((p): p is AIProvider => !!p);
+  for (const provider of providers) {
+    const model = usable(provider, availability)[0];
+    if (model) return { defaultProvider: provider.id, defaultModel: model.id };
+  }
+  // No connected key can use any listed model (or none is connected): keep a
+  // connected provider's default so the request's own error explains why.
+  if (current) return prev;
+  const first = connected.length ? getProvider(connected[0]) : undefined;
+  return first ? { defaultProvider: first.id, defaultModel: first.models[0].id } : prev;
+}
+
+function modelLabel(id: string): string {
+  for (const provider of PROVIDER_LIST) {
+    const model = provider.models.find((m) => m.id === id);
+    if (model) return model.label;
+  }
+  return id;
+}
 
 // Self-contained AI settings: reads/writes keys.ts + config.ts directly so the
 // Settings page needs no new prop plumbing.
 export function AiSettings() {
   const [config, setConfig] = useState<AIConfig>(() => loadAIConfig());
   const [connected, setConnected] = useState<ProviderId[]>([]);
+  const [availability, setAvailability] = useState<Availability>({});
+  // Why the default moved, when it moved because a key can't use a model.
+  const [notice, setNotice] = useState<string | null>(null);
   const mode = storageMode();
 
   // Keep the default model pointed at a provider the user actually has a key
-  // for. Any single key is enough — this makes a newly-added key immediately
-  // usable without touching the model dropdown.
+  // for, and at a model that key can use. Any single key is enough — this makes
+  // a newly-added key immediately usable without touching the model dropdown.
+  // A key saved or removed mid-check starts a newer pass; older ones stop.
+  const pass = useRef(0);
   const reconcile = useCallback(async () => {
+    const mine = ++pass.current;
     const ids = await listConfigured();
+    if (mine !== pass.current) return;
     setConnected(ids);
-    setConfig((prev) => {
-      const currentProvider = getProvider(prev.defaultProvider);
-      const currentProviderKeyed = ids.includes(prev.defaultProvider);
-      const modelBelongs = currentProvider?.models.some((m) => m.id === prev.defaultModel);
-      if (currentProviderKeyed && modelBelongs) return prev;
-      // Point the default at the first connected provider's first model.
-      const target = ids.length ? getProvider(ids[0]) : undefined;
-      if (!target) return prev;
-      return saveAIConfig({ defaultProvider: target.id, defaultModel: target.models[0].id });
-    });
+    const apply = (known: Availability) => {
+      const prev = loadAIConfig();
+      const next = chooseDefault(prev, ids, known);
+      if (
+        next.defaultModel === prev.defaultModel &&
+        next.defaultProvider === prev.defaultProvider
+      ) {
+        setConfig(prev);
+        return;
+      }
+      const keyed = getProvider(prev.defaultProvider);
+      if (keyed && ids.includes(keyed.id) && known[keyed.id]) {
+        setNotice(
+          `Your ${keyed.label} key can't use ${modelLabel(prev.defaultModel)}, so Ask AI now uses ${modelLabel(next.defaultModel)}.`,
+        );
+      }
+      setConfig(saveAIConfig(next));
+    };
+    // Settle the provider now; refine once the keys' model lists arrive.
+    apply({});
+    const known = await availabilityFor(ids);
+    if (mine !== pass.current) return;
+    setAvailability(known);
+    apply(known);
   }, []);
 
   useEffect(() => {
@@ -57,7 +150,15 @@ export function AiSettings() {
       >
         <Group>
           {PROVIDER_LIST.map((provider) => (
-            <ProviderKeyRow key={provider.id} provider={provider} onChanged={reconcile} />
+            <ProviderKeyRow
+              key={provider.id}
+              provider={provider}
+              onChanged={(check) => {
+                if (check) remember(provider.id, check);
+                else checkedKeys.delete(provider.id);
+                return reconcile();
+              }}
+            />
           ))}
         </Group>
         {mode === "encrypted" && (
@@ -67,7 +168,16 @@ export function AiSettings() {
         )}
       </Section>
 
-      <DefaultModel config={config} connected={connected} onChange={patchConfig} />
+      <DefaultModel
+        config={config}
+        connected={connected}
+        availability={availability}
+        notice={notice}
+        onChange={(patch) => {
+          setNotice(null);
+          patchConfig(patch);
+        }}
+      />
     </div>
   );
 }
@@ -77,12 +187,15 @@ function ProviderKeyRow({
   onChanged,
 }: {
   provider: (typeof PROVIDER_LIST)[number];
-  onChanged: () => void | Promise<void>;
+  /** A saved key passes its check; a removed key passes nothing. */
+  onChanged: (check?: KeyCheck) => void | Promise<void>;
 }) {
   const [value, setValue] = useState("");
   const [saved, setSaved] = useState(false);
   const [reveal, setReveal] = useState(false);
   const [status, setStatus] = useState<"idle" | "checking" | "valid" | "invalid">("idle");
+  // Why the last check failed: a bad key, a quota, or no connection.
+  const [checkError, setCheckError] = useState<string | null>(null);
   // Storage failures stay on screen until the next attempt; a key is only
   // shown as saved once its write has committed.
   const [storageError, setStorageError] = useState<string | null>(null);
@@ -103,9 +216,14 @@ function ProviderKeyRow({
   const onSave = async () => {
     setStatus("checking");
     setStorageError(null);
-    const ok = await provider.validateKey(value.trim());
-    if (!ok) {
+    const check = await provider.checkKey(value.trim());
+    if (!check.ok) {
       setStatus("invalid");
+      setCheckError(
+        check.error.kind === "auth"
+          ? "That key didn't validate. Check it and try again."
+          : check.error.message,
+      );
       return;
     }
     try {
@@ -117,7 +235,7 @@ function ProviderKeyRow({
     }
     setSaved(true);
     setStatus("valid");
-    await onChanged();
+    await onChanged(check);
   };
 
   const onRemove = async () => {
@@ -163,6 +281,7 @@ function ProviderKeyRow({
             onChange={(e) => {
               setValue(e.target.value);
               setStatus("idle");
+              setCheckError(null);
               setStorageError(null);
             }}
             placeholder={saved ? "Key saved" : "Paste API key"}
@@ -198,9 +317,9 @@ function ProviderKeyRow({
         )}
       </div>
 
-      {status === "invalid" && (
-        <p className="mt-1.5 text-xs text-destructive">
-          That key didn&apos;t validate. Check it and try again.
+      {status === "invalid" && checkError && (
+        <p role="alert" className="mt-1.5 text-xs text-destructive">
+          {checkError}
         </p>
       )}
       {storageError && (
@@ -215,10 +334,14 @@ function ProviderKeyRow({
 function DefaultModel({
   config,
   connected,
+  availability,
+  notice,
   onChange,
 }: {
   config: AIConfig;
   connected: ProviderId[];
+  availability: Availability;
+  notice: string | null;
   onChange: (patch: Partial<AIConfig>) => void;
 }) {
   const allOptions = PROVIDER_LIST.flatMap((provider) =>
@@ -251,18 +374,32 @@ function DefaultModel({
                   key={provider.id}
                   label={`${provider.label}${isConnected ? " — connected" : " — no key"}`}
                 >
-                  {provider.models.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                      {isConnected ? "" : " (add key)"}
-                    </option>
-                  ))}
+                  {provider.models.map((model) => {
+                    // Only a connected key's own model list can rule a model out.
+                    const unavailable =
+                      isConnected && !usable(provider, availability).includes(model);
+                    return (
+                      <option key={model.id} value={model.id} disabled={unavailable}>
+                        {model.label}
+                        {!isConnected
+                          ? " (add key)"
+                          : unavailable
+                            ? " (not available to your key)"
+                            : ""}
+                      </option>
+                    );
+                  })}
                 </optgroup>
               );
             })}
           </select>
         </div>
       </Group>
+      {notice && (
+        <p role="status" className="px-1 text-xs text-muted-foreground">
+          {notice}
+        </p>
+      )}
       {!anyConnected && (
         <p className="px-1 text-xs text-amber-600 dark:text-amber-400">
           No key connected yet — add one above to start using Ask AI.

@@ -1,4 +1,10 @@
-import { AIError, type AIProvider, type AIRequest, type StreamFinish } from "../types.ts";
+import {
+  AIError,
+  type AIProvider,
+  type AIRequest,
+  type KeyCheck,
+  type StreamFinish,
+} from "../types.ts";
 import { readSSE } from "../sse.ts";
 
 const BASE = "https://api.openai.com/v1";
@@ -14,14 +20,27 @@ export const openaiProvider: AIProvider = {
     { id: "gpt-4.1", label: "GPT-4.1" },
   ],
 
-  async validateKey(key: string): Promise<boolean> {
+  async checkKey(key: string): Promise<KeyCheck> {
+    let res: Response;
     try {
-      const res = await fetch(`${BASE}/models`, {
-        headers: { Authorization: `Bearer ${key}` },
-      });
-      return res.ok;
+      res = await fetch(`${BASE}/models`, { headers: { Authorization: `Bearer ${key}` } });
     } catch {
-      return false;
+      return {
+        ok: false,
+        error: new AIError("network", "Couldn't reach OpenAI. Check your connection."),
+      };
+    }
+    if (!res.ok) return { ok: false, error: await toError(res) };
+    try {
+      const json: { data?: { id?: unknown }[] } = await res.json();
+      if (!Array.isArray(json?.data)) return { ok: true };
+      return {
+        ok: true,
+        available: json.data.flatMap((m) => (typeof m?.id === "string" ? [m.id] : [])),
+      };
+    } catch {
+      // The key was accepted; only the list is unreadable.
+      return { ok: true };
     }
   },
 
@@ -42,7 +61,7 @@ export const openaiProvider: AIProvider = {
     });
 
     if (!res.ok) {
-      throw await toError(res);
+      throw await toError(res, req.model);
     }
 
     let sawText = false;
@@ -92,7 +111,7 @@ interface OpenAIChunk {
   choices?: { delta?: { content?: unknown }; finish_reason?: string | null }[];
 }
 
-async function toError(res: Response): Promise<AIError> {
+async function toError(res: Response, model?: string): Promise<AIError> {
   let detail = "";
   let code = "";
   try {
@@ -106,6 +125,12 @@ async function toError(res: Response): Promise<AIError> {
     res.status === 429 || /quota|insufficient_quota|exceeded/i.test(`${code} ${detail}`);
   if (res.status === 401) return new AIError("auth", "OpenAI: invalid API key.");
   if (quota) return new AIError("quota", "OpenAI: rate limit or quota exceeded.");
+  if (model && (res.status === 404 || code === "model_not_found")) {
+    return new AIError(
+      "model",
+      `OpenAI can't use ${model}: it has been retired or this key can't use it. Choose another model in Settings → Ask AI.`,
+    );
+  }
   return new AIError(
     "other",
     detail ? `OpenAI: ${detail}` : `OpenAI request failed (${res.status}).`,

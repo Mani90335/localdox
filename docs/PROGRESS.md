@@ -1,4 +1,111 @@
-Latest update — 2026-09-29 (A05 long Markdown: bounded rendering)
+Latest update — 2026-09-29 (A12 Gemini models: current list, migration, accurate errors)
+
+Completed A12 (Package 8). Ask AI offers only Gemini models Google still
+serves, a saved retired model moves to its replacement, Settings greys out
+models the reader's key can't use, and a retired model is reported as a model
+problem instead of a bad key. The Gemini key now travels in the
+x-goog-api-key header, not the URL (left over from R06).
+
+Checked against Google first (docs/models and docs/deprecations, both updated
+2026-09-24; fetched 2026-09-28):
+- All four offered ids were gone: gemini-2.0-flash and gemini-2.0-flash-lite
+  shut down on 2026-06-01; gemini-1.5-flash and gemini-1.5-pro are no longer
+  listed at all.
+- Stable text models now: 3.8 / 3.7 / 3.6 / 3.5 Flash, 3.5 Flash-Lite,
+  3.1 Flash-Lite (shutdown 2027-05-07). The only Pro text model is
+  gemini-3.1-pro-preview. Google limits 2.5 to accounts that used it before.
+- Google says to keep Gemini 3's temperature at its default of 1.0 (lower
+  values can loop). The provider forced 0.5.
+- Live endpoint, probed with a fake key: the CORS preflight allows
+  x-goog-api-key from our origin; an unknown key is 400 INVALID_ARGUMENT /
+  API_KEY_INVALID. Google's error page: 402 = prepaid credit used up,
+  403 = key lacks permission, 404 = model not found.
+
+Before (HEAD 164c4fc, production build; the new e2e spec run against it):
+all 5 cases fail. Every Gemini option was retired; a saved gemini-1.5-pro
+stayed selected; no model was ever ruled out for a key; a rate-limited or
+offline key check said "That key didn't validate"; a 404 for a retired model
+was not reported as a model problem. From reading the code: a saved id that
+was no longer listed made Settings repoint the default to the first connected
+provider, which could silently switch Gemini users to OpenAI.
+
+Fix:
+- providers/gemini.ts: offers gemini-3.8-flash (default),
+  gemini-3.5-flash-lite and gemini-3.1-pro-preview. retiredModels maps the four
+  old ids within their line (Flash → 3.8 Flash, Lite → 3.5 Flash-Lite,
+  1.5 Pro → 3.1 Pro preview). checkKey lists the key's models (pageSize 1000,
+  follows nextPageToken, at most 5 pages; a list that never ends rules nothing
+  out) and keeps those supporting generateContent. The key goes in
+  x-goog-api-key for both calls. Temperature is sent only when the caller asks.
+  Errors: 429/402/RESOURCE_EXHAUSTED → quota; 401/API_KEY_INVALID → "invalid
+  API key"; 403/PERMISSION_DENIED → auth with Google's own message (no longer
+  "invalid API key"); 404/NOT_FOUND on a generation request → new "model" kind
+  naming the model and pointing to Settings.
+- providers/openai.ts: the same checkKey contract; 404/model_not_found → model.
+- types.ts: AIProvider.validateKey (boolean) became checkKey (KeyCheck: ok with
+  the available ids, or an AIError); optional retiredModels; "model" error kind.
+- config.ts: normalizeAIConfig. A listed model is kept and its provider follows
+  it; a retired id becomes its replacement; an unknown id becomes the saved
+  provider's default (never another provider's). loadAIConfig writes a migrated
+  value back once and tolerates unreadable JSON.
+- AiSettings.tsx: availability per connected key, cached for the session and
+  seeded by the save-time check (one list request per key per session).
+  chooseDefault keeps a usable choice, else the same provider's next usable
+  model, with a notice ("Your Google Gemini key can't use …, so Ask AI now uses
+  …"). Unusable options are disabled and say "(not available to your key)".
+  Key errors say why (bad key / quota / no connection) in a role=alert. A pass
+  counter stops an older reconcile from applying stale key lists.
+- agent.ts: a model error falls back to the next keyed provider like
+  quota/auth. With no other key it keeps its own message rather than the
+  "key is invalid" exhaustion text.
+- documentation/ai-models.md: the model layers, flow, how to update the list,
+  and debugging.
+
+After:
+- tests/ai-models.test.ts (24 new): no retired id is offered; every
+  replacement is offered by its own provider; no duplicate ids; migration of
+  each old id, provider-follows-model, unknown-id and garbage cases;
+  loadAIConfig writes back once and survives bad JSON; checkKey sends only the
+  header, filters generateContent, follows pages, stops after 5; bad key /
+  429 / 402 / 403 / offline / 404-while-listing each classified; streamChat
+  sends the header, no generationConfig by default, an explicit temperature
+  when asked; retired-model 404 → "model" naming "Gemini 3.1 Pro (preview)";
+  OpenAI checkKey and model_not_found; runAgent with one key surfaces the model
+  error, with two keys OpenAI answers.
+- tests/e2e/ai-models.spec.ts (5 new; all 5 fail on HEAD 164c4fc, pass with
+  the fix): offered list and header-only key; 1.5 Pro migrates to 3.1 Pro;
+  a model missing from the key's list is disabled and the default moves with
+  the notice; bad key / 429 / offline messages; a retired model in Ask AI shows
+  the model message, not "invalid", with one request carrying the header.
+- tests/ai-gemini-contract.test.ts: live check that the key can use every
+  offered model and the default streams to a normal stop. Skipped unless
+  LOCALDOX_GEMINI_TEST_KEY is set. Run with a fake key it fails as it should,
+  with "Gemini: invalid API key." from the real endpoint.
+- DevTools MCP (production preview): a fake key against the real Google
+  endpoint gave a 400 API_KEY_INVALID and showed "That key didn't validate".
+  The request had the key only in x-goog-api-key; the URL was
+  /v1beta/models?pageSize=1000. Then, with the model list stubbed to omit
+  3.1 Pro and gemini-1.5-pro saved: 3.8 Flash selected, 3.1 Pro disabled
+  "(not available to your key)", the notice shown, config rewritten. No
+  console errors.
+- Checks (clean worktree on the new base, 1ef2cef plus this change only):
+  unit suite 412 passed / 2 skipped of 414 (24 new), typecheck, focused lint
+  on the changed files and build pass (same 3 build warnings as HEAD).
+  ai-models + ai-keys + ai-streaming e2e against a production preview on a
+  private port: 11 passed, 1 skipped (the dev-only two-tab key race). The full
+  browser suite was not rerun.
+
+Limits:
+- No real Gemini key was available, so no successful live generation was run.
+  The contract test is there for an explicitly configured test account.
+- The OpenAI list (gpt-4o-mini, gpt-4o, gpt-4.1-mini, gpt-4.1) was not
+  re-checked against OpenAI; its keys now get the same greying-out.
+- gemini-3.1-pro-preview is a preview (two weeks' notice, may need billing).
+- Pre-existing, not changed: a saved, untouched key row shows an "Update"
+  button, because the row counts any filled field as dirty.
+- Chromium only.
+
+Previous update — 2026-09-29 (A05 long Markdown: bounded rendering)
 
 Completed A05 (Package 5). A long Markdown document no longer parses and
 commits in one task. The first screen renders straight away and the rest
@@ -1737,7 +1844,7 @@ Pending (not started, or started but not committed)
 - Package 6: B01 is done (latest update above); B02–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
-- Package 8: R06 is done (latest update). B04 is done (B04 update above). A12 (Gemini models, not yet checked against Google's current list), B05, R05 and the lint debt (76 errors) remain.
+- Package 8: R06 is done (latest update). B04 is done (B04 update above). A12 is done (latest update). B05, R05 and the lint debt (76 errors) remain.
 
 None of PLAN.md's release gates are formally met yet. A01–A03 and A09/A10 now have passing reproductions, which is what the reliability gate asks for, and Package 3's offline criterion now has a passing reproduction too.
 

@@ -105,11 +105,14 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
       if ((err as Error)?.name === "AbortError") throw err;
       const aiErr = asAIError(err);
       lastError = aiErr;
-      // Only quota/auth failures are worth trying the next key. A genuine
-      // content/network error would just repeat.
-      const recoverable = aiErr.kind === "quota" || aiErr.kind === "auth";
+      // Only quota/auth/model failures are worth trying the next key: they
+      // belong to this provider. A genuine content/network error would just
+      // repeat.
+      const recoverable = aiErr.kind === "quota" || aiErr.kind === "auth" || aiErr.kind === "model";
       const hasNext = i < chain.length - 1;
       if (recoverable && hasNext) continue;
+      // An unavailable model is not a bad key; its message says what to change.
+      if (aiErr.kind === "model") throw aiErr;
       if (recoverable) throw exhaustionError(chain, aiErr);
       throw aiErr;
     }
