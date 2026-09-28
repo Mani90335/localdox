@@ -1,4 +1,43 @@
-Latest update — 2026-09-28 (A10)
+Latest update — 2026-09-28 (A11 persistent-storage enhancement)
+
+Completed the persistent-storage request and capability-state enhancement from
+A11. Settings → Storage now reads navigator.storage.persisted() each time the
+panel opens. "Protect local data" invokes persist() directly from a user click;
+opening settings never requests permission. The UI waits for the result and
+shows the browser's actual grant, denial, unsupported API or failure. Requests
+disable the button until settled; status-check and request failures can be
+retried. An accessible status region announces changes. A backup reminder points
+to Settings → Workspace → Export and remains visible after a grant, explaining
+that clearing site data or losing the device can still lose the data. No local
+preference is used as proof of protection.
+
+Validation: the new request/reload browser regression fails on the pre-change
+production build because the protection status is absent. After the change,
+npm run typecheck, npm test (241/241), npm run build, focused ESLint on all
+changed source/test files, and git diff --check pass. Production-preview
+Playwright passes 25/25 across storage-persistence, durability, persistence and
+sharing. The 11 new browser cases cover explicit user activation, a delayed
+grant and disabled button, reload and existing grants, denial and retry,
+rejected requests, failed status checks, missing storage/persisted/persist APIs,
+leaving the panel during a request, keyboard activation and wrapping at 320px,
+and agreement with the real unstubbed browser API. Grant/failure edge cases use
+API stubs; the native Chromium request was denied, correctly shown as denied.
+
+Chrome DevTools MCP independently confirmed the native denial, a simulated
+grant, the accessible status and persistent backup copy, and no console warnings
+or errors. Its default profile was busy, so the installed server ran with an
+isolated temporary profile. The inspected MCP screenshot was 500px wide (Chrome
+clamped the requested window width); the 320px assertion ran in Playwright.
+Build, preview and browser processes needed sandbox escalation. Original audit
+evidence was not overwritten, and the tree was clean before this enhancement.
+
+Limits: A11 remains open for the offline shell, cached capabilities and
+offline-readiness state. This change does not make offline reload work or meet
+Package 3's offline acceptance criterion. Grant policy belongs to the browser;
+no automatic-eviction simulation, Safari/Firefox, physical-device or screen
+reader test was performed. Unrelated audit findings remain pending.
+
+Previous update — 2026-09-28 (A10)
 
 Completed A10: saving is now a visible, durable part of the UI.
 - Save state is rendered (it was set but never shown): "Changes pending",
@@ -253,7 +292,7 @@ Limits: everything ran on Chromium on this machine. I haven't tested Safari, Fir
 
 Pending (not started, or started but not committed)
 
-- Package 3: A03 and A10 are done (above). Still pending: A11 (no offline support, no request for persistent storage).
+- Package 3: A03 and A10 are done (above). A11's persistent-storage request, capability state and backup reminder are done (latest update above); offline shell, cached capabilities and offline-readiness state remain pending.
 - Package 4: A06 is done (2026-09-28 update above). A07's unchanged-query refresh is covered; its remaining worker protocol/lifecycle work is pending.
 - Package 5: A04 (500-edge Stepped diagram makes a 52,311 px page), A05 (3,000-section Markdown), A08 (PDF zoom memory), R01–R04.
 - Package 6: B01–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).

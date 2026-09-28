@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Section, Group, Row } from "./primitives";
 import { STORAGE_QUOTA_FRACTION, formatBytes } from "@/lib/workspace/storage-limits";
+import { StorageProtection } from "./StorageProtection";
 
 /** Fraction of the cap at which the Bin is worth pointing at. */
 const STORAGE_PRESSURE = 0.8;
@@ -80,6 +81,7 @@ export function StorageSettings({
               }
             />
           )}
+          <StorageProtection />
         </Group>
       </Section>
 
