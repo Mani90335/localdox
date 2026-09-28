@@ -1,4 +1,44 @@
-Latest update — 2026-09-28 (A11 persistent-storage enhancement)
+Latest update — 2026-09-28 (R03 PDF keyboard isolation)
+
+Completed the keyboard-input bug within R03 / Package 5. PDF navigation and
+zoom no longer listen on window. Each PDF page area is a named, keyboard-
+focusable region with shortcut instructions and a visible focus ring. Tab or
+clicking its canvas/text activates that reader; only keys targeted at that
+surface change pages or zoom. Nested controls, menus, other panes, browser
+modifier shortcuts, Shift selection shortcuts, composing input and previously
+handled events keep their own behavior. Pointer focus preserves native text
+selection and ignores interactive descendants, including contenteditable.
+
+Validation: the new toolbar regression failed against the pre-change production
+build: ArrowRight on the focused Next page button changed page 1 to page 2.
+Final npm run typecheck, npm test (241/241), npm run build, focused ESLint,
+Prettier and git diff --check pass. Six new production-preview Playwright tests
+pass in tests/e2e/pdf-keyboard.spec.ts: toolbar/menu/search isolation; Tab entry
+and exit plus every page/zoom shortcut; real PDF text selection and pointer
+focus; nested select/contenteditable/button/link/slider/input/textarea controls;
+modifier/composition/default-prevented events; and two PDF panes whose page and
+zoom state change independently. The 15 existing highlighting, search,
+persistence and sharing browser tests also pass. Initial test locators were
+corrected for the modal menu's accessibility isolation, PDF text split across
+spans, the sidebar filename button and the split-view action's button role.
+Browser inspection also caught and corrected the initial pointer filter's
+handling of PDF.js role=presentation text spans.
+
+Chrome DevTools MCP independently confirmed the named region and visible focus
+ring, text-click focus, navigation inside the reader, no navigation from a
+focused toolbar control, and no console warnings/errors. It used an isolated
+browser context and a repository PDF fixture (passed through the browser File
+input because the MCP upload tool's configured roots rejected the local path).
+Build, preview and Playwright needed sandbox escalation for local servers and
+Chromium. Original audit evidence was preserved; the tree was clean initially.
+
+Limits: this completes only R03's shortcut bug. Lazy outline destination
+resolution and bounded outline rendering remain pending, as do A08's PDF pixel
+and cache budgets. Chromium desktop only; no Safari/Firefox, physical-device,
+screen-reader or performance-release-gate claim. The full browser suite was
+not rerun.
+
+Previous update — 2026-09-28 (A11 persistent-storage enhancement)
 
 Completed the persistent-storage request and capability-state enhancement from
 A11. Settings → Storage now reads navigator.storage.persisted() each time the
@@ -292,11 +332,11 @@ Limits: everything ran on Chromium on this machine. I haven't tested Safari, Fir
 
 Pending (not started, or started but not committed)
 
-- Package 3: A03 and A10 are done (above). A11's persistent-storage request, capability state and backup reminder are done (latest update above); offline shell, cached capabilities and offline-readiness state remain pending.
+- Package 3: A03 and A10 are done (above). A11's persistent-storage request, capability state and backup reminder are done (A11 update above); offline shell, cached capabilities and offline-readiness state remain pending.
 - Package 4: A06 is done (2026-09-28 update above). A07's unchanged-query refresh is covered; its remaining worker protocol/lifecycle work is pending.
-- Package 5: A04 (500-edge Stepped diagram makes a 52,311 px page), A05 (3,000-section Markdown), A08 (PDF zoom memory), R01–R04.
+- Package 5: R03's PDF keyboard isolation is done (latest update above); its outline work remains pending. A04 (500-edge Stepped diagram makes a 52,311 px page), A05 (3,000-section Markdown), A08 (PDF zoom memory), R01–R02 and R04 remain pending.
 - Package 6: B01–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
-- Package 7: A09 is done (latest update above); broader UX items remain pending.
+- Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
 - Package 8: A12 (Gemini models, not yet checked against Google's current list), B04, B05, R05, R06, and the lint debt (76 errors).
 
