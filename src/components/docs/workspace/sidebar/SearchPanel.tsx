@@ -10,6 +10,11 @@ export interface SearchPanelState {
   hits: SearchHit[];
   pending: boolean;
   loadingWorkspaces: string[];
+  /** The current workspace hasn't been indexed yet, so "no results" would
+   *  be premature. */
+  indexing: boolean;
+  error: "search" | "index" | null;
+  onRetry: () => void;
   onSelectHit: (hit: SearchHit) => void;
   workspaceName: (id: string) => string;
   onClose: () => void;
@@ -133,6 +138,9 @@ export function SearchPanel({
   hits,
   pending,
   loadingWorkspaces,
+  indexing,
+  error,
+  onRetry,
   onSelectHit,
   workspaceName,
   onClose,
@@ -208,7 +216,30 @@ export function SearchPanel({
             Searching…
           </div>
         )}
-        {!pending && query.trim() && totalMatches === 0 && (
+        {!pending && error && (
+          <div
+            role="alert"
+            className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm"
+          >
+            <p className="text-foreground">
+              {error === "search"
+                ? "Search couldn’t run."
+                : "Some documents couldn’t be indexed, so results may be incomplete."}
+            </p>
+            <button
+              onClick={onRetry}
+              className="coarse:min-h-11 mt-1 rounded-md text-sm font-medium text-primary hover:underline"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+        {!pending && error !== "search" && query.trim() && totalMatches === 0 && indexing && (
+          <div role="status" className="py-12 text-center text-sm text-muted-foreground">
+            Indexing documents…
+          </div>
+        )}
+        {!pending && error !== "search" && query.trim() && totalMatches === 0 && !indexing && (
           <div className="py-12 text-center text-sm text-muted-foreground">
             No results for "{query}"
           </div>

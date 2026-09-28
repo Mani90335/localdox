@@ -120,15 +120,44 @@ interface FileCacheEntry {
  *  One shared index (rather than one per workspace) is what makes BM25
  *  ranking comparable across workspaces when cross-workspace search is on —
  *  scores from separate indexes can't be merged meaningfully, but scores
- *  within one index, filtered by `where`, can. */
+ *  within one index, filtered by `where`, can.
+ *
+ *  Operations run one at a time, in the order they were called. A sync
+ *  yields between batches, so without this two syncs of one workspace would
+ *  both replace the same rows (one fails on a duplicate id and the older
+ *  content stays), a drop mid-sync would orphan rows the cache no longer
+ *  knows, and a search would see a half-applied sync. */
 export class DocumentIndex {
   private db: AnyOrama = create({
     schema: rowSchema,
     components: { tokenizer: { language: "english", stemming: true } },
   });
   private cache = new Map<string, Map<string, FileCacheEntry>>();
+  private queue: Promise<unknown> = Promise.resolve();
+  private generation = 0;
 
-  async syncWorkspace(workspaceId: string, files: SearchFile[]): Promise<void> {
+  private exclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(operation);
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Brings the workspace's rows in line with `files`. Resolves with the
+   *  index generation afterwards, which advances only when rows changed. */
+  syncWorkspace(workspaceId: string, files: SearchFile[]): Promise<number> {
+    return this.exclusive(async () => {
+      try {
+        if (await this.applySync(workspaceId, files)) this.generation++;
+      } catch (error) {
+        // Earlier batches may have applied; results can differ from before.
+        this.generation++;
+        throw error;
+      }
+      return this.generation;
+    });
+  }
+
+  private async applySync(workspaceId: string, files: SearchFile[]): Promise<boolean> {
     let workspaceCache = this.cache.get(workspaceId);
     if (!workspaceCache) {
       workspaceCache = new Map();
@@ -173,20 +202,30 @@ export class DocumentIndex {
       }
       if (i + FILES_PER_INSERT_BATCH < changed.length) await yieldToMainThread();
     }
+    return staleIds.length > 0 || changed.length > 0;
   }
 
-  async dropWorkspace(workspaceId: string): Promise<void> {
-    const workspaceCache = this.cache.get(workspaceId);
-    if (!workspaceCache) return;
-    const ids = [...workspaceCache.values()].flatMap((entry) => entry.rowIds);
-    if (ids.length) await removeMultiple(this.db, ids);
-    this.cache.delete(workspaceId);
+  /** Removes every row for the workspace. Resolves with the generation. */
+  dropWorkspace(workspaceId: string): Promise<number> {
+    return this.exclusive(async () => {
+      const workspaceCache = this.cache.get(workspaceId);
+      if (!workspaceCache) return this.generation;
+      const ids = [...workspaceCache.values()].flatMap((entry) => entry.rowIds);
+      if (ids.length) await removeMultiple(this.db, ids);
+      this.cache.delete(workspaceId);
+      return ++this.generation;
+    });
   }
 
-  async search(
+  /** Searches after every sync or drop called before it has applied. */
+  search(query: string, workspaceIds: string[], limit = SEARCH_RESULT_LIMIT): Promise<SearchHit[]> {
+    return this.exclusive(() => this.runSearch(query, workspaceIds, limit));
+  }
+
+  private async runSearch(
     query: string,
     workspaceIds: string[],
-    limit = SEARCH_RESULT_LIMIT,
+    limit: number,
   ): Promise<SearchHit[]> {
     const term = query.trim();
     if (!term || !workspaceIds.length) return [];

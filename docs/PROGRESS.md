@@ -1,4 +1,138 @@
-Latest update — 2026-09-28 (A11 offline shell and offline readiness)
+Latest update — 2026-09-28 (A07 search worker protocol and lifecycle)
+
+Completed A07, and with it Package 4 (A06 was done earlier). Search requests
+now settle on every path. Mutations apply in order, and a replaced worker
+starts with clean bookkeeping.
+
+Before (measured on HEAD):
+- DocumentIndex ran operations concurrently (the worker started a handler per
+  message), and a sync yields between 15-file batches. Probe, 40 files:
+  - Two back-to-back syncs: the newer one threw DOCUMENT_ALREADY_EXISTS, and
+    the index kept the older draft.
+  - A drop racing a sync left 40 orphaned rows. The cache no longer knew
+    them, and their ids are deterministic, so a later re-sync would collide.
+  - A search issued mid-sync saw 15 of 40 files.
+- Closing search terminated the worker but kept syncedIds, so reopening it
+  with "Search all workspaces" skipped the other workspaces: no results.
+- A worker "error" reply left the panel on "Searching…" forever.
+- Turning all-workspaces off while another workspace was indexing left
+  "Indexing 1 other workspace…" on screen permanently.
+- Initial indexing showed "No results", the same as a finished empty search.
+- A terminated worker left per-request listeners and promises pending.
+
+Fix:
+- DocumentIndex (src/lib/search/document-index.ts) runs sync/drop/search
+  one at a time, in call order. It keeps an index generation that advances
+  only when rows change; sync and drop resolve with it.
+- src/lib/search/protocol.ts: request/response types and
+  handleSearchRequest. Every request gets exactly one reply: ack
+  (with generation), hits, or a terminal error carrying the message. The
+  worker file only wires it up.
+- src/lib/search/search-client.ts: one client per backend (worker or
+  main-thread fallback), used by both.
+  - A single message listener; pending requests are keyed by reqId.
+  - An error reply rejects only that request.
+  - A worker error or messageerror terminates the worker, rejects every
+    pending request and reports the failure once (the hook then switches to
+    the fallback).
+  - close() rejects in-flight work, and a closed fallback never delivers a
+    stale result.
+- use-search-index.ts: each backend is a session with its own indexed-set,
+  so reopening or falling back re-indexes everything.
+  - The query reruns when an acknowledged generation advances (not on
+    no-op syncs).
+  - Other-workspace loads are ref-counted and never abandoned mid-claim.
+  - A load checks, after reading storage, whether it is still wanted. It
+    skips a workspace that became current, whose live files are newer.
+  - The "Indexing N other workspaces" indicator only counts workspaces
+    still requested.
+- SearchPanel shows "Indexing documents…" (status) instead of "No results"
+  until the current workspace is indexed. A failed search, or indexing that
+  failed, shows a persistent alert with "Try again".
+
+Validation:
+- Unit: 4 new DocumentIndex tests (overlapping syncs, a drop mid-sync then
+  re-sync, a search mid-sync, generation and recovery after a failed op);
+  all 4 fail against HEAD's document-index.ts. 8 new tests in
+  tests/search-client.test.ts, on a fake worker that answers like the real
+  one:
+  - out-of-order replies, one listener
+  - an error reply rejecting only its own request
+  - worker error and messageerror: all pending settle, failure reported
+    once, listeners removed, late replies ignored
+  - close
+  - a postMessage clone failure
+  - a burst of edits, a drop and a search through a real index
+  - the main-thread client
+  npm test: 261/261.
+- Browser (tests/e2e/search.spec.ts, production preview): 4 new tests, plus
+  the held-initial-sync test now asserting "Indexing documents…". Against a
+  HEAD build, 4 fail at their intended assertions:
+  - "Indexing documents…" is absent
+  - alpha.md is missing from the other workspace after reopening
+  - the indicator is still shown after turning all-workspaces off
+  - no alert appears after an error reply (HEAD stays on "Searching…")
+  The fifth, a worker crashed mid-search (uncaught error inside the real
+  worker) falling back and still answering, also passes on HEAD. HEAD
+  already fell back on a worker error event, so this is coverage, not a
+  regression proof. The spec passes 7/7 on the fixed build, and 21/21 with
+  --repeat-each=3.
+  - The tests control the real worker through a Worker subclass: they hold
+    replies (not requests, so the worker still sees the app's order),
+    inject the protocol's error reply, or hold searches.
+  - Harness fixes during development: the new "Archive" workspace is
+    imported through Settings. The helper waits for it in IndexedDB
+    before navigating, and the test then switches to it whichever
+    workspace reopens. The crash test enters edit mode before search takes
+    over the sidebar.
+- npm run typecheck, npm run build, focused ESLint and Prettier on every
+  changed file pass.
+- Full production Playwright suite (fixed build): 75 passed, 1 skipped
+  (dev-only), 3 failed.
+  - mobile-navigation "close button and backdrop" and viewers "spreadsheet
+    controls…" are the known failures recorded above.
+  - The third, offline "a fresh install imports…" (the save indicator
+    stayed "Changes pending" after an offline import), is pre-existing
+    flakiness. The test never opens search, so this hook creates no worker.
+    Repeating offline.spec.ts ×4 with nothing else on the port gave 2/28
+    failures on the fixed build and 3/28 on a HEAD build. The same two
+    tests failed at the same lines on both: that one, and the deep-link
+    Storage tab click at line 167. That flakiness is worth its own fix.
+  - Another Claude session ran the suite on the same port from about 14:16
+    to 14:25. My full run ended at 14:15:57, before it; the offline repeats
+    that overlapped were discarded and rerun afterwards.
+- Chrome DevTools MCP, in an isolated context against the production
+  preview:
+  - With alpha.md in "My workspace" and Archive current, "Search all
+    workspaces" found alpha.md. After closing and reopening search, it was
+    found again (the HEAD failure).
+  - With a search error reply injected through an init script, the
+    assertive "Search couldn’t run." alert appeared with Try again. Once
+    the injection was off, Try again returned the result and cleared the
+    alert.
+  - The only console message was the warning for the injected failure.
+
+Environment: the HEAD comparison was built in a detached git worktree with
+node_modules symlinked. Building both trees at once shared Nitro/Vite caches
+under node_modules, and the HEAD server manifest pointed at the other build's
+asset hashes (every page 404'd its chunks). Sequential builds fixed it. While
+this work was in progress, something outside this session removed the
+"Historical working-tree note" paragraph at the end of this file. That
+removal was kept as found.
+
+Limits:
+- A worker that stops silently (self.close(), or a kill with no error event)
+  is not detected. There is no request watchdog, because a large first sync
+  has no bound.
+- Other workspaces are indexed from storage once per session. Edits made to
+  them in another tab appear after search is closed and reopened.
+- An "index" alert stays until Try again, even if a later automatic re-sync
+  succeeds.
+- No search latency budget on the 1,000-document corpus and no non-English
+  text case: the PLAN gate's timing half is not measured here.
+- Chromium desktop only.
+
+Previous update — 2026-09-28 (A11 offline shell and offline readiness)
 
 Completed A11's offline half, and with it Package 3's offline criterion. On a
 production build, a populated workspace reopens with no network and the HTTP
@@ -484,7 +618,7 @@ Limits: everything ran on Chromium on this machine. I haven't tested Safari, Fir
 Pending (not started, or started but not committed)
 
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
-- Package 4: A06 is done (2026-09-28 update above). A07's unchanged-query refresh is covered; its remaining worker protocol/lifecycle work is pending.
+- Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
 - Package 5: R03's PDF keyboard isolation is done (R03 update above); its outline work remains pending. A04 (500-edge Stepped diagram makes a 52,311 px page), A05 (3,000-section Markdown), A08 (PDF zoom memory), R01–R02 and R04 remain pending.
 - Package 6: B01 is done (latest update above); B02–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
@@ -494,8 +628,3 @@ Pending (not started, or started but not committed)
 None of PLAN.md's release gates are formally met yet. A01–A03 and A09/A10 now have passing reproductions, which is what the reliability gate asks for, and Package 3's offline criterion now has a passing reproduction too.
 
 Historical working-tree note (superseded by the clean-tree check on 2026-09-28)
-
-At the earlier update, another Claude session and a Codex process were editing
-12 files, including DocsApp.tsx, the office viewers, ConversionContext.tsx and
-viewers.spec.ts. Those changes were left untouched by the earlier audit fixes.
-The working tree was clean when the A06 work above began.

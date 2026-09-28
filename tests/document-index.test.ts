@@ -120,3 +120,72 @@ test("a large file indexes without throwing and results stay bounded", async () 
   assert.ok(hits.length > 0 && hits.length <= 200);
   assert.deepEqual(await index.search("  ", ["w1"]), []);
 });
+
+// A07: the worker starts a handler per message without waiting for the last
+// one, and a sync yields between batches. These run operations the way the
+// worker does: all started at once, never awaited in between.
+
+/** More files than one insert batch, so a sync yields partway through. */
+function corpus(tag: string, count = 40) {
+  return Array.from({ length: count }, (_, i) => ({
+    id: String(i),
+    name: `f${i}.md`,
+    content: `${tag} line ${i}`,
+  }));
+}
+
+test("overlapping syncs of one workspace apply in order and the last one wins", async () => {
+  const index = new DocumentIndex();
+  await index.syncWorkspace("w1", corpus("original"));
+  const results = await Promise.allSettled([
+    index.syncWorkspace("w1", corpus("draftone")),
+    index.syncWorkspace("w1", corpus("drafttwo")),
+  ]);
+  assert.deepEqual(
+    results.map((result) => result.status),
+    ["fulfilled", "fulfilled"],
+    "neither sync may fail on a duplicate row id",
+  );
+  assert.equal((await index.search("original", ["w1"])).length, 0);
+  assert.equal((await index.search("draftone", ["w1"])).length, 0, "no stale draft rows");
+  assert.equal(new Set((await index.search("drafttwo", ["w1"])).map((hit) => hit.fileId)).size, 40);
+});
+
+test("a drop sent during a sync removes every row, and the workspace can be synced again", async () => {
+  const index = new DocumentIndex();
+  const [synced, dropped] = await Promise.all([
+    index.syncWorkspace("w1", corpus("other")),
+    index.dropWorkspace("w1"),
+  ]);
+  assert.deepEqual(await index.search("other", ["w1"]), [], "no orphaned rows");
+  assert.ok(dropped > synced, "the drop applies after the sync");
+
+  await index.syncWorkspace("w1", corpus("again"));
+  assert.equal(new Set((await index.search("again", ["w1"])).map((hit) => hit.fileId)).size, 40);
+  assert.deepEqual(await index.search("other", ["w1"]), []);
+});
+
+test("a search sent during a sync sees the whole sync", async () => {
+  const index = new DocumentIndex();
+  const sync = index.syncWorkspace("w1", corpus("partial", 100));
+  const hits = await index.search("partial", ["w1"]);
+  await sync;
+  assert.equal(new Set(hits.map((hit) => hit.fileId)).size, 100);
+});
+
+test("the generation advances only when rows change and a failed op doesn't block later ones", async () => {
+  const index = new DocumentIndex();
+  const files = [{ id: "1", name: "a.md", content: "alpha" }];
+  const first = await index.syncWorkspace("w1", files);
+  assert.equal(await index.syncWorkspace("w1", files), first, "an unchanged sync");
+  const renamed = await index.syncWorkspace("w1", [{ ...files[0], name: "b.md" }]);
+  assert.ok(renamed > first);
+  assert.equal(await index.dropWorkspace("never-synced"), renamed);
+
+  const broken = index.syncWorkspace("w2", [
+    { id: "x", name: "x.md", content: null as unknown as string },
+  ]);
+  const after = index.search("alpha", ["w1"]);
+  await assert.rejects(broken);
+  assert.equal((await after).length, 1, "the queue keeps going after a failure");
+});

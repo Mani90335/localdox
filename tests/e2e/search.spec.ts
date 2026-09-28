@@ -114,7 +114,9 @@ test("an unchanged query refreshes when initial worker indexing finishes after t
   });
   await upload(page);
   await openSearch(page, "constant");
-  await expect(page.locator("aside")).toContainText('No results for "constant"');
+  // Indexing in progress is not "no results".
+  await expect(page.locator("aside").getByRole("status")).toHaveText("Indexing documents…");
+  await expect(page.locator("aside")).not.toContainText("No results");
   await page.evaluate(() =>
     (window as unknown as { releaseSearchSync(): void }).releaseSearchSync(),
   );
@@ -122,4 +124,270 @@ test("an unchanged query refreshes when initial worker indexing finishes after t
     page.locator("aside").getByRole("button", { name: "constant content", exact: true }),
   ).toBeVisible();
   await expect(page.getByPlaceholder("Search all documents...")).toHaveValue("constant");
+});
+
+// A07: search worker lifecycle. The worker wrapper below lets a test hold
+// the replies to syncs of a named file's workspace, answer searches with the
+// worker protocol's error reply, or hold searches, all without touching the
+// app's code. Replies are held rather than requests so the worker still sees
+// every message in the order the app sent it.
+const searchWorkerControls = () => {
+  const state = {
+    holdSyncOf: "" as string,
+    failSearches: false,
+    holdSearches: false,
+    deferred: [] as Array<() => void>,
+  };
+  Object.assign(window, {
+    searchWorker: {
+      set(patch: Partial<typeof state>) {
+        Object.assign(state, patch);
+      },
+      release() {
+        state.holdSyncOf = "";
+        state.deferred.splice(0).forEach((deliver) => deliver());
+      },
+    },
+  });
+  const NativeWorker = window.Worker;
+  window.Worker = class extends NativeWorker {
+    private search: boolean;
+    private held = new Set<number>();
+    private wrapped = new Map<unknown, EventListener>();
+    constructor(url: string | URL, options?: WorkerOptions) {
+      super(url, options);
+      this.search = String(url).includes("document-index");
+    }
+    postMessage(message: unknown) {
+      const request = message as {
+        reqId: number;
+        type: string;
+        files?: { name: string }[];
+      };
+      if (this.search && request.type === "search" && state.failSearches) {
+        setTimeout(() =>
+          this.dispatchEvent(
+            new MessageEvent("message", {
+              data: { reqId: request.reqId, type: "error", message: "Test: search failed" },
+            }),
+          ),
+        );
+        return;
+      }
+      if (this.search && request.type === "search" && state.holdSearches) return;
+      if (
+        this.search &&
+        request.type === "sync" &&
+        state.holdSyncOf &&
+        request.files?.some((file) => file.name === state.holdSyncOf)
+      )
+        this.held.add(request.reqId);
+      super.postMessage(message);
+    }
+    addEventListener(
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: unknown,
+    ) {
+      if (type !== "message" || !this.search || typeof listener !== "function")
+        return super.addEventListener(type, listener, options as AddEventListenerOptions);
+      const wrapped: EventListener = (event) => {
+        const reqId = (event as MessageEvent).data?.reqId;
+        if (state.holdSyncOf && this.held.has(reqId))
+          state.deferred.push(() => listener.call(this, event));
+        else listener.call(this, event);
+      };
+      this.wrapped.set(listener, wrapped);
+      super.addEventListener(type, wrapped, options as AddEventListenerOptions);
+    }
+    removeEventListener(
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: unknown,
+    ) {
+      super.removeEventListener(
+        type,
+        (this.wrapped.get(listener) ?? listener) as EventListener,
+        options as EventListenerOptions,
+      );
+    }
+  };
+};
+
+type Controls = {
+  searchWorker: {
+    set(patch: { holdSyncOf?: string; failSearches?: boolean; holdSearches?: boolean }): void;
+    release(): void;
+  };
+};
+
+async function controlSearchWorker(
+  page: Page,
+  patch: Parameters<Controls["searchWorker"]["set"]>[0],
+) {
+  await page.evaluate((p) => (window as unknown as Controls).searchWorker.set(p), patch);
+}
+
+const archive = {
+  format: "localdox-workspace",
+  version: 2,
+  workspace: {
+    id: "archive",
+    name: "Archive",
+    createdAt: 1,
+    updatedAt: 1,
+    folders: [],
+    files: [
+      {
+        id: "archived",
+        name: "archived.md",
+        content: "# Archived\n\nold shelved note\n",
+        kind: "markdown",
+        addedAt: 1,
+      },
+    ],
+    bookmarks: [],
+    saved: [],
+    highlights: [],
+    ui: { activeFileId: "archived", expanded: {}, sidebarCollapsed: false, scrollTop: 0 },
+  },
+};
+
+/** alpha.md in the first workspace, then "Archive" imported and current, so
+ *  alpha.md is only reachable through "Search all workspaces". */
+async function twoWorkspaces(page: Page) {
+  await upload(page);
+  await page.goto("/settings");
+  await page.getByRole("tab", { name: "Workspace" }).click();
+  await page.locator('input[type="file"][accept="application/json,.json"]').setInputFiles({
+    name: "archive.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(archive)),
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          new Promise<string[]>((resolve, reject) => {
+            const request = indexedDB.open("localdox");
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+              const all = request.result
+                .transaction("workspaces")
+                .objectStore("workspaces")
+                .getAll();
+              all.onsuccess = () => {
+                request.result.close();
+                resolve(all.result.map((w: { name: string }) => w.name));
+              };
+            };
+          }),
+      ),
+    )
+    .toContain("Archive");
+  await page.goto("/");
+  // Which workspace reopens depends on whether the import's switch was
+  // saved before navigating; either way, end up in Archive.
+  const switchToArchive = page.getByRole("button", { name: "A Archive" });
+  await expect(
+    switchToArchive.or(page.getByRole("button", { name: "Settings for Archive" })),
+  ).toBeVisible();
+  if (await switchToArchive.isVisible()) await switchToArchive.click();
+  await expect(page.getByRole("heading", { name: "Archived", exact: true })).toBeVisible();
+}
+
+async function setAllWorkspaces(page: Page, on: boolean) {
+  await page.getByRole("checkbox", { name: "Search all workspaces" }).setChecked(on);
+}
+
+test("other workspaces are indexed again after search is closed and reopened", async ({ page }) => {
+  await twoWorkspaces(page);
+  const results = page.locator("aside");
+  await openSearch(page, "constant");
+  await setAllWorkspaces(page, true);
+  await expect(results.getByRole("button", { name: /^alpha\.md/ })).toBeVisible();
+
+  // Closing search ends that worker; the next one starts empty.
+  await page.getByRole("button", { name: "Close search" }).click();
+  await expect(page.getByPlaceholder("Search all documents...")).toHaveCount(0);
+  await openSearch(page, "constant");
+  await setAllWorkspaces(page, true);
+  await expect(results.getByRole("button", { name: /^alpha\.md/ })).toBeVisible();
+  await page.getByPlaceholder("Search all documents...").fill("shelved");
+  await expect(results.getByRole("button", { name: /^archived\.md/ })).toBeVisible();
+});
+
+test("turning all-workspaces off while another workspace is indexing settles the indicator", async ({
+  page,
+}) => {
+  await page.addInitScript(searchWorkerControls);
+  await twoWorkspaces(page);
+  const results = page.locator("aside");
+  await controlSearchWorker(page, { holdSyncOf: "alpha.md" });
+  await openSearch(page, "constant");
+  await setAllWorkspaces(page, true);
+  await expect(results.getByText("Indexing 1 other workspace…")).toBeVisible();
+
+  await setAllWorkspaces(page, false);
+  await expect(results.getByText(/Indexing \d+ other workspace/)).toHaveCount(0);
+  await expect(results).toContainText('No results for "constant"');
+  await page.evaluate(() => (window as unknown as Controls).searchWorker.release());
+  await expect(results.getByText(/Indexing \d+ other workspace/)).toHaveCount(0);
+  // The late sync was followed by the drop, so alpha.md stays out.
+  await page.getByPlaceholder("Search all documents...").fill("content");
+  await expect(results).toContainText('No results for "content"');
+
+  await setAllWorkspaces(page, true);
+  await expect(results.getByRole("button", { name: /^alpha\.md/ })).toBeVisible();
+  await expect(results.getByText(/Indexing \d+ other workspace/)).toHaveCount(0);
+});
+
+test("a search the worker reports as failed is shown and can be retried", async ({ page }) => {
+  await page.addInitScript(searchWorkerControls);
+  await upload(page);
+  await controlSearchWorker(page, { failSearches: true });
+  await openSearch(page, "constant");
+  const results = page.locator("aside");
+  await expect(results.getByRole("alert")).toContainText("Search couldn’t run.");
+  await expect(results.getByText("Searching…")).toHaveCount(0);
+  await expect(results).not.toContainText("No results");
+
+  await controlSearchWorker(page, { failSearches: false });
+  await results.getByRole("button", { name: "Try again" }).click();
+  await expect(
+    results.getByRole("button", { name: "constant content", exact: true }),
+  ).toBeVisible();
+  await expect(results.getByRole("alert")).toHaveCount(0);
+});
+
+test("a search worker that crashes mid-search falls back and still answers", async ({ page }) => {
+  await page.addInitScript(searchWorkerControls);
+  await upload(page);
+  await page.getByRole("button", { name: "Options", exact: true }).first().click();
+  await page.getByText("Edit", { exact: true }).click();
+  const workerStarted = page.waitForEvent("worker", (w) => w.url().includes("document-index"));
+  await openSearch(page, "constant");
+  const results = page.locator("aside");
+  await expect(
+    results.getByRole("button", { name: "constant content", exact: true }),
+  ).toBeVisible();
+  const worker = await workerStarted;
+
+  await controlSearchWorker(page, { holdSearches: true });
+  await page.getByPlaceholder("Search all documents...").fill("topic");
+  await expect(results.getByText("Searching…")).toBeVisible();
+  const closed = new Promise<void>((resolve) => worker.once("close", () => resolve()));
+  await worker.evaluate(() => {
+    setTimeout(() => {
+      throw new Error("Test: search worker crashed");
+    });
+  });
+  await closed;
+  await expect(results.getByRole("button", { name: "Topic", exact: true })).toBeVisible();
+  await expect(results.getByText("Searching…")).toHaveCount(0);
+
+  // The main-thread index keeps following edits.
+  await page.locator("textarea").fill("# Topic\n\nfreshly typed\n");
+  await page.getByPlaceholder("Search all documents...").fill("freshly");
+  await expect(results.getByRole("button", { name: "freshly typed", exact: true })).toBeVisible();
 });
