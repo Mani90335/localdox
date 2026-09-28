@@ -15,6 +15,8 @@ import type { GpuPlayer } from "./engine/gpu-player";
 import { zoomCeiling } from "./engine/zoom";
 import { Tray, TrayButton, ZoomControls } from "./Mermaid";
 import { useSvgViewport } from "./use-svg-viewport";
+import { prefersReducedMotion, useStageVisibility } from "./use-stage-visibility";
+import { PUBLISH_MS } from "./explainer/clock";
 import {
   TALL_STAGE_RATIO,
   clampStageRatio,
@@ -126,11 +128,30 @@ export function MermaidExplainer({
     beat: 0,
     beatCount: 0,
   });
+  // Off screen or in a background tab, the player keeps its play state but
+  // draws nothing; it carries on from the same moment when it is seen again.
+  const visibleRef = useStageVisibility(hostRef, (visible) =>
+    playerRef.current?.setVisible(visible),
+  );
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     let disposed = false;
+    /**
+     * Start a player that is ready. It plays from the top, unless the system
+     * asks for reduced motion: then it opens on the whole picture, paused,
+     * and Play (or stepping back) walks through it on request.
+     */
+    const start = (player: ExplainerPlayer | GpuPlayer) => {
+      playerRef.current = player;
+      setFollowing(player.following);
+      player.setSpeed(speed);
+      player.setVisible(visibleRef.current);
+      setLoading(false);
+      if (prefersReducedMotion()) player.seek(player.duration);
+      else player.play();
+    };
     setLoading(true);
     onError(null);
 
@@ -173,11 +194,7 @@ export function MermaidExplainer({
       });
       minimapRef.current = attachMinimap(renderer, scene, theme, viewport, readableSpan);
       setLarge(true);
-      playerRef.current = player;
-      setFollowing(player.following);
-      player.setSpeed(speed);
-      setLoading(false);
-      player.play();
+      start(player);
     };
 
     const run = async () => {
@@ -264,11 +281,7 @@ export function MermaidExplainer({
           // Through the viewport, so a reader who has taken the view keeps it.
           onFrame: (frame) => viewport.follow(frame),
         });
-        playerRef.current = player;
-        setFollowing(player.following);
-        player.setSpeed(speed);
-        setLoading(false);
-        player.play();
+        start(player);
       } catch (error) {
         if (disposed) return;
         setLoading(false);
@@ -369,6 +382,7 @@ export function MermaidExplainer({
             <Scrubber
               time={state.time}
               duration={state.duration}
+              playing={state.playing}
               onSeek={(time) => playerRef.current?.seek(time)}
             />
             {/* The caption names the step under the playhead. On a diagram of
@@ -487,10 +501,12 @@ function clock(ms: number): string {
 function Scrubber({
   time,
   duration,
+  playing,
   onSeek,
 }: {
   time: number;
   duration: number;
+  playing: boolean;
   onSeek: (time: number) => void;
 }) {
   const barRef = useRef<HTMLDivElement>(null);
@@ -530,7 +546,17 @@ function Scrubber({
         onPointerCancel={() => (dragging.current = false)}
       >
         <div className="h-1 w-full overflow-hidden rounded-full bg-foreground/15">
-          <div className="h-full rounded-full bg-primary" style={{ width: `${share * 100}%` }} />
+          {/* The player publishes about ten times a second while playing, so
+              the bar glides across each interval instead of stepping; a seek
+              or a pause lands at once. Sliding a full-width bar (clipped by
+              the track) keeps its rounded end, which scaling would squash. */}
+          <div
+            className="h-full w-full rounded-full bg-primary transition-transform ease-linear motion-reduce:transition-none"
+            style={{
+              transform: `translateX(${(share - 1) * 100}%)`,
+              transitionDuration: playing ? `${PUBLISH_MS}ms` : "0ms",
+            }}
+          />
         </div>
       </div>
       <span className="shrink-0 text-3xs tabular-nums text-muted-foreground">

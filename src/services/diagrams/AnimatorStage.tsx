@@ -3,6 +3,7 @@ import { LoaderCircle } from "lucide-react";
 import type { MermaidAnimator as MermaidAnimatorInstance } from "mermaid-animator";
 import { largeDiagramMermaidConfig } from "./mermaid-config";
 import { useSvgViewport } from "./use-svg-viewport";
+import { useStageVisibility } from "./use-stage-visibility";
 import { MAX_STAGE_RATIO, MIN_STAGE_RATIO } from "./stage-ratio";
 import { TRAY_GUTTER, ZOOM_LIMIT, quoteErEntities, widthCap } from "./mermaid-diagram-helpers";
 import { ZoomControls } from "./ZoomControls";
@@ -43,6 +44,12 @@ export function AnimatorStage({
   const [loading, setLoading] = useState(true);
   const [ratio, setRatio] = useState<number | null>(null);
   const { state: view, attach, detach, zoomIn, zoomOut, reset } = useSvgViewport();
+  // Flow repaints every frame for as long as it is mounted. Off screen or in a
+  // background tab it holds still, and resumes from the same moment.
+  const visibleRef = useStageVisibility(containerRef, (visible) => {
+    if (visible) animatorRef.current?.resume();
+    else animatorRef.current?.pause();
+  });
 
   useEffect(() => {
     const container = containerRef.current;
@@ -84,6 +91,7 @@ export function AnimatorStage({
         }
         animatorRef.current = animator;
         ownerGenerationRef.current = generation;
+        if (!visibleRef.current) animator.pause();
         // The untouched viewBox is the diagram's natural frame: it is both the
         // aspect ratio the inline stage should take and the zoom baseline.
         const svg = container.querySelector("svg");
@@ -129,7 +137,7 @@ export function AnimatorStage({
     // destroy the animator and lay the whole diagram out again — twice per
     // toggle, since closing did it too. Framing is applied by the effect below
     // instead, against the instance that is already running.
-  }, [code, dark, onError, onRatio, attach, detach]);
+  }, [code, dark, onError, onRatio, attach, detach, visibleRef]);
 
   // Re-frame when the stage changes shape (entering or leaving full screen).
   // Cheap: it writes a viewBox, where a re-create would re-run Mermaid's layout.

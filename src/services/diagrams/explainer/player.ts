@@ -40,6 +40,7 @@ import { canFollow, frameFor, framesEqual, homeFrame } from "./camera";
 import type { CameraView, Frame } from "./camera";
 import { travelDuration, travelFrame } from "./camera-path";
 import { groupBeats, type Beat } from "./beats";
+import { PlaybackClock } from "./clock";
 
 /** A step placed on the timeline. */
 interface ScheduledStep {
@@ -153,19 +154,14 @@ export class ExplainerPlayer {
   private settledThrough = 0;
   /** The beat whose elements currently carry the spotlight; -1 for none. */
   private litBeat = -1;
-  private raf = 0;
-  private lastTick = 0;
-  private time = 0;
-  private playing = false;
-  /** Where a step-forward stops; null while playing straight through. */
-  private stopAt: number | null = null;
-  private speed = 1;
   private appliedFrame: Frame | null = null;
+  /** Time, play state and the frame loop; see clock.ts. */
+  private readonly clock: PlaybackClock;
 
   constructor(
     private readonly graph: ExplainerGraph,
     private readonly plan: ExplainerPlan,
-    private readonly onState: (state: PlayerState) => void,
+    onState: (state: PlayerState) => void,
     private readonly options: PlayerOptions,
   ) {
     for (const edge of graph.edges) this.edgesById.set(edge.id, edge);
@@ -233,6 +229,19 @@ export class ExplainerPlayer {
       cursor += FINALE_MS;
     }
     this.total = cursor;
+    this.clock = new PlaybackClock(
+      {
+        draw: (t) => this.render(t),
+        describeAt: (t) => ({
+          index: this.indexAt(t),
+          stepCount: this.schedule.length,
+          beat: this.beatAt(t),
+          beatCount: this.beats.length,
+        }),
+      },
+      this.total,
+      onState,
+    );
     this.prepare();
   }
 
@@ -323,8 +332,7 @@ export class ExplainerPlayer {
 
   /** Restore the SVG to a plain static diagram and drop the clock. */
   destroy(): void {
-    cancelAnimationFrame(this.raf);
-    this.playing = false;
+    this.clock.destroy();
     this.spotlight(-1);
     this.paintedNodes.clear();
     this.paintedEdges.clear();
@@ -649,81 +657,33 @@ export class ExplainerPlayer {
     return this.schedule.length - 1;
   }
 
-  private emit(): void {
-    this.onState({
-      time: this.time,
-      duration: this.duration,
-      playing: this.playing,
-      index: this.indexAt(this.time),
-      stepCount: this.schedule.length,
-      beat: this.beatAt(this.time),
-      beatCount: this.beats.length,
-    });
-  }
-
-  private tick = (now: number): void => {
-    if (!this.playing) return;
-    const delta = this.lastTick === 0 ? 16 : now - this.lastTick;
-    this.lastTick = now;
-    const limit = this.stopAt ?? this.duration;
-    this.time = Math.min(limit, this.time + delta * this.speed);
-    this.render(this.time);
-    if (this.time >= limit) {
-      this.playing = false;
-      this.stopAt = null;
-      this.emit();
-      return;
-    }
-    this.emit();
-    this.raf = requestAnimationFrame(this.tick);
-  };
-
-  private run(): void {
-    this.playing = true;
-    this.lastTick = 0;
-    cancelAnimationFrame(this.raf);
-    this.raf = requestAnimationFrame(this.tick);
-    this.emit();
-  }
-
   play(): void {
-    if (this.playing && this.stopAt === null) return;
-    this.stopAt = null;
-    // Replay from the top rather than sitting at the end.
-    if (this.time >= this.duration) {
-      this.time = 0;
-      this.render(0);
-    }
-    this.run();
+    this.clock.play();
   }
 
   pause(): void {
-    this.stopAt = null;
-    if (!this.playing) return;
-    this.playing = false;
-    cancelAnimationFrame(this.raf);
-    this.emit();
+    this.clock.pause();
   }
 
   toggle(): void {
-    if (this.playing) this.pause();
-    else this.play();
+    this.clock.toggle();
   }
 
   seek(time: number): void {
-    this.time = Math.min(this.duration, Math.max(0, time));
-    this.lastTick = 0;
-    this.render(this.time);
-    this.emit();
+    this.clock.seek(time);
   }
 
   restart(): void {
-    this.seek(0);
-    this.play();
+    this.clock.restart();
   }
 
   setSpeed(speed: number): void {
-    this.speed = speed;
+    this.clock.setSpeed(speed);
+  }
+
+  /** Stop drawing while the stage can't be seen; resume where it left off. */
+  setVisible(visible: boolean): void {
+    this.clock.setVisible(visible);
   }
 
   /**
@@ -740,10 +700,12 @@ export class ExplainerPlayer {
    */
   step(direction: 1 | -1): void {
     if (this.beats.length === 0) return;
+    const { clock } = this;
     if (direction === 1) {
-      if (this.playing && this.stopAt !== null) this.seek(this.stopAt);
-      else if (this.playing) this.pause();
-      const t = this.time;
+      const stopAt = clock.stoppingAt;
+      if (clock.isPlaying && stopAt !== null) clock.seek(stopAt);
+      else if (clock.isPlaying) clock.pause();
+      const t = clock.now;
       if (t >= this.duration) return;
       const current = this.beatAt(t);
       let target: number;
@@ -753,19 +715,18 @@ export class ExplainerPlayer {
         const beat = this.beats[current];
         target = t >= beat.end - 1 ? (this.beats[current + 1]?.end ?? this.duration) : beat.end;
       }
-      this.stopAt = target;
-      this.run();
+      clock.run(target);
       return;
     }
 
-    this.pause();
-    const t = this.time;
+    clock.pause();
+    const t = clock.now;
     let target = 0;
     for (const beat of this.beats) {
       if (beat.end < t - 1) target = beat.end;
       else break;
     }
-    this.seek(target);
+    clock.seek(target);
   }
 
   /** A short human description of the beat, for the caption. */

@@ -11,6 +11,7 @@ import { stepNumber, type ExplainerPlan } from "../explainer/plan";
 import type { PlayerState } from "../explainer/player";
 import { framesEqual, homeFrame, type Frame } from "../explainer/camera";
 import { clampInside } from "../explainer/camera-path";
+import { PlaybackClock } from "../explainer/clock";
 import {
   beatAt,
   buildSchedule,
@@ -119,18 +120,13 @@ function labelShowsNumber(lines: string[] | undefined, number: string): boolean 
 
 export class GpuPlayer {
   private readonly schedule: Schedule;
-  private raf = 0;
-  private lastTick = 0;
-  private time = 0;
-  private playing = false;
-  private stopAt: number | null = null;
-  private speed = 1;
   private appliedFrame: Frame | null = null;
   private destroyed = false;
 
   private readonly renderer: DiagramRenderer;
-  private readonly onState: (state: PlayerState) => void;
   private readonly options: GpuPlayerOptions;
+  /** Time, play state and the frame loop, shared with the SVG player. */
+  private readonly clock: PlaybackClock;
 
   constructor(
     scene: Scene,
@@ -140,7 +136,6 @@ export class GpuPlayer {
     options: GpuPlayerOptions,
   ) {
     this.renderer = renderer;
-    this.onState = onState;
     this.options = options;
     const home = homeFrame(scene.graph);
     const span = options.readableSpan > 0 ? options.readableSpan : 1200;
@@ -174,6 +169,19 @@ export class GpuPlayer {
       }
       renderer.setBadges(numbers);
     }
+    this.clock = new PlaybackClock(
+      {
+        draw: (t, live) => this.render(t, live),
+        describeAt: (t) => ({
+          index: stepAt(this.schedule, t),
+          stepCount: this.schedule.kind.length,
+          beat: beatAt(this.schedule, t),
+          beatCount: this.schedule.beats.length,
+        }),
+      },
+      this.schedule.duration,
+      onState,
+    );
     this.render(0, true);
   }
 
@@ -192,8 +200,7 @@ export class GpuPlayer {
 
   destroy(): void {
     this.destroyed = true;
-    cancelAnimationFrame(this.raf);
-    this.playing = false;
+    this.clock.destroy();
   }
 
   private render(t: number, immediate: boolean): void {
@@ -209,90 +216,45 @@ export class GpuPlayer {
     if (immediate) renderer.render();
   }
 
-  private emit(): void {
-    this.onState({
-      time: this.time,
-      duration: this.duration,
-      playing: this.playing,
-      index: stepAt(this.schedule, this.time),
-      stepCount: this.schedule.kind.length,
-      beat: beatAt(this.schedule, this.time),
-      beatCount: this.schedule.beats.length,
-    });
-  }
-
-  private tick = (now: number): void => {
-    if (!this.playing || this.destroyed) return;
-    const delta = this.lastTick === 0 ? 16 : now - this.lastTick;
-    this.lastTick = now;
-    const limit = this.stopAt ?? this.duration;
-    this.time = Math.min(limit, this.time + delta * this.speed);
-    this.render(this.time, true);
-    if (this.time >= limit) {
-      this.playing = false;
-      this.stopAt = null;
-      this.emit();
-      return;
-    }
-    this.emit();
-    this.raf = requestAnimationFrame(this.tick);
-  };
-
-  private run(): void {
-    this.playing = true;
-    this.lastTick = 0;
-    cancelAnimationFrame(this.raf);
-    this.raf = requestAnimationFrame(this.tick);
-    this.emit();
-  }
-
   play(): void {
-    if (this.playing && this.stopAt === null) return;
-    this.stopAt = null;
-    if (this.time >= this.duration) {
-      this.time = 0;
-      this.render(0, false);
-    }
-    this.run();
+    this.clock.play();
   }
 
   pause(): void {
-    this.stopAt = null;
-    if (!this.playing) return;
-    this.playing = false;
-    cancelAnimationFrame(this.raf);
-    this.emit();
+    this.clock.pause();
   }
 
   toggle(): void {
-    if (this.playing) this.pause();
-    else this.play();
+    this.clock.toggle();
   }
 
   seek(time: number): void {
-    this.time = Math.min(this.duration, Math.max(0, time));
-    this.lastTick = 0;
-    this.render(this.time, false);
-    this.emit();
+    this.clock.seek(time);
   }
 
   restart(): void {
-    this.seek(0);
-    this.play();
+    this.clock.restart();
   }
 
   setSpeed(speed: number): void {
-    this.speed = speed;
+    this.clock.setSpeed(speed);
+  }
+
+  /** Stop drawing while the stage can't be seen; resume where it left off. */
+  setVisible(visible: boolean): void {
+    this.clock.setVisible(visible);
   }
 
   /** One beat forward (played, not jumped) or back (instant), as in the SVG player. */
   step(direction: 1 | -1): void {
     const { beats } = this.schedule;
     if (beats.length === 0) return;
+    const { clock } = this;
     if (direction === 1) {
-      if (this.playing && this.stopAt !== null) this.seek(this.stopAt);
-      else if (this.playing) this.pause();
-      const t = this.time;
+      const stopAt = clock.stoppingAt;
+      if (clock.isPlaying && stopAt !== null) clock.seek(stopAt);
+      else if (clock.isPlaying) clock.pause();
+      const t = clock.now;
       if (t >= this.duration) return;
       const current = beatAt(this.schedule, t);
       let target: number;
@@ -302,18 +264,17 @@ export class GpuPlayer {
         const beat = beats[current];
         target = t >= beat.end - 1 ? (beats[current + 1]?.end ?? this.duration) : beat.end;
       }
-      this.stopAt = Math.max(target, t);
-      this.run();
+      clock.run(Math.max(target, t));
       return;
     }
-    this.pause();
-    const t = this.time;
+    clock.pause();
+    const t = clock.now;
     let target = 0;
     for (const beat of beats) {
       if (beat.end < t - 1) target = Math.max(target, beat.end);
       else break;
     }
-    this.seek(target);
+    clock.seek(target);
   }
 
   describe(beat: number): string {

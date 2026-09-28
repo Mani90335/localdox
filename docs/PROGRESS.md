@@ -1,4 +1,112 @@
-Latest update — 2026-09-28 (B04 stale-chunk recovery without losing work)
+Latest update — 2026-09-28 (R01 diagram players: coarse React updates, stop when unseen, reduced motion)
+
+Completed R01 (Package 5). The Stepped and Flow players no longer re-render
+React every frame, stop drawing when nobody can see them, and Stepped no
+longer starts on its own under reduced motion. R02 (byte-budgeted caches,
+serialized Mermaid config) is not part of this change.
+
+Before (HEAD c93cc27, production build, 1280×800, Playwright + CDP
+Performance.getMetrics over 3 s windows, same script both sides, 3 runs; a
+document with three 40-node Stepped flowcharts):
+- One of the three on screen: 181 requestAnimationFrame callbacks/s, 180
+  scrubber re-renders/s (one React commit per diagram per frame), 26–30 ms of
+  script and 120–133 ms of main-thread tasks per second.
+- All three scrolled off screen: unchanged. 180 frames/s, 180 renders/s,
+  86–111 ms of tasks per second.
+- Reduced motion: every Stepped diagram started playing.
+- Flow (mermaid-animator) painted its dots every frame off screen too
+  (13,500 SVG attribute writes in 1 s in the e2e test below).
+- From reading the code (not measured): returning to a background tab,
+  Stepped would jump ahead by the whole time it was hidden, because the first
+  frame's delta was unbounded.
+
+Fix:
+- src/services/diagrams/explainer/clock.ts (PlaybackClock, new): the
+  transport both players had duplicated (time, play/pause, speed, step
+  targets, the requestAnimationFrame loop), plus:
+  - Drawing still runs every frame. React is told at most every 100 ms
+    (PUBLISH_MS). A beat change is published straight away, never more often
+    than every 50 ms, so the caption turns over with the picture. Play, pause,
+    seek, a step and the end of a run publish at once.
+  - setVisible(false) cancels the frame loop but keeps the play state (the
+    button still says Pause). setVisible(true) resumes from the same moment.
+  - One frame advances the timeline by at most 100 ms (MAX_FRAME_MS), so a
+    long task or a return from hiding can't skip beats.
+  - Nothing is published after destroy().
+- explainer/player.ts (ExplainerPlayer) and engine/gpu-player.ts (GpuPlayer)
+  delegate their transport to the clock. They supply draw(t, live) and
+  describeAt(t). Their public API is unchanged, plus setVisible().
+- use-stage-visibility.ts (new): useStageVisibility uses IntersectionObserver
+  and visibilitychange. prefersReducedMotion() is read when a player starts.
+- MermaidExplainer.tsx:
+  - The player is told when the stage is seen. A player created while hidden
+    waits: a diagram mounted 800 px ahead starts when it is first seen.
+  - Under reduced motion, Stepped opens paused on the finished diagram ("The
+    whole picture"); Play walks through it.
+  - The scrubber fill moves by translateX with a 100 ms linear transition
+    while playing, so 10 Hz updates glide. It snaps on seek or pause, and
+    motion-reduce turns the transition off. translateX, not scaleX, keeps
+    the rounded end.
+- AnimatorStage.tsx (Flow): animator.pause()/resume() on visibility, and a
+  new animator is created paused if it is hidden.
+
+After (same script, fixtures and runs):
+- One on screen: 61 frames/s, 9.7 scrubber renders/s, 7.6–8.9 ms of script
+  and 60–69 ms of tasks per second.
+- All off screen: 0 frames/s, 0 renders/s, 0.1 ms of script and 0.8–1.3 ms
+  of tasks per second.
+- Reduced motion: opens paused (button reads "Play animation").
+- Back on screen: still "Pause", resumed from the held position.
+
+Validation:
+- Unit: tests/playback-clock.test.ts, 9 tests with a fake frame scheduler.
+  They cover publish cadence, beat-change publishing, forced publishes,
+  step-to-target, hidden/visible resume without a jump, play while hidden,
+  the frame clamp, speed, and destroy.
+  - Mutation checks: removing the throttle, the beat fast path, the
+    visibility check, the frame clamp or the lastTick reset on show each fails
+    a test.
+  - npm test: 368/368.
+- Browser: tests/e2e/diagram-players.spec.ts, 5 tests, production preview:
+  - Stepped SVG: the picture keeps animating (>60 SVG writes in 2 s) while
+    the controls render 8–30 times. Off screen: zero SVG and scrubber writes
+    and fewer than 10 frame callbacks in 1.5 s. It resumes from the held
+    position.
+  - Stepped GPU (600-edge chain): stops off screen, resumes on screen.
+  - Background tab (visibilityState overridden and the event dispatched):
+    no writes; resumes.
+  - Flow: no SVG writes off screen; moves again on screen.
+  - Reduced motion: opens paused on the whole picture with nothing hidden,
+    and Play starts it.
+  - 15/15 with --repeat-each=3. Against the HEAD build, all five fail on
+    substance: 120 and 95 control renders, 98 SVG writes while hidden, 13,500
+    Flow writes off screen, and "Pause animation" under reduced motion.
+- Existing diagram-modes.spec passes. Full production suite: see below.
+- Chrome DevTools MCP, production preview, isolated context, two-diagram
+  document loaded through DataTransfer:
+  - Stepped on screen: 60 frames/s, 9.5 control renders/s, 112 SVG writes/s.
+  - Scrolled to the end: 0 / 0 / 0. The position held at 0:11 of 0:54, still
+    "Pause animation". Back on screen it continued from 0:11.
+  - A screenshot with the transport focused: scrubber, rounded fill, caption
+    "8/16 Step 7 → Step 14, …" and controls render correctly.
+  - No console errors, warnings or issues.
+- npm run typecheck, npm run build, ESLint (0 errors, 0 warnings) and
+  Prettier on every changed file pass.
+- Documentation: documentation/diagram-playback.md.
+
+Limits:
+- Reduced motion is read when a player starts. Changing the OS setting
+  applies the next time the diagram renders.
+- Flow still plays under reduced motion; it is a mode the reader picks.
+- mermaid-animator can't stop its own frame loop without being destroyed.
+  While paused, its callback returns without painting, so the cost is near
+  zero, but not zero frames.
+- The frame clamp means a device below 10 fps plays the walkthrough slower
+  than real time rather than skipping beats.
+- Chromium only. No real phones or low-power devices were measured, and there
+  is no frame-rate measurement against PLAN.md's 60/30 fps targets.
+
+Earlier update — 2026-09-28 (B04 stale-chunk recovery without losing work)
 
 Completed B04 (Package 8). When a lazily loaded chunk fails, the page no
 longer reloads straight away. It finds out why, saves first, and reloads by
@@ -1496,11 +1604,11 @@ Pending (not started, or started but not committed)
 
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
-- Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04's spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) is done (latest update); its bounded mass-import queue in DocsApp.tsx remains. A05 (3,000-section Markdown) and R01–R02 remain pending.
+- Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04's spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) is done (latest update); its bounded mass-import queue in DocsApp.tsx remains. R01 (diagram players: coarse React updates, no frames while unseen, reduced motion) is done (latest update). A05 (3,000-section Markdown) and R02 (byte-budgeted diagram caches, serialized Mermaid configuration) remain pending.
 - Package 6: B01 is done (latest update above); B02–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
-- Package 8: R06 is done (latest update). B04 is done (latest update). A12 (Gemini models, not yet checked against Google's current list), B05, R05 and the lint debt (76 errors) remain.
+- Package 8: R06 is done (latest update). B04 is done (B04 update above). A12 (Gemini models, not yet checked against Google's current list), B05, R05 and the lint debt (76 errors) remain.
 
 None of PLAN.md's release gates are formally met yet. A01–A03 and A09/A10 now have passing reproductions, which is what the reliability gate asks for, and Package 3's offline criterion now has a passing reproduction too.
 
