@@ -1,6 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
 import path from "node:path";
 
+async function convert(page: Page, again = false) {
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  await page
+    .getByRole("menuitem", { name: again ? /^Convert again/ : /^Convert to Markdown/ })
+    .click();
+}
+
 async function storedFiles(
   page: Page,
 ): Promise<import("../../src/lib/persistence").PersistedFile[]> {
@@ -49,11 +56,9 @@ test("convert, edit, repeat, reload and compare while preserving the original", 
       mimeType: "text/csv",
       buffer: Buffer.from("Name,Count\nApples,4\nPears,2\n"),
     });
-  await expect(
-    page.getByRole("button", { name: "Convert to Markdown", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Export", exact: true })).toBeVisible();
   const original = (await storedFiles(page))[0];
-  await page.getByRole("button", { name: "Convert to Markdown", exact: true }).click();
+  await convert(page);
   await expect(page.getByText("Converted from table.csv", { exact: true })).toBeVisible();
   await expect.poll(async () => (await storedFiles(page)).length).toBe(2);
   const copy = (await storedFiles(page)).find((f) => f.derivedFrom);
@@ -70,7 +75,7 @@ test("convert, edit, repeat, reload and compare while preserving the original", 
     .poll(async () => (await storedFiles(page)).find((f) => f.id === copy.id)?.content)
     .toContain("Keep these edits");
   await page.getByRole("button", { name: "Open original", exact: true }).click();
-  await page.getByRole("button", { name: "Convert again", exact: true }).click();
+  await convert(page, true);
   await expect.poll(async () => (await storedFiles(page)).length).toBe(3);
   expect((await storedFiles(page)).find((f) => f.id === copy.id)?.content).toContain(
     "Keep these edits",
@@ -88,7 +93,7 @@ test("scanned PDFs report OCR locally and create no derivative", async ({ page }
     .locator('input[type="file"]')
     .first()
     .setInputFiles(path.resolve("tests/fixtures/anydoc/handmade-mixed.pdf"));
-  await page.getByRole("button", { name: "Convert to Markdown", exact: true }).click();
+  await convert(page);
   await expect(page.getByText(/This PDF needs OCR on page 2/)).toBeVisible();
   expect((await storedFiles(page)).length).toBe(1);
 });
@@ -102,12 +107,10 @@ test("cancel and worker-load failure preserve the source", async ({ page }) => {
     .locator('input[type="file"]')
     .first()
     .setInputFiles({ name: "cancel.csv", mimeType: "text/csv", buffer: Buffer.from("A,B\n1,2") });
-  await page.getByRole("button", { name: "Convert to Markdown", exact: true }).click();
+  await convert(page);
   await page.getByRole("button", { name: "Cancel", exact: true }).first().click();
-  await expect(
-    page.getByRole("button", { name: "Convert to Markdown", exact: true }),
-  ).toBeEnabled();
-  await page.getByRole("button", { name: "Convert to Markdown", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Export", exact: true })).toBeEnabled();
+  await convert(page);
   await expect(page.getByText(/local converter could not load/)).toBeVisible();
   expect((await storedFiles(page)).length).toBe(1);
 });
@@ -117,9 +120,7 @@ test("a failed local save leaves no partial Markdown copy", async ({ page }) => 
     .locator('input[type="file"]')
     .first()
     .setInputFiles({ name: "quota.csv", mimeType: "text/csv", buffer: Buffer.from("A,B\n1,2") });
-  await expect(
-    page.getByRole("button", { name: "Convert to Markdown", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Export", exact: true })).toBeVisible();
   const original = (await storedFiles(page))[0];
   await page.evaluate(() => {
     const put = IDBObjectStore.prototype.put;
@@ -132,17 +133,13 @@ test("a failed local save leaves no partial Markdown copy", async ({ page }) => 
       return request;
     };
   });
-  await page.getByRole("button", { name: "Convert to Markdown", exact: true }).click();
+  await convert(page);
   await expect(
     page.getByText("The Markdown copy could not be saved. The original is unchanged."),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Convert to Markdown", exact: true }),
-  ).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Export", exact: true })).toBeEnabled();
   expect(await storedFiles(page)).toEqual([original]);
   await page.reload();
-  await expect(
-    page.getByRole("button", { name: "Convert to Markdown", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Export", exact: true })).toBeVisible();
   expect(await storedFiles(page)).toEqual([original]);
 });

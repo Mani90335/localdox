@@ -83,6 +83,9 @@ function ProviderKeyRow({
   const [saved, setSaved] = useState(false);
   const [reveal, setReveal] = useState(false);
   const [status, setStatus] = useState<"idle" | "checking" | "valid" | "invalid">("idle");
+  // Storage failures stay on screen until the next attempt; a key is only
+  // shown as saved once its write has committed.
+  const [storageError, setStorageError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -99,19 +102,32 @@ function ProviderKeyRow({
 
   const onSave = async () => {
     setStatus("checking");
+    setStorageError(null);
     const ok = await provider.validateKey(value.trim());
-    if (ok) {
-      await setKey(provider.id, value.trim());
-      setSaved(true);
-      setStatus("valid");
-      await onChanged();
-    } else {
+    if (!ok) {
       setStatus("invalid");
+      return;
     }
+    try {
+      await setKey(provider.id, value.trim());
+    } catch {
+      setStatus("idle");
+      setStorageError("Couldn't save the key on this device. Try again.");
+      return;
+    }
+    setSaved(true);
+    setStatus("valid");
+    await onChanged();
   };
 
   const onRemove = async () => {
-    await removeKey(provider.id);
+    setStorageError(null);
+    try {
+      await removeKey(provider.id);
+    } catch {
+      setStorageError("Couldn't remove the key from this device. Try again.");
+      return;
+    }
     setSaved(false);
     setValue("");
     setStatus("idle");
@@ -147,6 +163,7 @@ function ProviderKeyRow({
             onChange={(e) => {
               setValue(e.target.value);
               setStatus("idle");
+              setStorageError(null);
             }}
             placeholder={saved ? "Key saved" : "Paste API key"}
             autoComplete="off"
@@ -184,6 +201,11 @@ function ProviderKeyRow({
       {status === "invalid" && (
         <p className="mt-1.5 text-xs text-destructive">
           That key didn&apos;t validate. Check it and try again.
+        </p>
+      )}
+      {storageError && (
+        <p role="alert" className="mt-1.5 text-xs text-destructive">
+          {storageError}
         </p>
       )}
     </div>

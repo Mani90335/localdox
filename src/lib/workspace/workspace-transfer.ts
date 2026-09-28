@@ -200,9 +200,9 @@ export function transferCounts(plan: TransferPlan): TransferCounts {
 /**
  * Apply a plan to the destination record.
  *
- * Returns a new record rather than mutating, so the caller can write it and
- * only then remove from the source — a failed write leaves both workspaces
- * exactly as they were rather than losing the documents in between.
+ * Returns a new record rather than mutating, so the caller can commit it in
+ * the same transaction as `removeFromSource` — a failed write leaves both
+ * workspaces exactly as they were rather than losing the documents in between.
  */
 export function applyToDestination(
   destination: WorkspaceRecord,

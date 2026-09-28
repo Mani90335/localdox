@@ -111,7 +111,7 @@ function PdfThumbnail({
       <span className="flex aspect-[3/4] w-full items-center justify-center overflow-hidden rounded-sm border border-border bg-white shadow-sm">
         <canvas ref={canvasRef} className="max-h-full max-w-full" />
       </span>
-      <span className="text-[0.6875rem] font-medium text-muted-foreground">{pageNumber}</span>
+      <span className="text-2xs font-medium text-muted-foreground">{pageNumber}</span>
     </button>
   );
 }

@@ -93,6 +93,16 @@
   --color-surface-sunken: var(--surface-sunken);
   --color-surface-raised: var(--surface-raised);
   --color-hairline: var(--hairline);
+  /* Media chrome — see the `--media-*` tokens below for what these back. */
+  --color-media-backdrop: var(--media-backdrop);
+  --color-media-backdrop-foreground: var(--media-backdrop-foreground);
+  /* Two extra steps below Tailwind's `text-xs` (12px), closing the gap that
+     scattered ad hoc `text-[11px]` / `text-[10px]` arbitrary values across the
+     app. Font-size only, deliberately no paired `--text-*--line-height`: every
+     call site already controls its own leading, and adding one here would
+     change it under them. */
+  --text-2xs: 0.6875rem;
+  --text-3xs: 0.625rem;
 }
 
 :root {
@@ -241,6 +251,38 @@
   --code-number: oklch(0.52 0.15 60);
   --code-punct: oklch(0.6 0.02 265);
 
+  /*
+   * Text-highlighter marks, shared with the diagram node-recolour picker
+   * (`diagram-node-colors.ts`) — deliberately the same six hues everywhere a
+   * reader can tag something themselves, so yellow means one thing across the
+   * app. `--highlight-foreground` is a fixed ink rather than a themed
+   * foreground: these are pale, fixed fills chosen to hold dark text in both
+   * themes, not a surface that changes with the theme.
+   */
+  --highlight-0: #fde047;
+  --highlight-1: #86efac;
+  --highlight-2: #93c5fd;
+  --highlight-3: #f9a8d4;
+  --highlight-4: #fdba74;
+  --highlight-5: #d8b4fe;
+  --highlight-foreground: #0a0a0a;
+
+  /*
+   * Media chrome. A video/audio player, a raw-HTML/slide embed and the
+   * fallback code panel for an unparseable diagram all stay a fixed backing
+   * regardless of the reader's theme — the way an OS photo viewer always
+   * letterboxes in black. `--embed-surface` is the paper the embedded
+   * document itself assumes; `--media-nav-*`/`--media-scrim*` are the
+   * translucent pill controls drawn over that media.
+   */
+  --media-backdrop: #090b10;
+  --media-backdrop-foreground: oklch(0.85 0.01 265);
+  --embed-surface: #ffffff;
+  --media-nav-bg: rgb(255 255 255 / 0.1);
+  --media-nav-bg-hover: rgb(255 255 255 / 0.2);
+  --media-scrim: rgb(0 0 0 / 0.4);
+  --media-scrim-hover: rgb(0 0 0 / 0.62);
+
   /* Motion. Everything that moves uses one of these, so the app has a single
      sense of weight. `--ease-out` for things entering or responding to a
      pointer; `--ease-spring` for things that should feel physical. */
@@ -311,6 +353,19 @@
   --code-string: oklch(0.78 0.13 155);
   --code-number: oklch(0.8 0.13 72);
   --code-punct: oklch(0.6 0.02 265);
+
+  /* Fenced code blocks, dark mode only — light mode is themed by the imported
+     `highlight.js/styles/github.css`. Named separately from `--code-*` above:
+     that palette colours the JSON tree, and "string" and "number" mean
+     different colours there than they do in a code fence. */
+  --codefence-base: #c9d1d9;
+  --codefence-comment: #8b949e;
+  --codefence-keyword: #ff7b72;
+  --codefence-string: #a5d6ff;
+  --codefence-number: #79c0ff;
+  --codefence-title: #d2a8ff;
+  --codefence-type: #ffa657;
+  --codefence-tag: #7ee787;
 
   /* Shadow does almost no work on a dark ground — a dark blur on a dark plane
      is invisible. Depth there comes from the surface values above; these stay
@@ -563,7 +618,7 @@
 .docs-prose > * {
   min-width: 0;
 }
-.docs-prose :is(.docs-table-container, pre, .workspace-artifact, .interactive-block, .docs-mermaid) {
+.docs-prose :is(pre, .workspace-artifact, .interactive-block, .docs-mermaid) {
   width: calc(100% + var(--bleed) * 2);
   margin-inline: calc(var(--bleed) * -1);
 }
@@ -808,7 +863,7 @@
   position: relative;
   cursor: pointer;
   transition: all 0.2s ease-in-out;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--shadow-1);
 }
 
 .docs-prose input[type="checkbox"]:hover {
@@ -993,12 +1048,12 @@
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: rgb(255 255 255 / 0.1);
+  background: var(--media-nav-bg);
   color: white;
   transition: background-color 0.15s ease;
 }
 .presentation-nav:hover:not(:disabled) {
-  background: rgb(255 255 255 / 0.2);
+  background: var(--media-nav-bg-hover);
 }
 .presentation-nav:disabled {
   opacity: 0.25;
@@ -1025,8 +1080,8 @@
   width: min(100%, 1100px);
   overflow: hidden;
   border-radius: 0.25rem;
-  background: white;
-  box-shadow: 0 24px 70px rgb(0 0 0 / 0.45);
+  background: var(--embed-surface);
+  box-shadow: 0 24px 70px var(--media-scrim);
 }
 /* Embedded-deck swipe buttons: the only controls shown in reading mode. */
 .deck-nav {
@@ -1040,7 +1095,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
-  background: rgb(0 0 0 / 0.4);
+  background: var(--media-scrim);
   color: white;
   backdrop-filter: blur(4px);
   transition:
@@ -1048,7 +1103,7 @@
     opacity 0.15s ease;
 }
 .deck-nav:hover:not(:disabled) {
-  background: rgb(0 0 0 / 0.62);
+  background: var(--media-scrim-hover);
 }
 .deck-nav:disabled {
   pointer-events: none;
@@ -1194,14 +1249,14 @@
   display: block;
   max-height: 34rem;
   width: 100%;
-  background: #090b10;
+  background: var(--media-backdrop);
 }
 .artifact-html {
   display: block;
   height: 34rem;
   width: 100%;
   border: 0;
-  background: white;
+  background: var(--embed-surface);
 }
 .artifact-markdown {
   padding: 1.25rem 1.5rem;
@@ -1242,39 +1297,39 @@
 
 /* Dark mode code highlighting override */
 .dark .hljs {
-  color: #c9d1d9;
+  color: var(--codefence-base);
   background: transparent;
 }
 .dark .hljs-comment,
 .dark .hljs-quote {
-  color: #8b949e;
+  color: var(--codefence-comment);
 }
 .dark .hljs-keyword,
 .dark .hljs-selector-tag {
-  color: #ff7b72;
+  color: var(--codefence-keyword);
 }
 .dark .hljs-string,
 .dark .hljs-attr {
-  color: #a5d6ff;
+  color: var(--codefence-string);
 }
 .dark .hljs-number,
 .dark .hljs-literal {
-  color: #79c0ff;
+  color: var(--codefence-number);
 }
 .dark .hljs-title,
 .dark .hljs-name,
 .dark .hljs-section {
-  color: #d2a8ff;
+  color: var(--codefence-title);
 }
 .dark .hljs-type,
 .dark .hljs-built_in {
-  color: #ffa657;
+  color: var(--codefence-type);
 }
 .dark .hljs-tag {
-  color: #7ee787;
+  color: var(--codefence-tag);
 }
 .dark .hljs-variable {
-  color: #ffa657;
+  color: var(--codefence-type);
 }
 
 /* Search highlight flash */
@@ -1622,28 +1677,28 @@ mjx-container[jax="CHTML"] {
 /* Persistent highlights via the CSS Custom Highlight API. Rendered without
    mutating the DOM, so they survive React re-renders and span multiple nodes. */
 ::highlight(dc-hl-0) {
-  background-color: #fde047;
-  color: #0a0a0a;
+  background-color: var(--highlight-0);
+  color: var(--highlight-foreground);
 }
 ::highlight(dc-hl-1) {
-  background-color: #86efac;
-  color: #0a0a0a;
+  background-color: var(--highlight-1);
+  color: var(--highlight-foreground);
 }
 ::highlight(dc-hl-2) {
-  background-color: #93c5fd;
-  color: #0a0a0a;
+  background-color: var(--highlight-2);
+  color: var(--highlight-foreground);
 }
 ::highlight(dc-hl-3) {
-  background-color: #f9a8d4;
-  color: #0a0a0a;
+  background-color: var(--highlight-3);
+  color: var(--highlight-foreground);
 }
 ::highlight(dc-hl-4) {
-  background-color: #fdba74;
-  color: #0a0a0a;
+  background-color: var(--highlight-4);
+  color: var(--highlight-foreground);
 }
 ::highlight(dc-hl-5) {
-  background-color: #d8b4fe;
-  color: #0a0a0a;
+  background-color: var(--highlight-5);
+  color: var(--highlight-foreground);
 }
 ::highlight(dc-query) {
   background-color: color-mix(in oklab, var(--primary) 30%, transparent);
@@ -1877,70 +1932,21 @@ mjx-container[jax="CHTML"] {
   background-color: var(--color-muted-foreground);
 }
 
-/* Table widths are local to their scroll viewport. Never split words, URLs,
-   or inline code in the middle, even when the reading column is narrow. */
-.docs-prose .docs-table-container :is(th, td, th *, td *) {
+/* Tables never exceed the content column. Wrap between words, but never
+   split words, URLs, or inline code in the middle. */
+.docs-prose .docs-table-wrap :is(th, td) {
+  white-space: normal;
+}
+.docs-prose .docs-table-wrap :is(th, td, th *, td *) {
   overflow-wrap: normal;
   word-break: normal;
   hyphens: none;
-}
-.docs-table-container {
-  min-width: 0;
-  margin: 1.5rem 0;
-}
-.docs-table-container .docs-table-wrap {
-  position: relative;
-  margin: 0;
-  padding-bottom: 12px;
-}
-.docs-table-container[data-wrap="false"] :is(th, td, th *, td *) {
-  white-space: nowrap;
-}
-.docs-prose .docs-table-container[data-wrap="true"] :is(th, td) {
-  white-space: normal;
-}
-.docs-table-controls {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.5rem;
-  font: 12px/1.5 var(--font-sans);
-  color: var(--muted-foreground);
-}
-.docs-table-controls label {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.docs-table-controls button {
-  text-decoration: underline;
-}
-.docs-table-resize-controls {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.docs-column-resizer {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 10px;
-  cursor: col-resize;
-  touch-action: none;
-  pointer-events: auto;
-  border-right: 2px solid transparent;
-}
-.docs-column-resizer:hover,
-.docs-column-resizer:focus-visible {
-  border-color: var(--primary);
-  background: color-mix(in oklab, var(--primary) 12%, transparent);
 }
 
 /* Markdown media shares the reader's width; native controls remain usable on touch. */
 .markdown-media-paragraph { margin: 1.25em 0; }
 .markdown-media-player { display: block; margin: 1.5em 0; }
-.markdown-media-player video { display: block; width: 100%; max-height: 75vh; border-radius: .75rem; background: #111; }
+.markdown-media-player video { display: block; width: 100%; max-height: 75vh; border-radius: .75rem; background: var(--media-backdrop); }
 .markdown-media-player audio { display: block; width: 100%; }
 .markdown-media-download { display: block; margin-top: .5rem; font-size: .8em; }
 .artifact-image { max-width: 100%; height: auto; }

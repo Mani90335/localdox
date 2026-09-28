@@ -1,6 +1,6 @@
 import { Highlighter, Trash2, Tag, Unlink } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
-import type { Highlight } from "@/lib/markdown/dom-highlighter";
+import { HL_FOREGROUND, type Highlight } from "@/lib/markdown/dom-highlighter";
 
 /**
  * "Show highlights only": pulls every highlight for a single text document out
@@ -61,7 +61,7 @@ export function HighlightsOnlyModal({
                 >
                   <span
                     className="text-sm leading-relaxed text-foreground [box-decoration-break:clone]"
-                    style={{ backgroundColor: hl.color, color: "#0a0a0a", padding: "1px 2px" }}
+                    style={{ backgroundColor: hl.color, color: HL_FOREGROUND, padding: "1px 2px" }}
                   >
                     {hl.text}
                   </span>

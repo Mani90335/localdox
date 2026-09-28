@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Highlighter, Star, X } from "lucide-react";
-import { HL_COLORS, type Highlight } from "@/lib/markdown/dom-highlighter";
+import { HL_COLORS, HL_FOREGROUND, type Highlight } from "@/lib/markdown/dom-highlighter";
 import type { SavedEntry, SavedItem } from "@/lib/workspace/saved-items";
 
 /**
@@ -174,7 +174,7 @@ export function SavedPage({
                       if (e.button === 1) onRemoveHighlight(hl.id);
                     }}
                     className="cursor-pointer [box-decoration-break:clone]"
-                    style={{ backgroundColor: hl.color, color: "#0a0a0a", padding: "1px 3px" }}
+                    style={{ backgroundColor: hl.color, color: HL_FOREGROUND, padding: "1px 3px" }}
                     title="Open where this came from"
                   >
                     {hl.text}

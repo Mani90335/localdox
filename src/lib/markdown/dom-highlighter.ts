@@ -23,9 +23,16 @@ export interface Highlight {
   orphaned?: boolean;
 }
 
-/** Palette + the CSS ::highlight() group name each color maps to. */
+/** Palette + the CSS ::highlight() group name each color maps to. Mirrors the
+ *  `--highlight-*` tokens in styles.css — kept as literal values here (rather
+ *  than read from the CSS custom properties) because they also have to work
+ *  as plain data: stored per-highlight, compared for the "which colors are in
+ *  use" filter, and matched back to a ::highlight() group name. */
 export const HL_COLORS = ["#fde047", "#86efac", "#93c5fd", "#f9a8d4", "#fdba74", "#d8b4fe"];
 export const hlGroup = (color: string) => `dc-hl-${Math.max(0, HL_COLORS.indexOf(color))}`;
+
+/** Ink for a highlight mark. Fixed rather than themed — see `--highlight-foreground`. */
+export const HL_FOREGROUND = "#0a0a0a";
 
 /** Non-overlapping match ranges within a single text string. */
 export interface DecorRange {

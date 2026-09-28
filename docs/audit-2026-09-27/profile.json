@@ -1,0 +1,5443 @@
+{
+  "browser": "153.0.8010.12",
+  "url": "http://127.0.0.1:4176",
+  "date": "2026-09-27T10:59:12.056Z",
+  "runs": [
+    {
+      "longtasks": [],
+      "shifts": [
+        0.000036727754569348,
+        0.000015820191936728397
+      ],
+      "lcp": [
+        2204
+      ],
+      "events": [],
+      "paints": [
+        {
+          "name": "first-paint",
+          "start": 588
+        },
+        {
+          "name": "first-contentful-paint",
+          "start": 2204
+        }
+      ],
+      "resources": [
+        {
+          "name": "styles-CdZDRCHB.css",
+          "type": "link",
+          "transfer": 22681,
+          "encoded": 22381,
+          "decoded": 164236,
+          "duration": 404.30000001192093
+        },
+        {
+          "name": "rolldown-runtime-aKtaBQYM.js",
+          "type": "other",
+          "transfer": 853,
+          "encoded": 553,
+          "decoded": 1084,
+          "duration": 155.19999998807907
+        },
+        {
+          "name": "index-Cuykuzmu.js",
+          "type": "other",
+          "transfer": 49662,
+          "encoded": 49362,
+          "decoded": 184702,
+          "duration": 717.6000000238419
+        },
+        {
+          "name": "react-Cjg-8bzi.js",
+          "type": "other",
+          "transfer": 79011,
+          "encoded": 78711,
+          "decoded": 377957,
+          "duration": 1228.8999999761581
+        },
+        {
+          "name": "routes-l7R_cQhN.js",
+          "type": "other",
+          "transfer": 364,
+          "encoded": 64,
+          "decoded": 73,
+          "duration": 178.80000001192093
+        },
+        {
+          "name": "useStore-BNaHyct3.js",
+          "type": "other",
+          "transfer": 1949,
+          "encoded": 1649,
+          "decoded": 4081,
+          "duration": 184.89999997615814
+        },
+        {
+          "name": "DocsApp-B8oNNeup.js",
+          "type": "other",
+          "transfer": 115351,
+          "encoded": 115051,
+          "decoded": 450760,
+          "duration": 1783.3999999761581
+        },
+        {
+          "name": "with-selector-D5pTrEK8.js",
+          "type": "script",
+          "transfer": 975,
+          "encoded": 675,
+          "decoded": 1664,
+          "duration": 170.79999995231628
+        },
+        {
+          "name": "Combination-SmfkUR9g.js",
+          "type": "script",
+          "transfer": 4551,
+          "encoded": 4251,
+          "decoded": 12449,
+          "duration": 269.30000001192093
+        },
+        {
+          "name": "lib-Cu4ITbhr.js",
+          "type": "script",
+          "transfer": 1063,
+          "encoded": 763,
+          "decoded": 1853,
+          "duration": 178.19999998807907
+        },
+        {
+          "name": "x-I7m-BCzM.js",
+          "type": "script",
+          "transfer": 990,
+          "encoded": 690,
+          "decoded": 1329,
+          "duration": 170.5
+        },
+        {
+          "name": "lib-3PJ6z7X3.js",
+          "type": "script",
+          "transfer": 39630,
+          "encoded": 39330,
+          "decoded": 152350,
+          "duration": 613.8000000119209
+        },
+        {
+          "name": "utils-DktsMriq.js",
+          "type": "script",
+          "transfer": 9615,
+          "encoded": 9315,
+          "decoded": 32212,
+          "duration": 358.69999998807907
+        },
+        {
+          "name": "persistence-DeTLooDj.js",
+          "type": "script",
+          "transfer": 3870,
+          "encoded": 3570,
+          "decoded": 10971,
+          "duration": 418.5999999642372
+        },
+        {
+          "name": "markdown-utils-DA2EOCZ6.js",
+          "type": "script",
+          "transfer": 3234,
+          "encoded": 2934,
+          "decoded": 10511,
+          "duration": 425
+        },
+        {
+          "name": "document-utils-CWIJCDa4.js",
+          "type": "script",
+          "transfer": 1556,
+          "encoded": 1256,
+          "decoded": 2974,
+          "duration": 470.19999998807907
+        },
+        {
+          "name": "media-references-BJtATAFB.js",
+          "type": "script",
+          "transfer": 849,
+          "encoded": 549,
+          "decoded": 1192,
+          "duration": 522.6999999880791
+        },
+        {
+          "name": "400-BdM1LXey.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 153.89999997615814
+        },
+        {
+          "name": "700-C1S-qcTD.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 161.10000002384186
+        },
+        {
+          "name": "400-DhzmkGAC.css",
+          "type": "link",
+          "transfer": 892,
+          "encoded": 592,
+          "decoded": 2243,
+          "duration": 170.39999997615814
+        },
+        {
+          "name": "500-2kC3L4qO.css",
+          "type": "link",
+          "transfer": 866,
+          "encoded": 566,
+          "decoded": 2243,
+          "duration": 154.5
+        },
+        {
+          "name": "600-BkbYP6CE.css",
+          "type": "link",
+          "transfer": 871,
+          "encoded": 571,
+          "decoded": 2243,
+          "duration": 163.19999998807907
+        },
+        {
+          "name": "700-Cb4Vc2Cd.css",
+          "type": "link",
+          "transfer": 868,
+          "encoded": 568,
+          "decoded": 2243,
+          "duration": 177.0999999642372
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
+          "type": "css",
+          "transfer": 17502,
+          "encoded": 17202,
+          "decoded": 17208,
+          "duration": 324.5
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-700-normal-GZI4o3u0.woff2",
+          "type": "css",
+          "transfer": 17828,
+          "encoded": 17528,
+          "decoded": 17524,
+          "duration": 327.5
+        }
+      ],
+      "elements": 93,
+      "overflow": false,
+      "text": "Localdox\nWorkspace\nDrop files here, or click to upload\nMarkdown, PDFs, spreadsheets, slides, images & more\nOR START SOMETHING NEW\nNew file\nNew board",
+      "unnamedButtons": 0,
+      "storage": {
+        "serviceWorker": null
+      },
+      "metrics": {
+        "Timestamp": 468825.343566,
+        "AudioHandlers": 0,
+        "AudioWorkletProcessors": 0,
+        "Documents": 4,
+        "Frames": 4,
+        "JSEventListeners": 219,
+        "LayoutObjects": 92,
+        "MediaKeySessions": 0,
+        "MediaKeys": 0,
+        "Nodes": 133,
+        "Resources": 87,
+        "ContextLifecycleStateObservers": 13,
+        "V8PerContextDatas": 4,
+        "WorkerGlobalScopes": 0,
+        "UACSSResources": 0,
+        "RTCPeerConnections": 0,
+        "ResourceFetchers": 4,
+        "AdSubframes": 0,
+        "DetachedScriptStates": 2,
+        "ArrayBufferContents": 0,
+        "LayoutCount": 11,
+        "RecalcStyleCount": 16,
+        "LayoutDuration": 0.030863,
+        "RecalcStyleDuration": 0.011894,
+        "DevToolsCommandDuration": 0.029979,
+        "ScriptDuration": 0.141775,
+        "V8CompileDuration": 0.000466,
+        "TaskDuration": 0.272663,
+        "TaskOtherDuration": 0.057686,
+        "ThreadTime": 2.802454,
+        "ProcessTime": 3.084087,
+        "JSHeapUsedSize": 6572396,
+        "JSHeapTotalSize": 9240576,
+        "FirstMeaningfulPaint": 468823.769571,
+        "DomContentLoaded": 468822.154057,
+        "NavigationStart": 468821.566482
+      },
+      "errors": [],
+      "label": "cold-4x-slow4g-1"
+    },
+    {
+      "longtasks": [],
+      "shifts": [
+        0.000036727754569348,
+        0.000015820191936728397
+      ],
+      "lcp": [
+        2204
+      ],
+      "events": [],
+      "paints": [
+        {
+          "name": "first-paint",
+          "start": 608
+        },
+        {
+          "name": "first-contentful-paint",
+          "start": 2204
+        }
+      ],
+      "resources": [
+        {
+          "name": "styles-CdZDRCHB.css",
+          "type": "link",
+          "transfer": 22681,
+          "encoded": 22381,
+          "decoded": 164236,
+          "duration": 423.60000002384186
+        },
+        {
+          "name": "index-Cuykuzmu.js",
+          "type": "other",
+          "transfer": 49662,
+          "encoded": 49362,
+          "decoded": 184702,
+          "duration": 723.3999999761581
+        },
+        {
+          "name": "rolldown-runtime-aKtaBQYM.js",
+          "type": "other",
+          "transfer": 853,
+          "encoded": 553,
+          "decoded": 1084,
+          "duration": 168.5
+        },
+        {
+          "name": "routes-l7R_cQhN.js",
+          "type": "other",
+          "transfer": 364,
+          "encoded": 64,
+          "decoded": 73,
+          "duration": 159.4000000357628
+        },
+        {
+          "name": "useStore-BNaHyct3.js",
+          "type": "other",
+          "transfer": 1949,
+          "encoded": 1649,
+          "decoded": 4081,
+          "duration": 189.80000001192093
+        },
+        {
+          "name": "react-Cjg-8bzi.js",
+          "type": "other",
+          "transfer": 79011,
+          "encoded": 78711,
+          "decoded": 377957,
+          "duration": 1233
+        },
+        {
+          "name": "DocsApp-B8oNNeup.js",
+          "type": "other",
+          "transfer": 115351,
+          "encoded": 115051,
+          "decoded": 450760,
+          "duration": 1794.5
+        },
+        {
+          "name": "with-selector-D5pTrEK8.js",
+          "type": "script",
+          "transfer": 975,
+          "encoded": 675,
+          "decoded": 1664,
+          "duration": 170.19999998807907
+        },
+        {
+          "name": "lib-Cu4ITbhr.js",
+          "type": "script",
+          "transfer": 1063,
+          "encoded": 763,
+          "decoded": 1853,
+          "duration": 160.60000002384186
+        },
+        {
+          "name": "Combination-SmfkUR9g.js",
+          "type": "script",
+          "transfer": 4551,
+          "encoded": 4251,
+          "decoded": 12449,
+          "duration": 267
+        },
+        {
+          "name": "x-I7m-BCzM.js",
+          "type": "script",
+          "transfer": 990,
+          "encoded": 690,
+          "decoded": 1329,
+          "duration": 169
+        },
+        {
+          "name": "lib-3PJ6z7X3.js",
+          "type": "script",
+          "transfer": 39630,
+          "encoded": 39330,
+          "decoded": 152350,
+          "duration": 618
+        },
+        {
+          "name": "utils-DktsMriq.js",
+          "type": "script",
+          "transfer": 9615,
+          "encoded": 9315,
+          "decoded": 32212,
+          "duration": 363
+        },
+        {
+          "name": "persistence-DeTLooDj.js",
+          "type": "script",
+          "transfer": 3870,
+          "encoded": 3570,
+          "decoded": 10971,
+          "duration": 400.0999999642372
+        },
+        {
+          "name": "markdown-utils-DA2EOCZ6.js",
+          "type": "script",
+          "transfer": 3234,
+          "encoded": 2934,
+          "decoded": 10511,
+          "duration": 416.0999999642372
+        },
+        {
+          "name": "document-utils-CWIJCDa4.js",
+          "type": "script",
+          "transfer": 1556,
+          "encoded": 1256,
+          "decoded": 2974,
+          "duration": 461.39999997615814
+        },
+        {
+          "name": "media-references-BJtATAFB.js",
+          "type": "script",
+          "transfer": 849,
+          "encoded": 549,
+          "decoded": 1192,
+          "duration": 519.8000000119209
+        },
+        {
+          "name": "400-BdM1LXey.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 155.19999998807907
+        },
+        {
+          "name": "700-C1S-qcTD.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 163.19999998807907
+        },
+        {
+          "name": "400-DhzmkGAC.css",
+          "type": "link",
+          "transfer": 892,
+          "encoded": 592,
+          "decoded": 2243,
+          "duration": 156.30000001192093
+        },
+        {
+          "name": "500-2kC3L4qO.css",
+          "type": "link",
+          "transfer": 866,
+          "encoded": 566,
+          "decoded": 2243,
+          "duration": 178.60000002384186
+        },
+        {
+          "name": "700-Cb4Vc2Cd.css",
+          "type": "link",
+          "transfer": 868,
+          "encoded": 568,
+          "decoded": 2243,
+          "duration": 163.5
+        },
+        {
+          "name": "600-BkbYP6CE.css",
+          "type": "link",
+          "transfer": 871,
+          "encoded": 571,
+          "decoded": 2243,
+          "duration": 170.80000001192093
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
+          "type": "css",
+          "transfer": 17502,
+          "encoded": 17202,
+          "decoded": 17208,
+          "duration": 310.5
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-700-normal-GZI4o3u0.woff2",
+          "type": "css",
+          "transfer": 17828,
+          "encoded": 17528,
+          "decoded": 17524,
+          "duration": 316.2000000476837
+        }
+      ],
+      "elements": 93,
+      "overflow": false,
+      "text": "Localdox\nWorkspace\nDrop files here, or click to upload\nMarkdown, PDFs, spreadsheets, slides, images & more\nOR START SOMETHING NEW\nNew file\nNew board",
+      "unnamedButtons": 0,
+      "storage": {
+        "serviceWorker": null
+      },
+      "metrics": {
+        "Timestamp": 468829.202078,
+        "AudioHandlers": 0,
+        "AudioWorkletProcessors": 0,
+        "Documents": 4,
+        "Frames": 4,
+        "JSEventListeners": 219,
+        "LayoutObjects": 92,
+        "MediaKeySessions": 0,
+        "MediaKeys": 0,
+        "Nodes": 133,
+        "Resources": 87,
+        "ContextLifecycleStateObservers": 13,
+        "V8PerContextDatas": 4,
+        "WorkerGlobalScopes": 0,
+        "UACSSResources": 0,
+        "RTCPeerConnections": 0,
+        "ResourceFetchers": 4,
+        "AdSubframes": 0,
+        "DetachedScriptStates": 2,
+        "ArrayBufferContents": 0,
+        "LayoutCount": 11,
+        "RecalcStyleCount": 16,
+        "LayoutDuration": 0.028114,
+        "RecalcStyleDuration": 0.012442,
+        "DevToolsCommandDuration": 0.027784,
+        "ScriptDuration": 0.126477,
+        "V8CompileDuration": 0.000576,
+        "TaskDuration": 0.246726,
+        "TaskOtherDuration": 0.051333,
+        "ThreadTime": 2.796447,
+        "ProcessTime": 3.071541,
+        "JSHeapUsedSize": 6567608,
+        "JSHeapTotalSize": 9240576,
+        "FirstMeaningfulPaint": 468827.626794,
+        "DomContentLoaded": 468826.033676,
+        "NavigationStart": 468825.423956
+      },
+      "errors": [],
+      "label": "cold-4x-slow4g-2"
+    },
+    {
+      "longtasks": [],
+      "shifts": [
+        0.000015820191936728397,
+        0.000036727754569348
+      ],
+      "lcp": [
+        2196
+      ],
+      "events": [],
+      "paints": [
+        {
+          "name": "first-paint",
+          "start": 608
+        },
+        {
+          "name": "first-contentful-paint",
+          "start": 2196
+        }
+      ],
+      "resources": [
+        {
+          "name": "styles-CdZDRCHB.css",
+          "type": "link",
+          "transfer": 22681,
+          "encoded": 22381,
+          "decoded": 164236,
+          "duration": 423.5999999642372
+        },
+        {
+          "name": "index-Cuykuzmu.js",
+          "type": "other",
+          "transfer": 49662,
+          "encoded": 49362,
+          "decoded": 184702,
+          "duration": 715.6000000238419
+        },
+        {
+          "name": "rolldown-runtime-aKtaBQYM.js",
+          "type": "other",
+          "transfer": 853,
+          "encoded": 553,
+          "decoded": 1084,
+          "duration": 161.5999999642372
+        },
+        {
+          "name": "routes-l7R_cQhN.js",
+          "type": "other",
+          "transfer": 364,
+          "encoded": 64,
+          "decoded": 73,
+          "duration": 175.5
+        },
+        {
+          "name": "useStore-BNaHyct3.js",
+          "type": "other",
+          "transfer": 1949,
+          "encoded": 1649,
+          "decoded": 4081,
+          "duration": 191
+        },
+        {
+          "name": "react-Cjg-8bzi.js",
+          "type": "other",
+          "transfer": 79011,
+          "encoded": 78711,
+          "decoded": 377957,
+          "duration": 1232.8999999761581
+        },
+        {
+          "name": "DocsApp-B8oNNeup.js",
+          "type": "other",
+          "transfer": 115351,
+          "encoded": 115051,
+          "decoded": 450760,
+          "duration": 1796.699999988079
+        },
+        {
+          "name": "with-selector-D5pTrEK8.js",
+          "type": "script",
+          "transfer": 975,
+          "encoded": 675,
+          "decoded": 1664,
+          "duration": 171.10000002384186
+        },
+        {
+          "name": "Combination-SmfkUR9g.js",
+          "type": "script",
+          "transfer": 4551,
+          "encoded": 4251,
+          "decoded": 12449,
+          "duration": 265.0999999642372
+        },
+        {
+          "name": "lib-Cu4ITbhr.js",
+          "type": "script",
+          "transfer": 1063,
+          "encoded": 763,
+          "decoded": 1853,
+          "duration": 166.5999999642372
+        },
+        {
+          "name": "x-I7m-BCzM.js",
+          "type": "script",
+          "transfer": 990,
+          "encoded": 690,
+          "decoded": 1329,
+          "duration": 160.4000000357628
+        },
+        {
+          "name": "lib-3PJ6z7X3.js",
+          "type": "script",
+          "transfer": 39630,
+          "encoded": 39330,
+          "decoded": 152350,
+          "duration": 617.5
+        },
+        {
+          "name": "utils-DktsMriq.js",
+          "type": "script",
+          "transfer": 9615,
+          "encoded": 9315,
+          "decoded": 32212,
+          "duration": 353.69999998807907
+        },
+        {
+          "name": "persistence-DeTLooDj.js",
+          "type": "script",
+          "transfer": 3870,
+          "encoded": 3570,
+          "decoded": 10971,
+          "duration": 406.69999998807907
+        },
+        {
+          "name": "markdown-utils-DA2EOCZ6.js",
+          "type": "script",
+          "transfer": 3234,
+          "encoded": 2934,
+          "decoded": 10511,
+          "duration": 414.5
+        },
+        {
+          "name": "document-utils-CWIJCDa4.js",
+          "type": "script",
+          "transfer": 1556,
+          "encoded": 1256,
+          "decoded": 2974,
+          "duration": 459.60000002384186
+        },
+        {
+          "name": "media-references-BJtATAFB.js",
+          "type": "script",
+          "transfer": 849,
+          "encoded": 549,
+          "decoded": 1192,
+          "duration": 518.5
+        },
+        {
+          "name": "400-BdM1LXey.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 160.60000002384186
+        },
+        {
+          "name": "700-C1S-qcTD.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 166.69999998807907
+        },
+        {
+          "name": "400-DhzmkGAC.css",
+          "type": "link",
+          "transfer": 892,
+          "encoded": 592,
+          "decoded": 2243,
+          "duration": 179.29999995231628
+        },
+        {
+          "name": "500-2kC3L4qO.css",
+          "type": "link",
+          "transfer": 866,
+          "encoded": 566,
+          "decoded": 2243,
+          "duration": 157
+        },
+        {
+          "name": "600-BkbYP6CE.css",
+          "type": "link",
+          "transfer": 871,
+          "encoded": 571,
+          "decoded": 2243,
+          "duration": 163.80000001192093
+        },
+        {
+          "name": "700-Cb4Vc2Cd.css",
+          "type": "link",
+          "transfer": 868,
+          "encoded": 568,
+          "decoded": 2243,
+          "duration": 172.9000000357628
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-700-normal-GZI4o3u0.woff2",
+          "type": "css",
+          "transfer": 17828,
+          "encoded": 17528,
+          "decoded": 17524,
+          "duration": 321.39999997615814
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
+          "type": "css",
+          "transfer": 17502,
+          "encoded": 17202,
+          "decoded": 17208,
+          "duration": 328.5
+        }
+      ],
+      "elements": 93,
+      "overflow": false,
+      "text": "Localdox\nWorkspace\nDrop files here, or click to upload\nMarkdown, PDFs, spreadsheets, slides, images & more\nOR START SOMETHING NEW\nNew file\nNew board",
+      "unnamedButtons": 0,
+      "storage": {
+        "serviceWorker": null
+      },
+      "metrics": {
+        "Timestamp": 468833.026753,
+        "AudioHandlers": 0,
+        "AudioWorkletProcessors": 0,
+        "Documents": 4,
+        "Frames": 4,
+        "JSEventListeners": 219,
+        "LayoutObjects": 90,
+        "MediaKeySessions": 0,
+        "MediaKeys": 0,
+        "Nodes": 133,
+        "Resources": 87,
+        "ContextLifecycleStateObservers": 13,
+        "V8PerContextDatas": 4,
+        "WorkerGlobalScopes": 0,
+        "UACSSResources": 0,
+        "RTCPeerConnections": 0,
+        "ResourceFetchers": 4,
+        "AdSubframes": 0,
+        "DetachedScriptStates": 2,
+        "ArrayBufferContents": 0,
+        "LayoutCount": 10,
+        "RecalcStyleCount": 15,
+        "LayoutDuration": 0.028436,
+        "RecalcStyleDuration": 0.012799,
+        "DevToolsCommandDuration": 0.031847,
+        "ScriptDuration": 0.130291,
+        "V8CompileDuration": 0.000733,
+        "TaskDuration": 0.257685,
+        "TaskOtherDuration": 0.053579,
+        "ThreadTime": 2.805899,
+        "ProcessTime": 3.085554,
+        "JSHeapUsedSize": 6564432,
+        "JSHeapTotalSize": 8716288,
+        "FirstMeaningfulPaint": 468831.436986,
+        "DomContentLoaded": 468829.850506,
+        "NavigationStart": 468829.244159
+      },
+      "errors": [],
+      "label": "cold-4x-slow4g-3"
+    },
+    {
+      "longtasks": [],
+      "shifts": [],
+      "lcp": [
+        588,
+        664
+      ],
+      "events": [],
+      "paints": [
+        {
+          "name": "first-paint",
+          "start": 140
+        },
+        {
+          "name": "first-contentful-paint",
+          "start": 588
+        }
+      ],
+      "resources": [
+        {
+          "name": "styles-CdZDRCHB.css",
+          "type": "link",
+          "transfer": 22681,
+          "encoded": 22381,
+          "decoded": 164236,
+          "duration": 131.80000001192093
+        },
+        {
+          "name": "rolldown-runtime-aKtaBQYM.js",
+          "type": "other",
+          "transfer": 853,
+          "encoded": 553,
+          "decoded": 1084,
+          "duration": 4.5
+        },
+        {
+          "name": "useStore-BNaHyct3.js",
+          "type": "other",
+          "transfer": 1949,
+          "encoded": 1649,
+          "decoded": 4081,
+          "duration": 7
+        },
+        {
+          "name": "index-Cuykuzmu.js",
+          "type": "other",
+          "transfer": 49662,
+          "encoded": 49362,
+          "decoded": 184702,
+          "duration": 173.39999997615814
+        },
+        {
+          "name": "react-Cjg-8bzi.js",
+          "type": "other",
+          "transfer": 79011,
+          "encoded": 78711,
+          "decoded": 377957,
+          "duration": 394.30000001192093
+        },
+        {
+          "name": "routes-l7R_cQhN.js",
+          "type": "other",
+          "transfer": 364,
+          "encoded": 64,
+          "decoded": 73,
+          "duration": 4.899999976158142
+        },
+        {
+          "name": "DocsApp-B8oNNeup.js",
+          "type": "other",
+          "transfer": 115351,
+          "encoded": 115051,
+          "decoded": 450760,
+          "duration": 514.1999999880791
+        },
+        {
+          "name": "with-selector-D5pTrEK8.js",
+          "type": "script",
+          "transfer": 975,
+          "encoded": 675,
+          "decoded": 1664,
+          "duration": 4.699999988079071
+        },
+        {
+          "name": "Combination-SmfkUR9g.js",
+          "type": "script",
+          "transfer": 4551,
+          "encoded": 4251,
+          "decoded": 12449,
+          "duration": 11.799999952316284
+        },
+        {
+          "name": "lib-Cu4ITbhr.js",
+          "type": "script",
+          "transfer": 1063,
+          "encoded": 763,
+          "decoded": 1853,
+          "duration": 3.199999988079071
+        },
+        {
+          "name": "x-I7m-BCzM.js",
+          "type": "script",
+          "transfer": 990,
+          "encoded": 690,
+          "decoded": 1329,
+          "duration": 4.400000035762787
+        },
+        {
+          "name": "persistence-DeTLooDj.js",
+          "type": "script",
+          "transfer": 3870,
+          "encoded": 3570,
+          "decoded": 10971,
+          "duration": 20.399999976158142
+        },
+        {
+          "name": "markdown-utils-DA2EOCZ6.js",
+          "type": "script",
+          "transfer": 3234,
+          "encoded": 2934,
+          "decoded": 10511,
+          "duration": 28.899999976158142
+        },
+        {
+          "name": "utils-DktsMriq.js",
+          "type": "script",
+          "transfer": 9615,
+          "encoded": 9315,
+          "decoded": 32212,
+          "duration": 29.599999964237213
+        },
+        {
+          "name": "document-utils-CWIJCDa4.js",
+          "type": "script",
+          "transfer": 1556,
+          "encoded": 1256,
+          "decoded": 2974,
+          "duration": 33
+        },
+        {
+          "name": "lib-3PJ6z7X3.js",
+          "type": "script",
+          "transfer": 39630,
+          "encoded": 39330,
+          "decoded": 152350,
+          "duration": 138.30000001192093
+        },
+        {
+          "name": "media-references-BJtATAFB.js",
+          "type": "script",
+          "transfer": 849,
+          "encoded": 549,
+          "decoded": 1192,
+          "duration": 31.400000035762787
+        },
+        {
+          "name": "400-BdM1LXey.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 2.899999976158142
+        },
+        {
+          "name": "700-C1S-qcTD.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 2.599999964237213
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-700-normal-GZI4o3u0.woff2",
+          "type": "css",
+          "transfer": 17828,
+          "encoded": 17528,
+          "decoded": 17524,
+          "duration": 41.09999996423721
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
+          "type": "css",
+          "transfer": 17502,
+          "encoded": 17202,
+          "decoded": 17208,
+          "duration": 43.39999997615814
+        },
+        {
+          "name": "400-CPNfwKr3.css",
+          "type": "link",
+          "transfer": 7590,
+          "encoded": 7290,
+          "decoded": 11161,
+          "duration": 12.899999976158142
+        },
+        {
+          "name": "500-CgNxeaXa.css",
+          "type": "link",
+          "transfer": 7682,
+          "encoded": 7382,
+          "decoded": 11329,
+          "duration": 12.5
+        },
+        {
+          "name": "rehype-highlight-DsllXgCY.js",
+          "type": "script",
+          "transfer": 41683,
+          "encoded": 41383,
+          "decoded": 167124,
+          "duration": 153.80000001192093
+        },
+        {
+          "name": "Mermaid-CqShmmXa.js",
+          "type": "script",
+          "transfer": 12668,
+          "encoded": 12368,
+          "decoded": 40755,
+          "duration": 42.80000001192093
+        },
+        {
+          "name": "eye-off-CRT88w28.js",
+          "type": "script",
+          "transfer": 559,
+          "encoded": 259,
+          "decoded": 415,
+          "duration": 4.199999988079071
+        },
+        {
+          "name": "mermaid-render-cache-BwqYyW0J.js",
+          "type": "script",
+          "transfer": 1392,
+          "encoded": 1092,
+          "decoded": 2112,
+          "duration": 9.399999976158142
+        },
+        {
+          "name": "viewport-BwwQddCf.js",
+          "type": "script",
+          "transfer": 2637,
+          "encoded": 2337,
+          "decoded": 7555,
+          "duration": 12.199999988079071
+        },
+        {
+          "name": "mermaid-performance-CMplpI48.js",
+          "type": "script",
+          "transfer": 1053,
+          "encoded": 753,
+          "decoded": 1610,
+          "duration": 12.599999964237213
+        },
+        {
+          "name": "gate-D0Z4Mx6W.js",
+          "type": "script",
+          "transfer": 708,
+          "encoded": 408,
+          "decoded": 779,
+          "duration": 17
+        },
+        {
+          "name": "camera-CAyEZvqO.js",
+          "type": "script",
+          "transfer": 1314,
+          "encoded": 1014,
+          "decoded": 2497,
+          "duration": 36.19999998807907
+        },
+        {
+          "name": "jetbrains-mono-latin-400-normal-V6pRDFza.woff2",
+          "type": "css",
+          "transfer": 21453,
+          "encoded": 21153,
+          "decoded": 21168,
+          "duration": 50.59999996423721
+        },
+        {
+          "name": "400-DhzmkGAC.css",
+          "type": "link",
+          "transfer": 892,
+          "encoded": 592,
+          "decoded": 2243,
+          "duration": 14.800000011920929
+        },
+        {
+          "name": "500-2kC3L4qO.css",
+          "type": "link",
+          "transfer": 866,
+          "encoded": 566,
+          "decoded": 2243,
+          "duration": 18.69999998807907
+        },
+        {
+          "name": "600-BkbYP6CE.css",
+          "type": "link",
+          "transfer": 871,
+          "encoded": 571,
+          "decoded": 2243,
+          "duration": 21.19999998807907
+        },
+        {
+          "name": "700-Cb4Vc2Cd.css",
+          "type": "link",
+          "transfer": 868,
+          "encoded": 568,
+          "decoded": 2243,
+          "duration": 23.80000001192093
+        },
+        {
+          "name": "chunk-Y2CYZVJY-DsF7k-Jl.js",
+          "type": "script",
+          "transfer": 414,
+          "encoded": 114,
+          "decoded": 155,
+          "duration": 2.800000011920929
+        },
+        {
+          "name": "src-UMNXGZaF.js",
+          "type": "script",
+          "transfer": 14393,
+          "encoded": 14093,
+          "decoded": 45733,
+          "duration": 46
+        },
+        {
+          "name": "mermaid.core-xYmJNPLD.js",
+          "type": "script",
+          "transfer": 23892,
+          "encoded": 23592,
+          "decoded": 80034,
+          "duration": 77.39999997615814
+        },
+        {
+          "name": "chunk-ICXQ74PX-kT5GPKfb.js",
+          "type": "script",
+          "transfer": 7973,
+          "encoded": 7673,
+          "decoded": 30875,
+          "duration": 32.89999997615814
+        },
+        {
+          "name": "chunk-WYO6CB5R-C9HY9Ovi.js",
+          "type": "script",
+          "transfer": 28127,
+          "encoded": 27827,
+          "decoded": 234633,
+          "duration": 129.30000001192093
+        },
+        {
+          "name": "dist-qx0Iv9vM.js",
+          "type": "script",
+          "transfer": 1160,
+          "encoded": 860,
+          "decoded": 2173,
+          "duration": 5
+        },
+        {
+          "name": "chunk-C7G6YPKG-CxYoV8-T.js",
+          "type": "script",
+          "transfer": 1098,
+          "encoded": 798,
+          "decoded": 1849,
+          "duration": 35.40000003576279
+        },
+        {
+          "name": "chunk-OGEWGWER-CRsfHZgQ.js",
+          "type": "script",
+          "transfer": 787,
+          "encoded": 487,
+          "decoded": 963,
+          "duration": 37.10000002384186
+        },
+        {
+          "name": "chunk-HOUHSVGY-BnaYAkf6.js",
+          "type": "script",
+          "transfer": 2731,
+          "encoded": 2431,
+          "decoded": 5835,
+          "duration": 41.80000001192093
+        },
+        {
+          "name": "chunk-Q4XR5HBZ-DclffvuA.js",
+          "type": "script",
+          "transfer": 13708,
+          "encoded": 13408,
+          "decoded": 46875,
+          "duration": 79.40000003576279
+        },
+        {
+          "name": "rough.esm-CSKSodPl.js",
+          "type": "script",
+          "transfer": 8104,
+          "encoded": 7804,
+          "decoded": 27103,
+          "duration": 99.89999997615814
+        },
+        {
+          "name": "chunk-ZGVPDNZ5-BrxpqO9E.js",
+          "type": "script",
+          "transfer": 21247,
+          "encoded": 20947,
+          "decoded": 101886,
+          "duration": 129.30000001192093
+        },
+        {
+          "name": "chunk-7BUUIJ7U-Bb538aSH.js",
+          "type": "script",
+          "transfer": 1039,
+          "encoded": 739,
+          "decoded": 2105,
+          "duration": 81.5
+        },
+        {
+          "name": "line-4dmXmTOj.js",
+          "type": "script",
+          "transfer": 718,
+          "encoded": 418,
+          "decoded": 943,
+          "duration": 101.30000001192093
+        },
+        {
+          "name": "chunk-52WLFC77-D_19VM0M.js",
+          "type": "script",
+          "transfer": 6804,
+          "encoded": 6504,
+          "decoded": 33954,
+          "duration": 111.30000001192093
+        },
+        {
+          "name": "path-BWPyau1x.js",
+          "type": "script",
+          "transfer": 1217,
+          "encoded": 917,
+          "decoded": 2314,
+          "duration": 103.69999998807907
+        },
+        {
+          "name": "array-BifhSqXX.js",
+          "type": "script",
+          "transfer": 387,
+          "encoded": 87,
+          "decoded": 107,
+          "duration": 104.30000001192093
+        },
+        {
+          "name": "flowDiagram-23GEKE2U-C587zIVj.js",
+          "type": "script",
+          "transfer": 585,
+          "encoded": 285,
+          "decoded": 575,
+          "duration": 2.699999988079071
+        },
+        {
+          "name": "chunk-32BRIVSS-CvmlgJYT.js",
+          "type": "script",
+          "transfer": 1091,
+          "encoded": 791,
+          "decoded": 1972,
+          "duration": 4.899999976158142
+        },
+        {
+          "name": "chunk-XXDRQBXY-Bq6zMMOx.js",
+          "type": "script",
+          "transfer": 490,
+          "encoded": 190,
+          "decoded": 262,
+          "duration": 2.300000011920929
+        },
+        {
+          "name": "chunk-VR4S4FIN-D5dxgVv2.js",
+          "type": "script",
+          "transfer": 653,
+          "encoded": 353,
+          "decoded": 574,
+          "duration": 3.699999988079071
+        },
+        {
+          "name": "channel-DiJIXG95.js",
+          "type": "script",
+          "transfer": 406,
+          "encoded": 106,
+          "decoded": 114,
+          "duration": 3.399999976158142
+        },
+        {
+          "name": "chunk-5VM5RSS4-ZNzvKenW.js",
+          "type": "script",
+          "transfer": 517,
+          "encoded": 217,
+          "decoded": 362,
+          "duration": 5
+        },
+        {
+          "name": "chunk-PUDLZKDR-CJr7TzTy.js",
+          "type": "script",
+          "transfer": 16042,
+          "encoded": 15742,
+          "decoded": 60158,
+          "duration": 49.69999998807907
+        },
+        {
+          "name": "dagre-VKFMJZFB-OQ40se9r.js",
+          "type": "script",
+          "transfer": 3412,
+          "encoded": 3112,
+          "decoded": 8806,
+          "duration": 9.399999976158142
+        },
+        {
+          "name": "graphlib-DS17s2tU.js",
+          "type": "script",
+          "transfer": 7900,
+          "encoded": 7600,
+          "decoded": 23904,
+          "duration": 20.400000035762787
+        },
+        {
+          "name": "dagre-dpRSp0QF.js",
+          "type": "script",
+          "transfer": 10764,
+          "encoded": 10464,
+          "decoded": 32056,
+          "duration": 26.400000035762787
+        },
+        {
+          "name": "map-BaFkSB1l.js",
+          "type": "script",
+          "transfer": 2154,
+          "encoded": 1854,
+          "decoded": 5032,
+          "duration": 6.300000011920929
+        },
+        {
+          "name": "chunk-RYQCIY6F-Dtr3kkSR.js",
+          "type": "script",
+          "transfer": 2744,
+          "encoded": 2444,
+          "decoded": 7023,
+          "duration": 12.199999988079071
+        },
+        {
+          "name": "semantics-CXDvuTTU.js",
+          "type": "script",
+          "transfer": 1930,
+          "encoded": 1630,
+          "decoded": 3983,
+          "duration": 4.600000023841858
+        }
+      ],
+      "elements": 473,
+      "overflow": false,
+      "text": "Localdox\nALL FILES\naudit-guide\n1m\nMW\nMy workspace\nMW\nDownload HTML + Media\n\naudit-guide.md\n\nProduct architecture\n\n≈ 1 min read\n·\n70 words\n\nA workspace for thinking clearly.\n\nReading experience\n\nSelect text to highlight. Search across your documents.\n\nWrap words\nReset widths\nDrag column edges to resize\nFEATURE\tSTATUS\nLocal storage\tAvailable\nExport\tAvailable\nCopy\nconst workspace = { local: true };\n\nProcess\nRaw\nStepped\nFlow\n100%\n\nYes\n\nNo\n\nImport\n\nRead\n\nUnderstand?\n\nSave\n\nExplore\n\n0%\nSuccessfully uploaded 1 file!",
+      "unnamedButtons": 0,
+      "storage": {
+        "serviceWorker": null
+      },
+      "metrics": {
+        "Timestamp": 468835.30624,
+        "AudioHandlers": 0,
+        "AudioWorkletProcessors": 0,
+        "Documents": 12,
+        "Frames": 4,
+        "JSEventListeners": 370,
+        "LayoutObjects": 938,
+        "MediaKeySessions": 0,
+        "MediaKeys": 0,
+        "Nodes": 970,
+        "Resources": 151,
+        "ContextLifecycleStateObservers": 24,
+        "V8PerContextDatas": 4,
+        "WorkerGlobalScopes": 0,
+        "UACSSResources": 0,
+        "RTCPeerConnections": 0,
+        "ResourceFetchers": 12,
+        "AdSubframes": 0,
+        "DetachedScriptStates": 2,
+        "ArrayBufferContents": 1,
+        "LayoutCount": 54,
+        "RecalcStyleCount": 84,
+        "LayoutDuration": 0.017442,
+        "RecalcStyleDuration": 0.029721,
+        "DevToolsCommandDuration": 0.01537,
+        "ScriptDuration": 0.078395,
+        "V8CompileDuration": 0.000145,
+        "TaskDuration": 0.200119,
+        "TaskOtherDuration": 0.059046,
+        "ThreadTime": 0.198577,
+        "ProcessTime": 0.370477,
+        "JSHeapUsedSize": 12374156,
+        "JSHeapTotalSize": 21823488,
+        "FirstMeaningfulPaint": 468833.709451,
+        "DomContentLoaded": 468833.211037,
+        "NavigationStart": 468833.071516
+      },
+      "errors": [],
+      "label": "reader-with-small-diagram"
+    },
+    {
+      "longtasks": [],
+      "shifts": [],
+      "lcp": [
+        588,
+        664
+      ],
+      "events": [
+        {
+          "name": "pointerover",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseover",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerdown",
+          "duration": 48,
+          "interactionId": 9497
+        },
+        {
+          "name": "mousedown",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerup",
+          "duration": 48,
+          "interactionId": 9497
+        },
+        {
+          "name": "mouseup",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "click",
+          "duration": 48,
+          "interactionId": 9497
+        }
+      ],
+      "paints": [
+        {
+          "name": "first-paint",
+          "start": 140
+        },
+        {
+          "name": "first-contentful-paint",
+          "start": 588
+        }
+      ],
+      "resources": [
+        {
+          "name": "styles-CdZDRCHB.css",
+          "type": "link",
+          "transfer": 22681,
+          "encoded": 22381,
+          "decoded": 164236,
+          "duration": 131.80000001192093
+        },
+        {
+          "name": "rolldown-runtime-aKtaBQYM.js",
+          "type": "other",
+          "transfer": 853,
+          "encoded": 553,
+          "decoded": 1084,
+          "duration": 4.5
+        },
+        {
+          "name": "useStore-BNaHyct3.js",
+          "type": "other",
+          "transfer": 1949,
+          "encoded": 1649,
+          "decoded": 4081,
+          "duration": 7
+        },
+        {
+          "name": "index-Cuykuzmu.js",
+          "type": "other",
+          "transfer": 49662,
+          "encoded": 49362,
+          "decoded": 184702,
+          "duration": 173.39999997615814
+        },
+        {
+          "name": "react-Cjg-8bzi.js",
+          "type": "other",
+          "transfer": 79011,
+          "encoded": 78711,
+          "decoded": 377957,
+          "duration": 394.30000001192093
+        },
+        {
+          "name": "routes-l7R_cQhN.js",
+          "type": "other",
+          "transfer": 364,
+          "encoded": 64,
+          "decoded": 73,
+          "duration": 4.899999976158142
+        },
+        {
+          "name": "DocsApp-B8oNNeup.js",
+          "type": "other",
+          "transfer": 115351,
+          "encoded": 115051,
+          "decoded": 450760,
+          "duration": 514.1999999880791
+        },
+        {
+          "name": "with-selector-D5pTrEK8.js",
+          "type": "script",
+          "transfer": 975,
+          "encoded": 675,
+          "decoded": 1664,
+          "duration": 4.699999988079071
+        },
+        {
+          "name": "Combination-SmfkUR9g.js",
+          "type": "script",
+          "transfer": 4551,
+          "encoded": 4251,
+          "decoded": 12449,
+          "duration": 11.799999952316284
+        },
+        {
+          "name": "lib-Cu4ITbhr.js",
+          "type": "script",
+          "transfer": 1063,
+          "encoded": 763,
+          "decoded": 1853,
+          "duration": 3.199999988079071
+        },
+        {
+          "name": "x-I7m-BCzM.js",
+          "type": "script",
+          "transfer": 990,
+          "encoded": 690,
+          "decoded": 1329,
+          "duration": 4.400000035762787
+        },
+        {
+          "name": "persistence-DeTLooDj.js",
+          "type": "script",
+          "transfer": 3870,
+          "encoded": 3570,
+          "decoded": 10971,
+          "duration": 20.399999976158142
+        },
+        {
+          "name": "markdown-utils-DA2EOCZ6.js",
+          "type": "script",
+          "transfer": 3234,
+          "encoded": 2934,
+          "decoded": 10511,
+          "duration": 28.899999976158142
+        },
+        {
+          "name": "utils-DktsMriq.js",
+          "type": "script",
+          "transfer": 9615,
+          "encoded": 9315,
+          "decoded": 32212,
+          "duration": 29.599999964237213
+        },
+        {
+          "name": "document-utils-CWIJCDa4.js",
+          "type": "script",
+          "transfer": 1556,
+          "encoded": 1256,
+          "decoded": 2974,
+          "duration": 33
+        },
+        {
+          "name": "lib-3PJ6z7X3.js",
+          "type": "script",
+          "transfer": 39630,
+          "encoded": 39330,
+          "decoded": 152350,
+          "duration": 138.30000001192093
+        },
+        {
+          "name": "media-references-BJtATAFB.js",
+          "type": "script",
+          "transfer": 849,
+          "encoded": 549,
+          "decoded": 1192,
+          "duration": 31.400000035762787
+        },
+        {
+          "name": "400-BdM1LXey.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 2.899999976158142
+        },
+        {
+          "name": "700-C1S-qcTD.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 2.599999964237213
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-700-normal-GZI4o3u0.woff2",
+          "type": "css",
+          "transfer": 17828,
+          "encoded": 17528,
+          "decoded": 17524,
+          "duration": 41.09999996423721
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
+          "type": "css",
+          "transfer": 17502,
+          "encoded": 17202,
+          "decoded": 17208,
+          "duration": 43.39999997615814
+        },
+        {
+          "name": "400-CPNfwKr3.css",
+          "type": "link",
+          "transfer": 7590,
+          "encoded": 7290,
+          "decoded": 11161,
+          "duration": 12.899999976158142
+        },
+        {
+          "name": "500-CgNxeaXa.css",
+          "type": "link",
+          "transfer": 7682,
+          "encoded": 7382,
+          "decoded": 11329,
+          "duration": 12.5
+        },
+        {
+          "name": "rehype-highlight-DsllXgCY.js",
+          "type": "script",
+          "transfer": 41683,
+          "encoded": 41383,
+          "decoded": 167124,
+          "duration": 153.80000001192093
+        },
+        {
+          "name": "Mermaid-CqShmmXa.js",
+          "type": "script",
+          "transfer": 12668,
+          "encoded": 12368,
+          "decoded": 40755,
+          "duration": 42.80000001192093
+        },
+        {
+          "name": "eye-off-CRT88w28.js",
+          "type": "script",
+          "transfer": 559,
+          "encoded": 259,
+          "decoded": 415,
+          "duration": 4.199999988079071
+        },
+        {
+          "name": "mermaid-render-cache-BwqYyW0J.js",
+          "type": "script",
+          "transfer": 1392,
+          "encoded": 1092,
+          "decoded": 2112,
+          "duration": 9.399999976158142
+        },
+        {
+          "name": "viewport-BwwQddCf.js",
+          "type": "script",
+          "transfer": 2637,
+          "encoded": 2337,
+          "decoded": 7555,
+          "duration": 12.199999988079071
+        },
+        {
+          "name": "mermaid-performance-CMplpI48.js",
+          "type": "script",
+          "transfer": 1053,
+          "encoded": 753,
+          "decoded": 1610,
+          "duration": 12.599999964237213
+        },
+        {
+          "name": "gate-D0Z4Mx6W.js",
+          "type": "script",
+          "transfer": 708,
+          "encoded": 408,
+          "decoded": 779,
+          "duration": 17
+        },
+        {
+          "name": "camera-CAyEZvqO.js",
+          "type": "script",
+          "transfer": 1314,
+          "encoded": 1014,
+          "decoded": 2497,
+          "duration": 36.19999998807907
+        },
+        {
+          "name": "jetbrains-mono-latin-400-normal-V6pRDFza.woff2",
+          "type": "css",
+          "transfer": 21453,
+          "encoded": 21153,
+          "decoded": 21168,
+          "duration": 50.59999996423721
+        },
+        {
+          "name": "400-DhzmkGAC.css",
+          "type": "link",
+          "transfer": 892,
+          "encoded": 592,
+          "decoded": 2243,
+          "duration": 14.800000011920929
+        },
+        {
+          "name": "500-2kC3L4qO.css",
+          "type": "link",
+          "transfer": 866,
+          "encoded": 566,
+          "decoded": 2243,
+          "duration": 18.69999998807907
+        },
+        {
+          "name": "600-BkbYP6CE.css",
+          "type": "link",
+          "transfer": 871,
+          "encoded": 571,
+          "decoded": 2243,
+          "duration": 21.19999998807907
+        },
+        {
+          "name": "700-Cb4Vc2Cd.css",
+          "type": "link",
+          "transfer": 868,
+          "encoded": 568,
+          "decoded": 2243,
+          "duration": 23.80000001192093
+        },
+        {
+          "name": "chunk-Y2CYZVJY-DsF7k-Jl.js",
+          "type": "script",
+          "transfer": 414,
+          "encoded": 114,
+          "decoded": 155,
+          "duration": 2.800000011920929
+        },
+        {
+          "name": "src-UMNXGZaF.js",
+          "type": "script",
+          "transfer": 14393,
+          "encoded": 14093,
+          "decoded": 45733,
+          "duration": 46
+        },
+        {
+          "name": "mermaid.core-xYmJNPLD.js",
+          "type": "script",
+          "transfer": 23892,
+          "encoded": 23592,
+          "decoded": 80034,
+          "duration": 77.39999997615814
+        },
+        {
+          "name": "chunk-ICXQ74PX-kT5GPKfb.js",
+          "type": "script",
+          "transfer": 7973,
+          "encoded": 7673,
+          "decoded": 30875,
+          "duration": 32.89999997615814
+        },
+        {
+          "name": "chunk-WYO6CB5R-C9HY9Ovi.js",
+          "type": "script",
+          "transfer": 28127,
+          "encoded": 27827,
+          "decoded": 234633,
+          "duration": 129.30000001192093
+        },
+        {
+          "name": "dist-qx0Iv9vM.js",
+          "type": "script",
+          "transfer": 1160,
+          "encoded": 860,
+          "decoded": 2173,
+          "duration": 5
+        },
+        {
+          "name": "chunk-C7G6YPKG-CxYoV8-T.js",
+          "type": "script",
+          "transfer": 1098,
+          "encoded": 798,
+          "decoded": 1849,
+          "duration": 35.40000003576279
+        },
+        {
+          "name": "chunk-OGEWGWER-CRsfHZgQ.js",
+          "type": "script",
+          "transfer": 787,
+          "encoded": 487,
+          "decoded": 963,
+          "duration": 37.10000002384186
+        },
+        {
+          "name": "chunk-HOUHSVGY-BnaYAkf6.js",
+          "type": "script",
+          "transfer": 2731,
+          "encoded": 2431,
+          "decoded": 5835,
+          "duration": 41.80000001192093
+        },
+        {
+          "name": "chunk-Q4XR5HBZ-DclffvuA.js",
+          "type": "script",
+          "transfer": 13708,
+          "encoded": 13408,
+          "decoded": 46875,
+          "duration": 79.40000003576279
+        },
+        {
+          "name": "rough.esm-CSKSodPl.js",
+          "type": "script",
+          "transfer": 8104,
+          "encoded": 7804,
+          "decoded": 27103,
+          "duration": 99.89999997615814
+        },
+        {
+          "name": "chunk-ZGVPDNZ5-BrxpqO9E.js",
+          "type": "script",
+          "transfer": 21247,
+          "encoded": 20947,
+          "decoded": 101886,
+          "duration": 129.30000001192093
+        },
+        {
+          "name": "chunk-7BUUIJ7U-Bb538aSH.js",
+          "type": "script",
+          "transfer": 1039,
+          "encoded": 739,
+          "decoded": 2105,
+          "duration": 81.5
+        },
+        {
+          "name": "line-4dmXmTOj.js",
+          "type": "script",
+          "transfer": 718,
+          "encoded": 418,
+          "decoded": 943,
+          "duration": 101.30000001192093
+        },
+        {
+          "name": "chunk-52WLFC77-D_19VM0M.js",
+          "type": "script",
+          "transfer": 6804,
+          "encoded": 6504,
+          "decoded": 33954,
+          "duration": 111.30000001192093
+        },
+        {
+          "name": "path-BWPyau1x.js",
+          "type": "script",
+          "transfer": 1217,
+          "encoded": 917,
+          "decoded": 2314,
+          "duration": 103.69999998807907
+        },
+        {
+          "name": "array-BifhSqXX.js",
+          "type": "script",
+          "transfer": 387,
+          "encoded": 87,
+          "decoded": 107,
+          "duration": 104.30000001192093
+        },
+        {
+          "name": "flowDiagram-23GEKE2U-C587zIVj.js",
+          "type": "script",
+          "transfer": 585,
+          "encoded": 285,
+          "decoded": 575,
+          "duration": 2.699999988079071
+        },
+        {
+          "name": "chunk-32BRIVSS-CvmlgJYT.js",
+          "type": "script",
+          "transfer": 1091,
+          "encoded": 791,
+          "decoded": 1972,
+          "duration": 4.899999976158142
+        },
+        {
+          "name": "chunk-XXDRQBXY-Bq6zMMOx.js",
+          "type": "script",
+          "transfer": 490,
+          "encoded": 190,
+          "decoded": 262,
+          "duration": 2.300000011920929
+        },
+        {
+          "name": "chunk-VR4S4FIN-D5dxgVv2.js",
+          "type": "script",
+          "transfer": 653,
+          "encoded": 353,
+          "decoded": 574,
+          "duration": 3.699999988079071
+        },
+        {
+          "name": "channel-DiJIXG95.js",
+          "type": "script",
+          "transfer": 406,
+          "encoded": 106,
+          "decoded": 114,
+          "duration": 3.399999976158142
+        },
+        {
+          "name": "chunk-5VM5RSS4-ZNzvKenW.js",
+          "type": "script",
+          "transfer": 517,
+          "encoded": 217,
+          "decoded": 362,
+          "duration": 5
+        },
+        {
+          "name": "chunk-PUDLZKDR-CJr7TzTy.js",
+          "type": "script",
+          "transfer": 16042,
+          "encoded": 15742,
+          "decoded": 60158,
+          "duration": 49.69999998807907
+        },
+        {
+          "name": "dagre-VKFMJZFB-OQ40se9r.js",
+          "type": "script",
+          "transfer": 3412,
+          "encoded": 3112,
+          "decoded": 8806,
+          "duration": 9.399999976158142
+        },
+        {
+          "name": "graphlib-DS17s2tU.js",
+          "type": "script",
+          "transfer": 7900,
+          "encoded": 7600,
+          "decoded": 23904,
+          "duration": 20.400000035762787
+        },
+        {
+          "name": "dagre-dpRSp0QF.js",
+          "type": "script",
+          "transfer": 10764,
+          "encoded": 10464,
+          "decoded": 32056,
+          "duration": 26.400000035762787
+        },
+        {
+          "name": "map-BaFkSB1l.js",
+          "type": "script",
+          "transfer": 2154,
+          "encoded": 1854,
+          "decoded": 5032,
+          "duration": 6.300000011920929
+        },
+        {
+          "name": "chunk-RYQCIY6F-Dtr3kkSR.js",
+          "type": "script",
+          "transfer": 2744,
+          "encoded": 2444,
+          "decoded": 7023,
+          "duration": 12.199999988079071
+        },
+        {
+          "name": "semantics-CXDvuTTU.js",
+          "type": "script",
+          "transfer": 1930,
+          "encoded": 1630,
+          "decoded": 3983,
+          "duration": 4.600000023841858
+        },
+        {
+          "name": "MermaidExplainer-CIyBPwou.js",
+          "type": "script",
+          "transfer": 6591,
+          "encoded": 6291,
+          "decoded": 18859,
+          "duration": 18.30000001192093
+        },
+        {
+          "name": "zoom-BTJyG63m.js",
+          "type": "script",
+          "transfer": 372,
+          "encoded": 72,
+          "decoded": 68,
+          "duration": 2.199999988079071
+        },
+        {
+          "name": "MermaidExplainer-CGnxxofE.css",
+          "type": "link",
+          "transfer": 931,
+          "encoded": 631,
+          "decoded": 2796,
+          "duration": 4.300000011920929
+        },
+        {
+          "name": "beats--xJxeDjs.js",
+          "type": "script",
+          "transfer": 1673,
+          "encoded": 1373,
+          "decoded": 3500,
+          "duration": 5.099999964237213
+        }
+      ],
+      "elements": 497,
+      "overflow": false,
+      "text": "Localdox\nALL FILES\naudit-guide\n1m\nMW\nMy workspace\nMW\nDownload HTML + Media\n\naudit-guide.md\n\nProduct architecture\n\n≈ 1 min read\n·\n70 words\n\nA workspace for thinking clearly.\n\nReading experience\n\nSelect text to highlight. Search across your documents.\n\nWrap words\nReset widths\nDrag column edges to resize\nFEATURE\tSTATUS\nLocal storage\tAvailable\nExport\tAvailable\nCopy\nconst workspace = { local: true };\n\nProcess\nRaw\nStepped\nFlow\n0:01 / 0:08\n1/4\nImport → Read\n1×\nAuto\n1\n2\n3\n4\n5\n\nYes\n\nNo\n\nImport\n\nRead\n\nUnderstand?\n\nSave\n\nExplore\n\n0%\nSuccessfully uploaded 1 file!",
+      "unnamedButtons": 0,
+      "storage": {
+        "serviceWorker": null
+      },
+      "metrics": {
+        "Timestamp": 468836.937825,
+        "AudioHandlers": 0,
+        "AudioWorkletProcessors": 0,
+        "Documents": 12,
+        "Frames": 4,
+        "JSEventListeners": 787,
+        "LayoutObjects": 1467,
+        "MediaKeySessions": 0,
+        "MediaKeys": 0,
+        "Nodes": 1181,
+        "Resources": 155,
+        "ContextLifecycleStateObservers": 24,
+        "V8PerContextDatas": 4,
+        "WorkerGlobalScopes": 0,
+        "UACSSResources": 0,
+        "RTCPeerConnections": 0,
+        "ResourceFetchers": 12,
+        "AdSubframes": 0,
+        "DetachedScriptStates": 2,
+        "ArrayBufferContents": 1,
+        "LayoutCount": 145,
+        "RecalcStyleCount": 275,
+        "LayoutDuration": 0.038508,
+        "RecalcStyleDuration": 0.078645,
+        "DevToolsCommandDuration": 0.020876,
+        "ScriptDuration": 0.122297,
+        "V8CompileDuration": 0.000145,
+        "TaskDuration": 0.416353,
+        "TaskOtherDuration": 0.155882,
+        "ThreadTime": 0.394777,
+        "ProcessTime": 0.672603,
+        "JSHeapUsedSize": 15969960,
+        "JSHeapTotalSize": 22347776,
+        "FirstMeaningfulPaint": 468833.709451,
+        "DomContentLoaded": 468833.211037,
+        "NavigationStart": 468833.071516
+      },
+      "errors": [],
+      "label": "small-diagram-stepped"
+    },
+    {
+      "longtasks": [],
+      "shifts": [],
+      "lcp": [
+        588,
+        664
+      ],
+      "events": [
+        {
+          "name": "pointerover",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseover",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerdown",
+          "duration": 48,
+          "interactionId": 9497
+        },
+        {
+          "name": "mousedown",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerup",
+          "duration": 48,
+          "interactionId": 9497
+        },
+        {
+          "name": "mouseup",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "click",
+          "duration": 48,
+          "interactionId": 9497
+        },
+        {
+          "name": "pointerout",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseout",
+          "duration": 16,
+          "interactionId": 0
+        }
+      ],
+      "paints": [
+        {
+          "name": "first-paint",
+          "start": 140
+        },
+        {
+          "name": "first-contentful-paint",
+          "start": 588
+        }
+      ],
+      "resources": [
+        {
+          "name": "styles-CdZDRCHB.css",
+          "type": "link",
+          "transfer": 22681,
+          "encoded": 22381,
+          "decoded": 164236,
+          "duration": 131.80000001192093
+        },
+        {
+          "name": "rolldown-runtime-aKtaBQYM.js",
+          "type": "other",
+          "transfer": 853,
+          "encoded": 553,
+          "decoded": 1084,
+          "duration": 4.5
+        },
+        {
+          "name": "useStore-BNaHyct3.js",
+          "type": "other",
+          "transfer": 1949,
+          "encoded": 1649,
+          "decoded": 4081,
+          "duration": 7
+        },
+        {
+          "name": "index-Cuykuzmu.js",
+          "type": "other",
+          "transfer": 49662,
+          "encoded": 49362,
+          "decoded": 184702,
+          "duration": 173.39999997615814
+        },
+        {
+          "name": "react-Cjg-8bzi.js",
+          "type": "other",
+          "transfer": 79011,
+          "encoded": 78711,
+          "decoded": 377957,
+          "duration": 394.30000001192093
+        },
+        {
+          "name": "routes-l7R_cQhN.js",
+          "type": "other",
+          "transfer": 364,
+          "encoded": 64,
+          "decoded": 73,
+          "duration": 4.899999976158142
+        },
+        {
+          "name": "DocsApp-B8oNNeup.js",
+          "type": "other",
+          "transfer": 115351,
+          "encoded": 115051,
+          "decoded": 450760,
+          "duration": 514.1999999880791
+        },
+        {
+          "name": "with-selector-D5pTrEK8.js",
+          "type": "script",
+          "transfer": 975,
+          "encoded": 675,
+          "decoded": 1664,
+          "duration": 4.699999988079071
+        },
+        {
+          "name": "Combination-SmfkUR9g.js",
+          "type": "script",
+          "transfer": 4551,
+          "encoded": 4251,
+          "decoded": 12449,
+          "duration": 11.799999952316284
+        },
+        {
+          "name": "lib-Cu4ITbhr.js",
+          "type": "script",
+          "transfer": 1063,
+          "encoded": 763,
+          "decoded": 1853,
+          "duration": 3.199999988079071
+        },
+        {
+          "name": "x-I7m-BCzM.js",
+          "type": "script",
+          "transfer": 990,
+          "encoded": 690,
+          "decoded": 1329,
+          "duration": 4.400000035762787
+        },
+        {
+          "name": "persistence-DeTLooDj.js",
+          "type": "script",
+          "transfer": 3870,
+          "encoded": 3570,
+          "decoded": 10971,
+          "duration": 20.399999976158142
+        },
+        {
+          "name": "markdown-utils-DA2EOCZ6.js",
+          "type": "script",
+          "transfer": 3234,
+          "encoded": 2934,
+          "decoded": 10511,
+          "duration": 28.899999976158142
+        },
+        {
+          "name": "utils-DktsMriq.js",
+          "type": "script",
+          "transfer": 9615,
+          "encoded": 9315,
+          "decoded": 32212,
+          "duration": 29.599999964237213
+        },
+        {
+          "name": "document-utils-CWIJCDa4.js",
+          "type": "script",
+          "transfer": 1556,
+          "encoded": 1256,
+          "decoded": 2974,
+          "duration": 33
+        },
+        {
+          "name": "lib-3PJ6z7X3.js",
+          "type": "script",
+          "transfer": 39630,
+          "encoded": 39330,
+          "decoded": 152350,
+          "duration": 138.30000001192093
+        },
+        {
+          "name": "media-references-BJtATAFB.js",
+          "type": "script",
+          "transfer": 849,
+          "encoded": 549,
+          "decoded": 1192,
+          "duration": 31.400000035762787
+        },
+        {
+          "name": "400-BdM1LXey.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 2.899999976158142
+        },
+        {
+          "name": "700-C1S-qcTD.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 2.599999964237213
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-700-normal-GZI4o3u0.woff2",
+          "type": "css",
+          "transfer": 17828,
+          "encoded": 17528,
+          "decoded": 17524,
+          "duration": 41.09999996423721
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
+          "type": "css",
+          "transfer": 17502,
+          "encoded": 17202,
+          "decoded": 17208,
+          "duration": 43.39999997615814
+        },
+        {
+          "name": "400-CPNfwKr3.css",
+          "type": "link",
+          "transfer": 7590,
+          "encoded": 7290,
+          "decoded": 11161,
+          "duration": 12.899999976158142
+        },
+        {
+          "name": "500-CgNxeaXa.css",
+          "type": "link",
+          "transfer": 7682,
+          "encoded": 7382,
+          "decoded": 11329,
+          "duration": 12.5
+        },
+        {
+          "name": "rehype-highlight-DsllXgCY.js",
+          "type": "script",
+          "transfer": 41683,
+          "encoded": 41383,
+          "decoded": 167124,
+          "duration": 153.80000001192093
+        },
+        {
+          "name": "Mermaid-CqShmmXa.js",
+          "type": "script",
+          "transfer": 12668,
+          "encoded": 12368,
+          "decoded": 40755,
+          "duration": 42.80000001192093
+        },
+        {
+          "name": "eye-off-CRT88w28.js",
+          "type": "script",
+          "transfer": 559,
+          "encoded": 259,
+          "decoded": 415,
+          "duration": 4.199999988079071
+        },
+        {
+          "name": "mermaid-render-cache-BwqYyW0J.js",
+          "type": "script",
+          "transfer": 1392,
+          "encoded": 1092,
+          "decoded": 2112,
+          "duration": 9.399999976158142
+        },
+        {
+          "name": "viewport-BwwQddCf.js",
+          "type": "script",
+          "transfer": 2637,
+          "encoded": 2337,
+          "decoded": 7555,
+          "duration": 12.199999988079071
+        },
+        {
+          "name": "mermaid-performance-CMplpI48.js",
+          "type": "script",
+          "transfer": 1053,
+          "encoded": 753,
+          "decoded": 1610,
+          "duration": 12.599999964237213
+        },
+        {
+          "name": "gate-D0Z4Mx6W.js",
+          "type": "script",
+          "transfer": 708,
+          "encoded": 408,
+          "decoded": 779,
+          "duration": 17
+        },
+        {
+          "name": "camera-CAyEZvqO.js",
+          "type": "script",
+          "transfer": 1314,
+          "encoded": 1014,
+          "decoded": 2497,
+          "duration": 36.19999998807907
+        },
+        {
+          "name": "jetbrains-mono-latin-400-normal-V6pRDFza.woff2",
+          "type": "css",
+          "transfer": 21453,
+          "encoded": 21153,
+          "decoded": 21168,
+          "duration": 50.59999996423721
+        },
+        {
+          "name": "400-DhzmkGAC.css",
+          "type": "link",
+          "transfer": 892,
+          "encoded": 592,
+          "decoded": 2243,
+          "duration": 14.800000011920929
+        },
+        {
+          "name": "500-2kC3L4qO.css",
+          "type": "link",
+          "transfer": 866,
+          "encoded": 566,
+          "decoded": 2243,
+          "duration": 18.69999998807907
+        },
+        {
+          "name": "600-BkbYP6CE.css",
+          "type": "link",
+          "transfer": 871,
+          "encoded": 571,
+          "decoded": 2243,
+          "duration": 21.19999998807907
+        },
+        {
+          "name": "700-Cb4Vc2Cd.css",
+          "type": "link",
+          "transfer": 868,
+          "encoded": 568,
+          "decoded": 2243,
+          "duration": 23.80000001192093
+        },
+        {
+          "name": "chunk-Y2CYZVJY-DsF7k-Jl.js",
+          "type": "script",
+          "transfer": 414,
+          "encoded": 114,
+          "decoded": 155,
+          "duration": 2.800000011920929
+        },
+        {
+          "name": "src-UMNXGZaF.js",
+          "type": "script",
+          "transfer": 14393,
+          "encoded": 14093,
+          "decoded": 45733,
+          "duration": 46
+        },
+        {
+          "name": "mermaid.core-xYmJNPLD.js",
+          "type": "script",
+          "transfer": 23892,
+          "encoded": 23592,
+          "decoded": 80034,
+          "duration": 77.39999997615814
+        },
+        {
+          "name": "chunk-ICXQ74PX-kT5GPKfb.js",
+          "type": "script",
+          "transfer": 7973,
+          "encoded": 7673,
+          "decoded": 30875,
+          "duration": 32.89999997615814
+        },
+        {
+          "name": "chunk-WYO6CB5R-C9HY9Ovi.js",
+          "type": "script",
+          "transfer": 28127,
+          "encoded": 27827,
+          "decoded": 234633,
+          "duration": 129.30000001192093
+        },
+        {
+          "name": "dist-qx0Iv9vM.js",
+          "type": "script",
+          "transfer": 1160,
+          "encoded": 860,
+          "decoded": 2173,
+          "duration": 5
+        },
+        {
+          "name": "chunk-C7G6YPKG-CxYoV8-T.js",
+          "type": "script",
+          "transfer": 1098,
+          "encoded": 798,
+          "decoded": 1849,
+          "duration": 35.40000003576279
+        },
+        {
+          "name": "chunk-OGEWGWER-CRsfHZgQ.js",
+          "type": "script",
+          "transfer": 787,
+          "encoded": 487,
+          "decoded": 963,
+          "duration": 37.10000002384186
+        },
+        {
+          "name": "chunk-HOUHSVGY-BnaYAkf6.js",
+          "type": "script",
+          "transfer": 2731,
+          "encoded": 2431,
+          "decoded": 5835,
+          "duration": 41.80000001192093
+        },
+        {
+          "name": "chunk-Q4XR5HBZ-DclffvuA.js",
+          "type": "script",
+          "transfer": 13708,
+          "encoded": 13408,
+          "decoded": 46875,
+          "duration": 79.40000003576279
+        },
+        {
+          "name": "rough.esm-CSKSodPl.js",
+          "type": "script",
+          "transfer": 8104,
+          "encoded": 7804,
+          "decoded": 27103,
+          "duration": 99.89999997615814
+        },
+        {
+          "name": "chunk-ZGVPDNZ5-BrxpqO9E.js",
+          "type": "script",
+          "transfer": 21247,
+          "encoded": 20947,
+          "decoded": 101886,
+          "duration": 129.30000001192093
+        },
+        {
+          "name": "chunk-7BUUIJ7U-Bb538aSH.js",
+          "type": "script",
+          "transfer": 1039,
+          "encoded": 739,
+          "decoded": 2105,
+          "duration": 81.5
+        },
+        {
+          "name": "line-4dmXmTOj.js",
+          "type": "script",
+          "transfer": 718,
+          "encoded": 418,
+          "decoded": 943,
+          "duration": 101.30000001192093
+        },
+        {
+          "name": "chunk-52WLFC77-D_19VM0M.js",
+          "type": "script",
+          "transfer": 6804,
+          "encoded": 6504,
+          "decoded": 33954,
+          "duration": 111.30000001192093
+        },
+        {
+          "name": "path-BWPyau1x.js",
+          "type": "script",
+          "transfer": 1217,
+          "encoded": 917,
+          "decoded": 2314,
+          "duration": 103.69999998807907
+        },
+        {
+          "name": "array-BifhSqXX.js",
+          "type": "script",
+          "transfer": 387,
+          "encoded": 87,
+          "decoded": 107,
+          "duration": 104.30000001192093
+        },
+        {
+          "name": "flowDiagram-23GEKE2U-C587zIVj.js",
+          "type": "script",
+          "transfer": 585,
+          "encoded": 285,
+          "decoded": 575,
+          "duration": 2.699999988079071
+        },
+        {
+          "name": "chunk-32BRIVSS-CvmlgJYT.js",
+          "type": "script",
+          "transfer": 1091,
+          "encoded": 791,
+          "decoded": 1972,
+          "duration": 4.899999976158142
+        },
+        {
+          "name": "chunk-XXDRQBXY-Bq6zMMOx.js",
+          "type": "script",
+          "transfer": 490,
+          "encoded": 190,
+          "decoded": 262,
+          "duration": 2.300000011920929
+        },
+        {
+          "name": "chunk-VR4S4FIN-D5dxgVv2.js",
+          "type": "script",
+          "transfer": 653,
+          "encoded": 353,
+          "decoded": 574,
+          "duration": 3.699999988079071
+        },
+        {
+          "name": "channel-DiJIXG95.js",
+          "type": "script",
+          "transfer": 406,
+          "encoded": 106,
+          "decoded": 114,
+          "duration": 3.399999976158142
+        },
+        {
+          "name": "chunk-5VM5RSS4-ZNzvKenW.js",
+          "type": "script",
+          "transfer": 517,
+          "encoded": 217,
+          "decoded": 362,
+          "duration": 5
+        },
+        {
+          "name": "chunk-PUDLZKDR-CJr7TzTy.js",
+          "type": "script",
+          "transfer": 16042,
+          "encoded": 15742,
+          "decoded": 60158,
+          "duration": 49.69999998807907
+        },
+        {
+          "name": "dagre-VKFMJZFB-OQ40se9r.js",
+          "type": "script",
+          "transfer": 3412,
+          "encoded": 3112,
+          "decoded": 8806,
+          "duration": 9.399999976158142
+        },
+        {
+          "name": "graphlib-DS17s2tU.js",
+          "type": "script",
+          "transfer": 7900,
+          "encoded": 7600,
+          "decoded": 23904,
+          "duration": 20.400000035762787
+        },
+        {
+          "name": "dagre-dpRSp0QF.js",
+          "type": "script",
+          "transfer": 10764,
+          "encoded": 10464,
+          "decoded": 32056,
+          "duration": 26.400000035762787
+        },
+        {
+          "name": "map-BaFkSB1l.js",
+          "type": "script",
+          "transfer": 2154,
+          "encoded": 1854,
+          "decoded": 5032,
+          "duration": 6.300000011920929
+        },
+        {
+          "name": "chunk-RYQCIY6F-Dtr3kkSR.js",
+          "type": "script",
+          "transfer": 2744,
+          "encoded": 2444,
+          "decoded": 7023,
+          "duration": 12.199999988079071
+        },
+        {
+          "name": "semantics-CXDvuTTU.js",
+          "type": "script",
+          "transfer": 1930,
+          "encoded": 1630,
+          "decoded": 3983,
+          "duration": 4.600000023841858
+        },
+        {
+          "name": "MermaidExplainer-CIyBPwou.js",
+          "type": "script",
+          "transfer": 6591,
+          "encoded": 6291,
+          "decoded": 18859,
+          "duration": 18.30000001192093
+        },
+        {
+          "name": "zoom-BTJyG63m.js",
+          "type": "script",
+          "transfer": 372,
+          "encoded": 72,
+          "decoded": 68,
+          "duration": 2.199999988079071
+        },
+        {
+          "name": "MermaidExplainer-CGnxxofE.css",
+          "type": "link",
+          "transfer": 931,
+          "encoded": 631,
+          "decoded": 2796,
+          "duration": 4.300000011920929
+        },
+        {
+          "name": "beats--xJxeDjs.js",
+          "type": "script",
+          "transfer": 1673,
+          "encoded": 1373,
+          "decoded": 3500,
+          "duration": 5.099999964237213
+        }
+      ],
+      "elements": 497,
+      "overflow": false,
+      "text": "Localdox\nDownload HTML + Media\n\naudit-guide.md\n\nProduct architecture\n\n≈ 1 min read\n·\n70 words\n\nA workspace for thinking clearly.\n\nReading experience\n\nSelect text to highlight. Search across your documents.\n\nWrap words\nReset widths\nDrag column edges to resize\nFEATURE\tSTATUS\nLocal storage\tAvailable\nExport\tAvailable\nCopy\nconst workspace = { local: true };\n\nProcess\nRaw\nStepped\nFlow\n0:01 / 0:08\n1/4\nImport → Read\n1×\nAuto\n1\n2\n3\n4\n5\n\nYes\n\nNo\n\nImport\n\nRead\n\nUnderstand?\n\nSave\n\nExplore\n\n0%\nSuccessfully uploaded 1 file!",
+      "unnamedButtons": 0,
+      "storage": {
+        "serviceWorker": null
+      },
+      "metrics": {
+        "Timestamp": 468837.006452,
+        "AudioHandlers": 0,
+        "AudioWorkletProcessors": 0,
+        "Documents": 12,
+        "Frames": 4,
+        "JSEventListeners": 829,
+        "LayoutObjects": 1512,
+        "MediaKeySessions": 0,
+        "MediaKeys": 0,
+        "Nodes": 1181,
+        "Resources": 155,
+        "ContextLifecycleStateObservers": 24,
+        "V8PerContextDatas": 4,
+        "WorkerGlobalScopes": 0,
+        "UACSSResources": 0,
+        "RTCPeerConnections": 0,
+        "ResourceFetchers": 12,
+        "AdSubframes": 0,
+        "DetachedScriptStates": 2,
+        "ArrayBufferContents": 1,
+        "LayoutCount": 156,
+        "RecalcStyleCount": 289,
+        "LayoutDuration": 0.041099,
+        "RecalcStyleDuration": 0.086836,
+        "DevToolsCommandDuration": 0.02241,
+        "ScriptDuration": 0.124844,
+        "V8CompileDuration": 0.000145,
+        "TaskDuration": 0.43533,
+        "TaskOtherDuration": 0.159996,
+        "ThreadTime": 0.413888,
+        "ProcessTime": 0.700712,
+        "JSHeapUsedSize": 13793456,
+        "JSHeapTotalSize": 22609920,
+        "FirstMeaningfulPaint": 468833.709451,
+        "DomContentLoaded": 468833.211037,
+        "NavigationStart": 468833.071516
+      },
+      "errors": [],
+      "label": "mobile-reader"
+    },
+    {
+      "longtasks": [
+        {
+          "start": 4024.699999988079,
+          "duration": 358
+        },
+        {
+          "start": 4404,
+          "duration": 822
+        },
+        {
+          "start": 5226.5,
+          "duration": 150
+        }
+      ],
+      "shifts": [
+        0.000013180700231481481
+      ],
+      "lcp": [
+        588,
+        664
+      ],
+      "events": [
+        {
+          "name": "pointerover",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseover",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerdown",
+          "duration": 48,
+          "interactionId": 9497
+        },
+        {
+          "name": "mousedown",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerup",
+          "duration": 48,
+          "interactionId": 9497
+        },
+        {
+          "name": "mouseup",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "click",
+          "duration": 48,
+          "interactionId": 9497
+        },
+        {
+          "name": "pointerout",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseout",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerout",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseout",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerout",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerover",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseout",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseover",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerdown",
+          "duration": 400,
+          "interactionId": 9504
+        },
+        {
+          "name": "mousedown",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerup",
+          "duration": 400,
+          "interactionId": 9504
+        },
+        {
+          "name": "mouseup",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "click",
+          "duration": 400,
+          "interactionId": 9504
+        }
+      ],
+      "paints": [
+        {
+          "name": "first-paint",
+          "start": 140
+        },
+        {
+          "name": "first-contentful-paint",
+          "start": 588
+        }
+      ],
+      "resources": [
+        {
+          "name": "styles-CdZDRCHB.css",
+          "type": "link",
+          "transfer": 22681,
+          "encoded": 22381,
+          "decoded": 164236,
+          "duration": 131.80000001192093
+        },
+        {
+          "name": "rolldown-runtime-aKtaBQYM.js",
+          "type": "other",
+          "transfer": 853,
+          "encoded": 553,
+          "decoded": 1084,
+          "duration": 4.5
+        },
+        {
+          "name": "useStore-BNaHyct3.js",
+          "type": "other",
+          "transfer": 1949,
+          "encoded": 1649,
+          "decoded": 4081,
+          "duration": 7
+        },
+        {
+          "name": "index-Cuykuzmu.js",
+          "type": "other",
+          "transfer": 49662,
+          "encoded": 49362,
+          "decoded": 184702,
+          "duration": 173.39999997615814
+        },
+        {
+          "name": "react-Cjg-8bzi.js",
+          "type": "other",
+          "transfer": 79011,
+          "encoded": 78711,
+          "decoded": 377957,
+          "duration": 394.30000001192093
+        },
+        {
+          "name": "routes-l7R_cQhN.js",
+          "type": "other",
+          "transfer": 364,
+          "encoded": 64,
+          "decoded": 73,
+          "duration": 4.899999976158142
+        },
+        {
+          "name": "DocsApp-B8oNNeup.js",
+          "type": "other",
+          "transfer": 115351,
+          "encoded": 115051,
+          "decoded": 450760,
+          "duration": 514.1999999880791
+        },
+        {
+          "name": "with-selector-D5pTrEK8.js",
+          "type": "script",
+          "transfer": 975,
+          "encoded": 675,
+          "decoded": 1664,
+          "duration": 4.699999988079071
+        },
+        {
+          "name": "Combination-SmfkUR9g.js",
+          "type": "script",
+          "transfer": 4551,
+          "encoded": 4251,
+          "decoded": 12449,
+          "duration": 11.799999952316284
+        },
+        {
+          "name": "lib-Cu4ITbhr.js",
+          "type": "script",
+          "transfer": 1063,
+          "encoded": 763,
+          "decoded": 1853,
+          "duration": 3.199999988079071
+        },
+        {
+          "name": "x-I7m-BCzM.js",
+          "type": "script",
+          "transfer": 990,
+          "encoded": 690,
+          "decoded": 1329,
+          "duration": 4.400000035762787
+        },
+        {
+          "name": "persistence-DeTLooDj.js",
+          "type": "script",
+          "transfer": 3870,
+          "encoded": 3570,
+          "decoded": 10971,
+          "duration": 20.399999976158142
+        },
+        {
+          "name": "markdown-utils-DA2EOCZ6.js",
+          "type": "script",
+          "transfer": 3234,
+          "encoded": 2934,
+          "decoded": 10511,
+          "duration": 28.899999976158142
+        },
+        {
+          "name": "utils-DktsMriq.js",
+          "type": "script",
+          "transfer": 9615,
+          "encoded": 9315,
+          "decoded": 32212,
+          "duration": 29.599999964237213
+        },
+        {
+          "name": "document-utils-CWIJCDa4.js",
+          "type": "script",
+          "transfer": 1556,
+          "encoded": 1256,
+          "decoded": 2974,
+          "duration": 33
+        },
+        {
+          "name": "lib-3PJ6z7X3.js",
+          "type": "script",
+          "transfer": 39630,
+          "encoded": 39330,
+          "decoded": 152350,
+          "duration": 138.30000001192093
+        },
+        {
+          "name": "media-references-BJtATAFB.js",
+          "type": "script",
+          "transfer": 849,
+          "encoded": 549,
+          "decoded": 1192,
+          "duration": 31.400000035762787
+        },
+        {
+          "name": "400-BdM1LXey.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 2.899999976158142
+        },
+        {
+          "name": "700-C1S-qcTD.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 2.599999964237213
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-700-normal-GZI4o3u0.woff2",
+          "type": "css",
+          "transfer": 17828,
+          "encoded": 17528,
+          "decoded": 17524,
+          "duration": 41.09999996423721
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
+          "type": "css",
+          "transfer": 17502,
+          "encoded": 17202,
+          "decoded": 17208,
+          "duration": 43.39999997615814
+        },
+        {
+          "name": "400-CPNfwKr3.css",
+          "type": "link",
+          "transfer": 7590,
+          "encoded": 7290,
+          "decoded": 11161,
+          "duration": 12.899999976158142
+        },
+        {
+          "name": "500-CgNxeaXa.css",
+          "type": "link",
+          "transfer": 7682,
+          "encoded": 7382,
+          "decoded": 11329,
+          "duration": 12.5
+        },
+        {
+          "name": "rehype-highlight-DsllXgCY.js",
+          "type": "script",
+          "transfer": 41683,
+          "encoded": 41383,
+          "decoded": 167124,
+          "duration": 153.80000001192093
+        },
+        {
+          "name": "Mermaid-CqShmmXa.js",
+          "type": "script",
+          "transfer": 12668,
+          "encoded": 12368,
+          "decoded": 40755,
+          "duration": 42.80000001192093
+        },
+        {
+          "name": "eye-off-CRT88w28.js",
+          "type": "script",
+          "transfer": 559,
+          "encoded": 259,
+          "decoded": 415,
+          "duration": 4.199999988079071
+        },
+        {
+          "name": "mermaid-render-cache-BwqYyW0J.js",
+          "type": "script",
+          "transfer": 1392,
+          "encoded": 1092,
+          "decoded": 2112,
+          "duration": 9.399999976158142
+        },
+        {
+          "name": "viewport-BwwQddCf.js",
+          "type": "script",
+          "transfer": 2637,
+          "encoded": 2337,
+          "decoded": 7555,
+          "duration": 12.199999988079071
+        },
+        {
+          "name": "mermaid-performance-CMplpI48.js",
+          "type": "script",
+          "transfer": 1053,
+          "encoded": 753,
+          "decoded": 1610,
+          "duration": 12.599999964237213
+        },
+        {
+          "name": "gate-D0Z4Mx6W.js",
+          "type": "script",
+          "transfer": 708,
+          "encoded": 408,
+          "decoded": 779,
+          "duration": 17
+        },
+        {
+          "name": "camera-CAyEZvqO.js",
+          "type": "script",
+          "transfer": 1314,
+          "encoded": 1014,
+          "decoded": 2497,
+          "duration": 36.19999998807907
+        },
+        {
+          "name": "jetbrains-mono-latin-400-normal-V6pRDFza.woff2",
+          "type": "css",
+          "transfer": 21453,
+          "encoded": 21153,
+          "decoded": 21168,
+          "duration": 50.59999996423721
+        },
+        {
+          "name": "400-DhzmkGAC.css",
+          "type": "link",
+          "transfer": 892,
+          "encoded": 592,
+          "decoded": 2243,
+          "duration": 14.800000011920929
+        },
+        {
+          "name": "500-2kC3L4qO.css",
+          "type": "link",
+          "transfer": 866,
+          "encoded": 566,
+          "decoded": 2243,
+          "duration": 18.69999998807907
+        },
+        {
+          "name": "600-BkbYP6CE.css",
+          "type": "link",
+          "transfer": 871,
+          "encoded": 571,
+          "decoded": 2243,
+          "duration": 21.19999998807907
+        },
+        {
+          "name": "700-Cb4Vc2Cd.css",
+          "type": "link",
+          "transfer": 868,
+          "encoded": 568,
+          "decoded": 2243,
+          "duration": 23.80000001192093
+        },
+        {
+          "name": "chunk-Y2CYZVJY-DsF7k-Jl.js",
+          "type": "script",
+          "transfer": 414,
+          "encoded": 114,
+          "decoded": 155,
+          "duration": 2.800000011920929
+        },
+        {
+          "name": "src-UMNXGZaF.js",
+          "type": "script",
+          "transfer": 14393,
+          "encoded": 14093,
+          "decoded": 45733,
+          "duration": 46
+        },
+        {
+          "name": "mermaid.core-xYmJNPLD.js",
+          "type": "script",
+          "transfer": 23892,
+          "encoded": 23592,
+          "decoded": 80034,
+          "duration": 77.39999997615814
+        },
+        {
+          "name": "chunk-ICXQ74PX-kT5GPKfb.js",
+          "type": "script",
+          "transfer": 7973,
+          "encoded": 7673,
+          "decoded": 30875,
+          "duration": 32.89999997615814
+        },
+        {
+          "name": "chunk-WYO6CB5R-C9HY9Ovi.js",
+          "type": "script",
+          "transfer": 28127,
+          "encoded": 27827,
+          "decoded": 234633,
+          "duration": 129.30000001192093
+        },
+        {
+          "name": "dist-qx0Iv9vM.js",
+          "type": "script",
+          "transfer": 1160,
+          "encoded": 860,
+          "decoded": 2173,
+          "duration": 5
+        },
+        {
+          "name": "chunk-C7G6YPKG-CxYoV8-T.js",
+          "type": "script",
+          "transfer": 1098,
+          "encoded": 798,
+          "decoded": 1849,
+          "duration": 35.40000003576279
+        },
+        {
+          "name": "chunk-OGEWGWER-CRsfHZgQ.js",
+          "type": "script",
+          "transfer": 787,
+          "encoded": 487,
+          "decoded": 963,
+          "duration": 37.10000002384186
+        },
+        {
+          "name": "chunk-HOUHSVGY-BnaYAkf6.js",
+          "type": "script",
+          "transfer": 2731,
+          "encoded": 2431,
+          "decoded": 5835,
+          "duration": 41.80000001192093
+        },
+        {
+          "name": "chunk-Q4XR5HBZ-DclffvuA.js",
+          "type": "script",
+          "transfer": 13708,
+          "encoded": 13408,
+          "decoded": 46875,
+          "duration": 79.40000003576279
+        },
+        {
+          "name": "rough.esm-CSKSodPl.js",
+          "type": "script",
+          "transfer": 8104,
+          "encoded": 7804,
+          "decoded": 27103,
+          "duration": 99.89999997615814
+        },
+        {
+          "name": "chunk-ZGVPDNZ5-BrxpqO9E.js",
+          "type": "script",
+          "transfer": 21247,
+          "encoded": 20947,
+          "decoded": 101886,
+          "duration": 129.30000001192093
+        },
+        {
+          "name": "chunk-7BUUIJ7U-Bb538aSH.js",
+          "type": "script",
+          "transfer": 1039,
+          "encoded": 739,
+          "decoded": 2105,
+          "duration": 81.5
+        },
+        {
+          "name": "line-4dmXmTOj.js",
+          "type": "script",
+          "transfer": 718,
+          "encoded": 418,
+          "decoded": 943,
+          "duration": 101.30000001192093
+        },
+        {
+          "name": "chunk-52WLFC77-D_19VM0M.js",
+          "type": "script",
+          "transfer": 6804,
+          "encoded": 6504,
+          "decoded": 33954,
+          "duration": 111.30000001192093
+        },
+        {
+          "name": "path-BWPyau1x.js",
+          "type": "script",
+          "transfer": 1217,
+          "encoded": 917,
+          "decoded": 2314,
+          "duration": 103.69999998807907
+        },
+        {
+          "name": "array-BifhSqXX.js",
+          "type": "script",
+          "transfer": 387,
+          "encoded": 87,
+          "decoded": 107,
+          "duration": 104.30000001192093
+        },
+        {
+          "name": "flowDiagram-23GEKE2U-C587zIVj.js",
+          "type": "script",
+          "transfer": 585,
+          "encoded": 285,
+          "decoded": 575,
+          "duration": 2.699999988079071
+        },
+        {
+          "name": "chunk-32BRIVSS-CvmlgJYT.js",
+          "type": "script",
+          "transfer": 1091,
+          "encoded": 791,
+          "decoded": 1972,
+          "duration": 4.899999976158142
+        },
+        {
+          "name": "chunk-XXDRQBXY-Bq6zMMOx.js",
+          "type": "script",
+          "transfer": 490,
+          "encoded": 190,
+          "decoded": 262,
+          "duration": 2.300000011920929
+        },
+        {
+          "name": "chunk-VR4S4FIN-D5dxgVv2.js",
+          "type": "script",
+          "transfer": 653,
+          "encoded": 353,
+          "decoded": 574,
+          "duration": 3.699999988079071
+        },
+        {
+          "name": "channel-DiJIXG95.js",
+          "type": "script",
+          "transfer": 406,
+          "encoded": 106,
+          "decoded": 114,
+          "duration": 3.399999976158142
+        },
+        {
+          "name": "chunk-5VM5RSS4-ZNzvKenW.js",
+          "type": "script",
+          "transfer": 517,
+          "encoded": 217,
+          "decoded": 362,
+          "duration": 5
+        },
+        {
+          "name": "chunk-PUDLZKDR-CJr7TzTy.js",
+          "type": "script",
+          "transfer": 16042,
+          "encoded": 15742,
+          "decoded": 60158,
+          "duration": 49.69999998807907
+        },
+        {
+          "name": "dagre-VKFMJZFB-OQ40se9r.js",
+          "type": "script",
+          "transfer": 3412,
+          "encoded": 3112,
+          "decoded": 8806,
+          "duration": 9.399999976158142
+        },
+        {
+          "name": "graphlib-DS17s2tU.js",
+          "type": "script",
+          "transfer": 7900,
+          "encoded": 7600,
+          "decoded": 23904,
+          "duration": 20.400000035762787
+        },
+        {
+          "name": "dagre-dpRSp0QF.js",
+          "type": "script",
+          "transfer": 10764,
+          "encoded": 10464,
+          "decoded": 32056,
+          "duration": 26.400000035762787
+        },
+        {
+          "name": "map-BaFkSB1l.js",
+          "type": "script",
+          "transfer": 2154,
+          "encoded": 1854,
+          "decoded": 5032,
+          "duration": 6.300000011920929
+        },
+        {
+          "name": "chunk-RYQCIY6F-Dtr3kkSR.js",
+          "type": "script",
+          "transfer": 2744,
+          "encoded": 2444,
+          "decoded": 7023,
+          "duration": 12.199999988079071
+        },
+        {
+          "name": "semantics-CXDvuTTU.js",
+          "type": "script",
+          "transfer": 1930,
+          "encoded": 1630,
+          "decoded": 3983,
+          "duration": 4.600000023841858
+        },
+        {
+          "name": "MermaidExplainer-CIyBPwou.js",
+          "type": "script",
+          "transfer": 6591,
+          "encoded": 6291,
+          "decoded": 18859,
+          "duration": 18.30000001192093
+        },
+        {
+          "name": "zoom-BTJyG63m.js",
+          "type": "script",
+          "transfer": 372,
+          "encoded": 72,
+          "decoded": 68,
+          "duration": 2.199999988079071
+        },
+        {
+          "name": "MermaidExplainer-CGnxxofE.css",
+          "type": "link",
+          "transfer": 931,
+          "encoded": 631,
+          "decoded": 2796,
+          "duration": 4.300000011920929
+        },
+        {
+          "name": "beats--xJxeDjs.js",
+          "type": "script",
+          "transfer": 1673,
+          "encoded": 1373,
+          "decoded": 3500,
+          "duration": 5.099999964237213
+        }
+      ],
+      "elements": 18281,
+      "overflow": false,
+      "text": "Localdox\nALL FILES\naudit-guide\n1m\naudit-long\n150m\nMW\nMy workspace\nMW\nDownload HTML + Media\n\naudit-long.md\n\nLong document\n\n≈ 150 min read\n·\n33,003 words\n\nSection 0\n\nParagraph 0: alpha bravo charlie target passage 0.\n\nSection 1\n\nParagraph 1: alpha bravo charlie target passage 1.\n\nSection 2\n\nParagraph 2: alpha bravo charlie target passage 2.\n\nSection 3\n\nParagraph 3: alpha bravo charlie target passage 3.\n\nSection 4\n\nParagraph 4: alpha bravo charlie target passage 4.\n\nSection 5\n\nParagraph 5: alpha bravo charlie target passage 5.\n\nSection 6\n\nParagraph 6: alpha bravo charlie target passage 6.\n\nSection 7\n\nParagraph 7: alpha bravo charlie target passage 7.\n\nSection 8\n\nParagraph 8: alpha bravo charlie target passage 8.\n\nSection 9\n\nParagraph 9: alpha bravo charlie target passage 9.\n\nSection 10\n\nParagraph 10: alpha bravo charlie target passage 10.\n\nSection 11\n\nParagraph 11: alpha bravo charlie target passage 11.\n\nSection 12\n\nParagraph 12: alpha bravo charlie target passage 12.\n\nSection 13\n\nParagraph 13: alpha bravo charlie target passage 13.\n\nSection 14\n\nParagraph 14: alpha bravo charlie target passage 14.\n\nSection 15\n\nParagraph 15: alpha bravo charlie target passage 15.\n\nSection 16\n\nParagraph 16: alpha bravo charlie target passage 16.\n\nSection 17\n\nParagraph 17: alpha bravo charlie target passage 17.\n\nSection 18\n\nParagraph 18: alpha bravo charlie target passage 18.\n\nSection 19\n\nParagraph 19: alpha bravo charlie target passage 19.\n\nSection 20\n\nParagraph 20: alpha bravo charlie target passage 20.\n\nSection 21\n\nParagraph 21: alpha bravo charlie target passage 21.\n\nSection 22\n\nParagraph 22: alpha bravo charlie target passage 22.\n\nSection 23\n\nParagraph 23: alpha bravo charlie target passage 23.\n\nSection 24\n\nParagraph 24: alpha bravo charlie target passage 24.\n\nSection 25\n\nParagraph 25: alpha bravo charlie target passage 25.\n\nSection 26\n\nParagraph 26: alpha bravo charlie target passage 26.\n\nSection 27\n\nParagraph 27: alpha bravo charlie target passage 27.\n\nSection 28\n\nParagraph 28: alpha bravo charlie target passage 28.\n\nSection 29\n\nParagraph 29: alpha bravo charlie target passage 29.\n\nSection 30\n\nParagraph 30: alpha bravo charlie target passage 30.\n\nSection 31\n\nParagraph 31: alpha bravo charlie target passage 31.\n\nSection 32\n\nParagraph 32: alpha bravo charlie target passage 32.\n\nSection 33\n\nParagraph 33: alpha bravo charlie target passage 33.\n\nSection 34\n\nParagraph 34: alpha bravo charlie target passage 34.\n\nSection 35\n\nParagraph 35: alpha bravo charlie target passage 35.\n\nS",
+      "unnamedButtons": 0,
+      "storage": {
+        "serviceWorker": null
+      },
+      "metrics": {
+        "Timestamp": 468840.391368,
+        "AudioHandlers": 0,
+        "AudioWorkletProcessors": 0,
+        "Documents": 3,
+        "Frames": 1,
+        "JSEventListeners": 6312,
+        "LayoutObjects": 60249,
+        "MediaKeySessions": 0,
+        "MediaKeys": 0,
+        "Nodes": 66671,
+        "Resources": 155,
+        "ContextLifecycleStateObservers": 12,
+        "V8PerContextDatas": 2,
+        "WorkerGlobalScopes": 0,
+        "UACSSResources": 0,
+        "RTCPeerConnections": 0,
+        "ResourceFetchers": 3,
+        "AdSubframes": 0,
+        "DetachedScriptStates": 2,
+        "ArrayBufferContents": 0,
+        "LayoutCount": 175,
+        "RecalcStyleCount": 331,
+        "LayoutDuration": 0.104792,
+        "RecalcStyleDuration": 0.269235,
+        "DevToolsCommandDuration": 0.440205,
+        "ScriptDuration": 1.18243,
+        "V8CompileDuration": 0.000145,
+        "TaskDuration": 2.275732,
+        "TaskOtherDuration": 0.278925,
+        "ThreadTime": 2.245989,
+        "ProcessTime": 3.04099,
+        "JSHeapUsedSize": 88785592,
+        "JSHeapTotalSize": 136626176,
+        "FirstMeaningfulPaint": 468833.709451,
+        "DomContentLoaded": 468833.211037,
+        "NavigationStart": 468833.071516
+      },
+      "errors": [],
+      "label": "long-markdown-3000-sections",
+      "uploadToSettledMs": 3340
+    },
+    {
+      "longtasks": [
+        {
+          "start": 4024.699999988079,
+          "duration": 358
+        },
+        {
+          "start": 4404,
+          "duration": 822
+        },
+        {
+          "start": 5226.5,
+          "duration": 150
+        }
+      ],
+      "shifts": [
+        0.000013180700231481481
+      ],
+      "lcp": [
+        588,
+        664
+      ],
+      "events": [
+        {
+          "name": "pointerover",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseover",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerdown",
+          "duration": 48,
+          "interactionId": 9497
+        },
+        {
+          "name": "mousedown",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerup",
+          "duration": 48,
+          "interactionId": 9497
+        },
+        {
+          "name": "mouseup",
+          "duration": 48,
+          "interactionId": 0
+        },
+        {
+          "name": "click",
+          "duration": 48,
+          "interactionId": 9497
+        },
+        {
+          "name": "pointerout",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseout",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerout",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseout",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerout",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerover",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseout",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseover",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerdown",
+          "duration": 400,
+          "interactionId": 9504
+        },
+        {
+          "name": "mousedown",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerup",
+          "duration": 400,
+          "interactionId": 9504
+        },
+        {
+          "name": "mouseup",
+          "duration": 400,
+          "interactionId": 0
+        },
+        {
+          "name": "click",
+          "duration": 400,
+          "interactionId": 9504
+        },
+        {
+          "name": "pointerout",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerleave",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerenter",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseout",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "mouseover",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerdown",
+          "duration": 16,
+          "interactionId": 9511
+        },
+        {
+          "name": "mousedown",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "pointerup",
+          "duration": 16,
+          "interactionId": 9511
+        },
+        {
+          "name": "mouseup",
+          "duration": 16,
+          "interactionId": 0
+        },
+        {
+          "name": "click",
+          "duration": 16,
+          "interactionId": 9511
+        }
+      ],
+      "paints": [
+        {
+          "name": "first-paint",
+          "start": 140
+        },
+        {
+          "name": "first-contentful-paint",
+          "start": 588
+        }
+      ],
+      "resources": [
+        {
+          "name": "styles-CdZDRCHB.css",
+          "type": "link",
+          "transfer": 22681,
+          "encoded": 22381,
+          "decoded": 164236,
+          "duration": 131.80000001192093
+        },
+        {
+          "name": "rolldown-runtime-aKtaBQYM.js",
+          "type": "other",
+          "transfer": 853,
+          "encoded": 553,
+          "decoded": 1084,
+          "duration": 4.5
+        },
+        {
+          "name": "useStore-BNaHyct3.js",
+          "type": "other",
+          "transfer": 1949,
+          "encoded": 1649,
+          "decoded": 4081,
+          "duration": 7
+        },
+        {
+          "name": "index-Cuykuzmu.js",
+          "type": "other",
+          "transfer": 49662,
+          "encoded": 49362,
+          "decoded": 184702,
+          "duration": 173.39999997615814
+        },
+        {
+          "name": "react-Cjg-8bzi.js",
+          "type": "other",
+          "transfer": 79011,
+          "encoded": 78711,
+          "decoded": 377957,
+          "duration": 394.30000001192093
+        },
+        {
+          "name": "routes-l7R_cQhN.js",
+          "type": "other",
+          "transfer": 364,
+          "encoded": 64,
+          "decoded": 73,
+          "duration": 4.899999976158142
+        },
+        {
+          "name": "DocsApp-B8oNNeup.js",
+          "type": "other",
+          "transfer": 115351,
+          "encoded": 115051,
+          "decoded": 450760,
+          "duration": 514.1999999880791
+        },
+        {
+          "name": "with-selector-D5pTrEK8.js",
+          "type": "script",
+          "transfer": 975,
+          "encoded": 675,
+          "decoded": 1664,
+          "duration": 4.699999988079071
+        },
+        {
+          "name": "Combination-SmfkUR9g.js",
+          "type": "script",
+          "transfer": 4551,
+          "encoded": 4251,
+          "decoded": 12449,
+          "duration": 11.799999952316284
+        },
+        {
+          "name": "lib-Cu4ITbhr.js",
+          "type": "script",
+          "transfer": 1063,
+          "encoded": 763,
+          "decoded": 1853,
+          "duration": 3.199999988079071
+        },
+        {
+          "name": "x-I7m-BCzM.js",
+          "type": "script",
+          "transfer": 990,
+          "encoded": 690,
+          "decoded": 1329,
+          "duration": 4.400000035762787
+        },
+        {
+          "name": "persistence-DeTLooDj.js",
+          "type": "script",
+          "transfer": 3870,
+          "encoded": 3570,
+          "decoded": 10971,
+          "duration": 20.399999976158142
+        },
+        {
+          "name": "markdown-utils-DA2EOCZ6.js",
+          "type": "script",
+          "transfer": 3234,
+          "encoded": 2934,
+          "decoded": 10511,
+          "duration": 28.899999976158142
+        },
+        {
+          "name": "utils-DktsMriq.js",
+          "type": "script",
+          "transfer": 9615,
+          "encoded": 9315,
+          "decoded": 32212,
+          "duration": 29.599999964237213
+        },
+        {
+          "name": "document-utils-CWIJCDa4.js",
+          "type": "script",
+          "transfer": 1556,
+          "encoded": 1256,
+          "decoded": 2974,
+          "duration": 33
+        },
+        {
+          "name": "lib-3PJ6z7X3.js",
+          "type": "script",
+          "transfer": 39630,
+          "encoded": 39330,
+          "decoded": 152350,
+          "duration": 138.30000001192093
+        },
+        {
+          "name": "media-references-BJtATAFB.js",
+          "type": "script",
+          "transfer": 849,
+          "encoded": 549,
+          "decoded": 1192,
+          "duration": 31.400000035762787
+        },
+        {
+          "name": "400-BdM1LXey.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 2.899999976158142
+        },
+        {
+          "name": "700-C1S-qcTD.css",
+          "type": "link",
+          "transfer": 628,
+          "encoded": 328,
+          "decoded": 864,
+          "duration": 2.599999964237213
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-700-normal-GZI4o3u0.woff2",
+          "type": "css",
+          "transfer": 17828,
+          "encoded": 17528,
+          "decoded": 17524,
+          "duration": 41.09999996423721
+        },
+        {
+          "name": "atkinson-hyperlegible-latin-400-normal-BrHNak5F.woff2",
+          "type": "css",
+          "transfer": 17502,
+          "encoded": 17202,
+          "decoded": 17208,
+          "duration": 43.39999997615814
+        },
+        {
+          "name": "400-CPNfwKr3.css",
+          "type": "link",
+          "transfer": 7590,
+          "encoded": 7290,
+          "decoded": 11161,
+          "duration": 12.899999976158142
+        },
+        {
+          "name": "500-CgNxeaXa.css",
+          "type": "link",
+          "transfer": 7682,
+          "encoded": 7382,
+          "decoded": 11329,
+          "duration": 12.5
+        },
+        {
+          "name": "rehype-highlight-DsllXgCY.js",
+          "type": "script",
+          "transfer": 41683,
+          "encoded": 41383,
+          "decoded": 167124,
+          "duration": 153.80000001192093
+        },
+        {
+          "name": "Mermaid-CqShmmXa.js",
+          "type": "script",
+          "transfer": 12668,
+          "encoded": 12368,
+          "decoded": 40755,
+          "duration": 42.80000001192093
+        },
+        {
+          "name": "eye-off-CRT88w28.js",
+          "type": "script",
+          "transfer": 559,
+          "encoded": 259,
+          "decoded": 415,
+          "duration": 4.199999988079071
+        },
+        {
+          "name": "mermaid-render-cache-BwqYyW0J.js",
+          "type": "script",
+          "transfer": 1392,
+          "encoded": 1092,
+          "decoded": 2112,
+          "duration": 9.399999976158142
+        },
+        {
+          "name": "viewport-BwwQddCf.js",
+          "type": "script",
+          "transfer": 2637,
+          "encoded": 2337,
+          "decoded": 7555,
+          "duration": 12.199999988079071
+        },
+        {
+          "name": "mermaid-performance-CMplpI48.js",
+          "type": "script",
+          "transfer": 1053,
+          "encoded": 753,
+          "decoded": 1610,
+          "duration": 12.599999964237213
+        },
+        {
+          "name": "gate-D0Z4Mx6W.js",
+          "type": "script",
+          "transfer": 708,
+          "encoded": 408,
+          "decoded": 779,
+          "duration": 17
+        },
+        {
+          "name": "camera-CAyEZvqO.js",
+          "type": "script",
+          "transfer": 1314,
+          "encoded": 1014,
+          "decoded": 2497,
+          "duration": 36.19999998807907
+        },
+        {
+          "name": "jetbrains-mono-latin-400-normal-V6pRDFza.woff2",
+          "type": "css",
+          "transfer": 21453,
+          "encoded": 21153,
+          "decoded": 21168,
+          "duration": 50.59999996423721
+        },
+        {
+          "name": "400-DhzmkGAC.css",
+          "type": "link",
+          "transfer": 892,
+          "encoded": 592,
+          "decoded": 2243,
+          "duration": 14.800000011920929
+        },
+        {
+          "name": "500-2kC3L4qO.css",
+          "type": "link",
+          "transfer": 866,
+          "encoded": 566,
+          "decoded": 2243,
+          "duration": 18.69999998807907
+        },
+        {
+          "name": "600-BkbYP6CE.css",
+          "type": "link",
+          "transfer": 871,
+          "encoded": 571,
+          "decoded": 2243,
+          "duration": 21.19999998807907
+        },
+        {
+          "name": "700-Cb4Vc2Cd.css",
+          "type": "link",
+          "transfer": 868,
+          "encoded": 568,
+          "decoded": 2243,
+          "duration": 23.80000001192093
+        },
+        {
+          "name": "chunk-Y2CYZVJY-DsF7k-Jl.js",
+          "type": "script",
+          "transfer": 414,
+          "encoded": 114,
+          "decoded": 155,
+          "duration": 2.800000011920929
+        },
+        {
+          "name": "src-UMNXGZaF.js",
+          "type": "script",
+          "transfer": 14393,
+          "encoded": 14093,
+          "decoded": 45733,
+          "duration": 46
+        },
+        {
+          "name": "mermaid.core-xYmJNPLD.js",
+          "type": "script",
+          "transfer": 23892,
+          "encoded": 23592,
+          "decoded": 80034,
+          "duration": 77.39999997615814
+        },
+        {
+          "name": "chunk-ICXQ74PX-kT5GPKfb.js",
+          "type": "script",
+          "transfer": 7973,
+          "encoded": 7673,
+          "decoded": 30875,
+          "duration": 32.89999997615814
+        },
+        {
+          "name": "chunk-WYO6CB5R-C9HY9Ovi.js",
+          "type": "script",
+          "transfer": 28127,
+          "encoded": 27827,
+          "decoded": 234633,
+          "duration": 129.30000001192093
+        },
+        {
+          "name": "dist-qx0Iv9vM.js",
+          "type": "script",
+          "transfer": 1160,
+          "encoded": 860,
+          "decoded": 2173,
+          "duration": 5
+        },
+        {
+          "name": "chunk-C7G6YPKG-CxYoV8-T.js",
+          "type": "script",
+          "transfer": 1098,
+          "encoded": 798,
+          "decoded": 1849,
+          "duration": 35.40000003576279
+        },
+        {
+          "name": "chunk-OGEWGWER-CRsfHZgQ.js",
+          "type": "script",
+          "transfer": 787,
+          "encoded": 487,
+          "decoded": 963,
+          "duration": 37.10000002384186
+        },
+        {
+          "name": "chunk-HOUHSVGY-BnaYAkf6.js",
+          "type": "script",
+          "transfer": 2731,
+          "encoded": 2431,
+          "decoded": 5835,
+          "duration": 41.80000001192093
+        },
+        {
+          "name": "chunk-Q4XR5HBZ-DclffvuA.js",
+          "type": "script",
+          "transfer": 13708,
+          "encoded": 13408,
+          "decoded": 46875,
+          "duration": 79.40000003576279
+        },
+        {
+          "name": "rough.esm-CSKSodPl.js",
+          "type": "script",
+          "transfer": 8104,
+          "encoded": 7804,
+          "decoded": 27103,
+          "duration": 99.89999997615814
+        },
+        {
+          "name": "chunk-ZGVPDNZ5-BrxpqO9E.js",
+          "type": "script",
+          "transfer": 21247,
+          "encoded": 20947,
+          "decoded": 101886,
+          "duration": 129.30000001192093
+        },
+        {
+          "name": "chunk-7BUUIJ7U-Bb538aSH.js",
+          "type": "script",
+          "transfer": 1039,
+          "encoded": 739,
+          "decoded": 2105,
+          "duration": 81.5
+        },
+        {
+          "name": "line-4dmXmTOj.js",
+          "type": "script",
+          "transfer": 718,
+          "encoded": 418,
+          "decoded": 943,
+          "duration": 101.30000001192093
+        },
+        {
+          "name": "chunk-52WLFC77-D_19VM0M.js",
+          "type": "script",
+          "transfer": 6804,
+          "encoded": 6504,
+          "decoded": 33954,
+          "duration": 111.30000001192093
+        },
+        {
+          "name": "path-BWPyau1x.js",
+          "type": "script",
+          "transfer": 1217,
+          "encoded": 917,
+          "decoded": 2314,
+          "duration": 103.69999998807907
+        },
+        {
+          "name": "array-BifhSqXX.js",
+          "type": "script",
+          "transfer": 387,
+          "encoded": 87,
+          "decoded": 107,
+          "duration": 104.30000001192093
+        },
+        {
+          "name": "flowDiagram-23GEKE2U-C587zIVj.js",
+          "type": "script",
+          "transfer": 585,
+          "encoded": 285,
+          "decoded": 575,
+          "duration": 2.699999988079071
+        },
+        {
+          "name": "chunk-32BRIVSS-CvmlgJYT.js",
+          "type": "script",
+          "transfer": 1091,
+          "encoded": 791,
+          "decoded": 1972,
+          "duration": 4.899999976158142
+        },
+        {
+          "name": "chunk-XXDRQBXY-Bq6zMMOx.js",
+          "type": "script",
+          "transfer": 490,
+          "encoded": 190,
+          "decoded": 262,
+          "duration": 2.300000011920929
+        },
+        {
+          "name": "chunk-VR4S4FIN-D5dxgVv2.js",
+          "type": "script",
+          "transfer": 653,
+          "encoded": 353,
+          "decoded": 574,
+          "duration": 3.699999988079071
+        },
+        {
+          "name": "channel-DiJIXG95.js",
+          "type": "script",
+          "transfer": 406,
+          "encoded": 106,
+          "decoded": 114,
+          "duration": 3.399999976158142
+        },
+        {
+          "name": "chunk-5VM5RSS4-ZNzvKenW.js",
+          "type": "script",
+          "transfer": 517,
+          "encoded": 217,
+          "decoded": 362,
+          "duration": 5
+        },
+        {
+          "name": "chunk-PUDLZKDR-CJr7TzTy.js",
+          "type": "script",
+          "transfer": 16042,
+          "encoded": 15742,
+          "decoded": 60158,
+          "duration": 49.69999998807907
+        },
+        {
+          "name": "dagre-VKFMJZFB-OQ40se9r.js",
+          "type": "script",
+          "transfer": 3412,
+          "encoded": 3112,
+          "decoded": 8806,
+          "duration": 9.399999976158142
+        },
+        {
+          "name": "graphlib-DS17s2tU.js",
+          "type": "script",
+          "transfer": 7900,
+          "encoded": 7600,
+          "decoded": 23904,
+          "duration": 20.400000035762787
+        },
+        {
+          "name": "dagre-dpRSp0QF.js",
+          "type": "script",
+          "transfer": 10764,
+          "encoded": 10464,
+          "decoded": 32056,
+          "duration": 26.400000035762787
+        },
+        {
+          "name": "map-BaFkSB1l.js",
+          "type": "script",
+          "transfer": 2154,
+          "encoded": 1854,
+          "decoded": 5032,
+          "duration": 6.300000011920929
+        },
+        {
+          "name": "chunk-RYQCIY6F-Dtr3kkSR.js",
+          "type": "script",
+          "transfer": 2744,
+          "encoded": 2444,
+          "decoded": 7023,
+          "duration": 12.199999988079071
+        },
+        {
+          "name": "semantics-CXDvuTTU.js",
+          "type": "script",
+          "transfer": 1930,
+          "encoded": 1630,
+          "decoded": 3983,
+          "duration": 4.600000023841858
+        },
+        {
+          "name": "MermaidExplainer-CIyBPwou.js",
+          "type": "script",
+          "transfer": 6591,
+          "encoded": 6291,
+          "decoded": 18859,
+          "duration": 18.30000001192093
+        },
+        {
+          "name": "zoom-BTJyG63m.js",
+          "type": "script",
+          "transfer": 372,
+          "encoded": 72,
+          "decoded": 68,
+          "duration": 2.199999988079071
+        },
+        {
+          "name": "MermaidExplainer-CGnxxofE.css",
+          "type": "link",
+          "transfer": 931,
+          "encoded": 631,
+          "decoded": 2796,
+          "duration": 4.300000011920929
+        },
+        {
+          "name": "beats--xJxeDjs.js",
+          "type": "script",
+          "transfer": 1673,
+          "encoded": 1373,
+          "decoded": 3500,
+          "duration": 5.099999964237213
+        },
+        {
+          "name": "document-index.worker-BbA1cxR_.js",
+          "type": "other",
+          "transfer": 22467,
+          "encoded": 22167,
+          "decoded": 79415,
+          "duration": -3.5
+        }
+      ],
+      "elements": 18656,
+      "overflow": false,
+      "text": "Localdox\nSEARCH\nSearch all workspaces\naudit-long.md\n200\nParagraph 0: alpha **bravo** charlie target passage 0.\nParagraph 1: alpha **bravo** charlie target passage 1.\nParagraph 2: alpha **bravo** charlie target passage 2.\nParagraph 3: alpha **bravo** charlie target passage 3.\nParagraph 4: alpha **bravo** charlie target passage 4.\nParagraph 5: alpha **bravo** charlie target passage 5.\nParagraph 6: alpha **bravo** charlie target passage 6.\nParagraph 7: alpha **bravo** charlie target passage 7.\nParagraph 8: alpha **bravo** charlie target passage 8.\nParagraph 9: alpha **bravo** charlie target passage 9.\nParagraph 10: alpha **bravo** charlie target passage 10.\nParagraph 11: alpha **bravo** charlie target passage 11.\nParagraph 12: alpha **bravo** charlie target passage 12.\nParagraph 13: alpha **bravo** charlie target passage 13.\nParagraph 14: alpha **bravo** charlie target passage 14.\nParagraph 15: alpha **bravo** charlie target passage 15.\nParagraph 16: alpha **bravo** charlie target passage 16.\nParagraph 17: alpha **bravo** charlie target passage 17.\nParagraph 18: alpha **bravo** charlie target passage 18.\nParagraph 19: alpha **bravo** charlie target passage 19.\nParagraph 20: alpha **bravo** charlie target passage 20.\nParagraph 21: alpha **bravo** charlie target passage 21.\nParagraph 22: alpha **bravo** charlie target passage 22.\nParagraph 23: alpha **bravo** charlie target passage 23.\nParagraph 24: alpha **bravo** charlie target passage 24.\nParagraph 25: alpha **bravo** charlie target passage 25.\nParagraph 26: alpha **bravo** charlie target passage 26.\nParagraph 27: alpha **bravo** charlie target passage 27.\nParagraph 28: alpha **bravo** charlie target passage 28.\nParagraph 29: alpha **bravo** charlie target passage 29.\nParagraph 30: alpha **bravo** charlie target passage 30.\nParagraph 31: alpha **bravo** charlie target passage 31.\nParagraph 32: alpha **bravo** charlie target passage 32.\nParagraph 33: alpha **bravo** charlie target passage 33.\nParagraph 34: alpha **bravo** charlie target passage 34.\nParagraph 35: alpha **bravo** charlie target passage 35.\nParagraph 36: alpha **bravo** charlie target passage 36.\nParagraph 37: alpha **bravo** charlie target passage 37.\nParagraph 38: alpha **bravo** charlie target passage 38.\nParagraph 39: alpha **bravo** charlie target passage 39.\nParagraph 40: alpha **bravo** charlie target passage 40.\nParagraph 41: alpha **bravo** charlie target passage 41.\nParagraph 42: alpha **bravo** charlie target passage 42.\nParagraph 43:",
+      "unnamedButtons": 0,
+      "storage": {
+        "serviceWorker": null
+      },
+      "metrics": {
+        "Timestamp": 468843.012216,
+        "AudioHandlers": 0,
+        "AudioWorkletProcessors": 0,
+        "Documents": 3,
+        "Frames": 1,
+        "JSEventListeners": 6618,
+        "LayoutObjects": 61316,
+        "MediaKeySessions": 0,
+        "MediaKeys": 0,
+        "Nodes": 67727,
+        "Resources": 155,
+        "ContextLifecycleStateObservers": 13,
+        "V8PerContextDatas": 2,
+        "WorkerGlobalScopes": 1,
+        "UACSSResources": 0,
+        "RTCPeerConnections": 0,
+        "ResourceFetchers": 3,
+        "AdSubframes": 0,
+        "DetachedScriptStates": 2,
+        "ArrayBufferContents": 0,
+        "LayoutCount": 184,
+        "RecalcStyleCount": 360,
+        "LayoutDuration": 0.106872,
+        "RecalcStyleDuration": 0.275329,
+        "DevToolsCommandDuration": 0.473253,
+        "ScriptDuration": 1.201324,
+        "V8CompileDuration": 0.000145,
+        "TaskDuration": 2.460126,
+        "TaskOtherDuration": 0.403203,
+        "ThreadTime": 2.42509,
+        "ProcessTime": 3.466363,
+        "JSHeapUsedSize": 76312396,
+        "JSHeapTotalSize": 141574144,
+        "FirstMeaningfulPaint": 468833.709451,
+        "DomContentLoaded": 468833.211037,
+        "NavigationStart": 468833.071516
+      },
+      "errors": [],
+      "label": "long-document-search"
+    }
+  ]
+}

@@ -61,7 +61,7 @@ export function DiagramTopBar({ interaction }: { interaction: Interaction }) {
                 className="h-8 w-32 bg-transparent text-sm outline-none placeholder:text-muted-foreground sm:w-48"
               />
               {search.matchCount > 0 && (
-                <span className="whitespace-nowrap px-1 text-[10px] tabular-nums text-muted-foreground">
+                <span className="whitespace-nowrap px-1 text-3xs tabular-nums text-muted-foreground">
                   {search.index + 1} / {search.matchCount}
                 </span>
               )}
@@ -95,7 +95,7 @@ export function DiagramTopBar({ interaction }: { interaction: Interaction }) {
       {isolation && (
         <div className="pointer-events-auto">
           <Tray>
-            <span className="whitespace-nowrap px-3 text-[11px] font-medium text-muted-foreground">
+            <span className="whitespace-nowrap px-3 text-2xs font-medium text-muted-foreground">
               Showing {isolation.count} of {isolation.total} nodes
             </span>
             <TrayButton

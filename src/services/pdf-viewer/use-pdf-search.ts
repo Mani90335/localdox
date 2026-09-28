@@ -1,60 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 import type { PdfSearchMatch } from "./types";
+import { findMatchesOnPage } from "./pdf-search-matches";
 
 type PdfTextContent = Awaited<ReturnType<PDFPageProxy["getTextContent"]>>;
 
 /** Debounce between the last keystroke and the scan starting. */
 const QUERY_DEBOUNCE_MS = 200;
-
-/**
- * Finds every occurrence of `needle` in a page's text, joining all items into
- * one string first so a match spanning two items is still found, then maps
- * each hit's character range back onto the item(s) it overlaps.
- */
-function findMatchesOnPage(
-  pageNumber: number,
-  items: PdfTextContent["items"],
-  needle: string,
-  nextId: { current: number },
-): PdfSearchMatch[] {
-  const bounds: Array<{ start: number; end: number }> = [];
-  let text = "";
-  for (const item of items) {
-    const str = (item as { str?: string }).str ?? "";
-    bounds.push({ start: text.length, end: text.length + str.length });
-    text += str;
-  }
-  const lower = text.toLowerCase();
-
-  const matches: PdfSearchMatch[] = [];
-  let from = 0;
-  for (;;) {
-    const at = lower.indexOf(needle, from);
-    if (at === -1) break;
-    const end = at + needle.length;
-    from = end;
-
-    const highlights: PdfSearchMatch["highlights"] = [];
-    for (let itemIndex = 0; itemIndex < bounds.length; itemIndex++) {
-      const bound = bounds[itemIndex];
-      const overlapStart = Math.max(at, bound.start);
-      const overlapEnd = Math.min(end, bound.end);
-      if (overlapStart < overlapEnd) {
-        highlights.push({
-          itemIndex,
-          charIndex: overlapStart - bound.start,
-          length: overlapEnd - overlapStart,
-        });
-      }
-      if (bound.start >= end) break; // bounds are ordered; nothing further can overlap
-    }
-    if (highlights.length) {
-      matches.push({ id: nextId.current++, pageNumber, highlights });
-    }
-  }
-  return matches;
-}
 
 export interface PdfSearchApi {
   query: string;
@@ -78,7 +30,7 @@ export interface PdfSearchApi {
  * mapping the match's character range back onto whichever item(s) it touches
  * is what makes search actually find text that's visibly on the page. pdf.js
  * renders one text-layer span per item (see `PdfPageCanvas`), so a match is
- * highlighted by adding a class to every span it overlaps.
+ * highlighted using exact character ranges within those spans.
  */
 export function usePdfSearch({
   active,
@@ -113,7 +65,7 @@ export function usePdfSearch({
   useEffect(() => {
     setMatches([]);
     setActiveIndex(0);
-    const needle = debouncedQuery.trim().toLowerCase();
+    const needle = debouncedQuery.trim();
     if (!active || !needle || !numPages) {
       setIsSearching(false);
       return;
@@ -121,17 +73,30 @@ export function usePdfSearch({
 
     let cancelled = false;
     nextMatchId.current = 0;
+    jumpedToFirst.current = false;
     setIsSearching(true);
     void (async () => {
+      let pending: PdfSearchMatch[] = [];
       for (let pageNumber = 1; pageNumber <= numPages; pageNumber++) {
         if (cancelled) return;
         try {
           const content = await getTextContent(pageNumber);
           if (cancelled) return;
           const found = findMatchesOnPage(pageNumber, content.items, needle, nextMatchId);
-          if (found.length && !cancelled) setMatches((prev) => [...prev, ...found]);
+          for (const match of found) pending.push(match);
         } catch {
           // A page whose text can't be extracted is skipped, not fatal to the search.
+        }
+        if (cancelled) return;
+        if (pageNumber === 1 || pageNumber % 8 === 0 || pageNumber === numPages) {
+          if (pending.length) {
+            const batch = pending;
+            pending = [];
+            setMatches((prev) => [...prev, ...batch]);
+          }
+          // Cached pages resolve in microtasks. Yield so a long document does
+          // not monopolize input/painting until the entire scan has finished.
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
       }
       if (!cancelled) setIsSearching(false);

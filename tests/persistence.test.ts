@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { indexedDB, IDBKeyRange, IDBObjectStore } from "fake-indexeddb";
-import { persistence, newWorkspaceRecord } from "../src/lib/workspace/persistence.ts";
+import {
+  persistence,
+  newWorkspaceRecord,
+  WorkspaceConflictError,
+} from "../src/lib/workspace/persistence.ts";
 
 Object.assign(globalThis, { indexedDB, IDBKeyRange });
 
@@ -61,7 +65,9 @@ test("workspace storage migration, incremental writes and transaction safety", a
   });
 
   await t.test("v1 upgrade preserves file bytes, order, bin state and UI", async () => {
-    assert.deepEqual(await persistence.getWorkspace(legacy.id), legacy);
+    const { revision, ...upgraded } = (await persistence.getWorkspace(legacy.id))!;
+    assert.equal(typeof revision, "string");
+    assert.deepEqual(upgraded, legacy);
     const [summary] = await persistence.listWorkspaceSummaries();
     assert.equal(summary.docCount, 2);
     assert.equal("files" in summary, false);
@@ -124,15 +130,32 @@ test("workspace storage migration, incremental writes and transaction safety", a
     assert.deepEqual(await persistence.getWorkspace(legacy.id), changed);
   });
 
-  await t.test("overlapping saves finish with the latest snapshot", async () => {
+  await t.test("overlapping saves from one snapshot: the second is refused, not merged", async () => {
     const workspace = (await persistence.getWorkspace(legacy.id))!;
     const first = { ...workspace, files: [{ ...workspace.files[0], content: "first" }] };
     const second = { ...workspace, files: [{ ...workspace.files[0], content: "second" }] };
-    await Promise.all([persistence.putWorkspace(first), persistence.putWorkspace(second)]);
-    assert.deepEqual(await persistence.getWorkspace(legacy.id), second);
+    const results = await Promise.allSettled([
+      persistence.putWorkspace(first),
+      persistence.putWorkspace(second),
+    ]);
+    assert.equal(results[0].status, "fulfilled");
+    assert.equal(results[1].status, "rejected");
+    assert.equal((await persistence.getWorkspace(legacy.id))!.files[0].content, "first");
   });
 
-  await t.test("a different tab's revision invalidates the incremental-write cache", async () => {
+  await t.test("serial saves apply in order and each checks the previous commit", async () => {
+    const workspace = (await persistence.getWorkspace(legacy.id))!;
+    const writes = ["one", "two", "three"].map((content) =>
+      persistence.serial(async () => {
+        workspace.files = [{ ...workspace.files[0], content }];
+        await persistence.putWorkspace(workspace);
+      }),
+    );
+    await Promise.all(writes);
+    assert.equal((await persistence.getWorkspace(legacy.id))!.files[0].content, "three");
+  });
+
+  await t.test("a different tab's revision refuses the write and keeps its data", async () => {
     const workspace = (await persistence.getWorkspace(legacy.id))!;
     const db = await new Promise<IDBDatabase>((resolve) => {
       const req = indexedDB.open("localdox", 2);
@@ -151,8 +174,53 @@ test("workspace storage migration, incremental writes and transaction safety", a
       tx.oncomplete = () => resolve();
     });
     db.close();
-    await persistence.putWorkspace(workspace);
-    assert.deepEqual(await persistence.getWorkspace(workspace.id), workspace);
+    await assert.rejects(
+      persistence.putWorkspace(workspace),
+      (error: Error) => error instanceof WorkspaceConflictError && error.reason === "changed",
+    );
+    const stored = (await persistence.getWorkspace(workspace.id))!;
+    assert.equal(stored.revision, "other-tab");
+    assert.equal(stored.files[0].content, "other tab");
+    // Re-reading and writing again succeeds, and invalidates the file cache:
+    // the other tab's file row is overwritten with this snapshot's content.
+    stored.files[0] = { ...stored.files[0], content: "merged" };
+    await persistence.putWorkspace(stored);
+    assert.equal((await persistence.getWorkspace(workspace.id))!.files[0].content, "merged");
+  });
+
+  await t.test("creating over an existing id is refused", async () => {
+    const existing = (await persistence.getWorkspace(legacy.id))!;
+    const { revision: _r, ...fresh } = existing;
+    await assert.rejects(
+      persistence.putWorkspace({ ...fresh, files: [] }),
+      (error: Error) => error instanceof WorkspaceConflictError && error.reason === "exists",
+    );
+    assert.deepEqual(await persistence.getWorkspace(legacy.id), existing);
+  });
+
+  await t.test("rename touches metadata only and bumps the revision", async () => {
+    const before = (await persistence.getWorkspace(legacy.id))!;
+    const writes: string[] = [];
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value, ...args) {
+      writes.push(this.name);
+      return original.call(this, value, ...args);
+    };
+    try {
+      await persistence.renameWorkspace(legacy.id, "Renamed", before.revision);
+    } finally {
+      IDBObjectStore.prototype.put = original;
+    }
+    assert.equal(writes.includes("files"), false);
+    const after = (await persistence.getWorkspace(legacy.id))!;
+    assert.equal(after.name, "Renamed");
+    assert.notEqual(after.revision, before.revision);
+    assert.equal((await persistence.listWorkspaceSummaries())[0].name, "Renamed");
+    await assert.rejects(persistence.putWorkspace(before), WorkspaceConflictError);
+    await assert.rejects(
+      persistence.renameWorkspace(legacy.id, "Stale", before.revision),
+      WorkspaceConflictError,
+    );
   });
 
   await t.test(

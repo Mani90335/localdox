@@ -65,10 +65,14 @@ export default defineConfig({
     chunkSizeWarningLimit: 700,
     rollupOptions: {
       output: {
-        // Keep the React runtime in one long-lived chunk. It changes far less
-        // often than app code, so a deploy shouldn't invalidate it.
+        // Keep the client React runtime in one long-lived chunk. HTML export's
+        // server entry and both CJS renderers must stay behind its lazy import.
         manualChunks(id: string) {
           if (!id.includes("node_modules")) return;
+          if (
+            /[\\/]node_modules[\\/]react-dom[\\/](?:server[.\\/]|cjs[\\/]react-dom-server)/.test(id)
+          )
+            return "react-dom-server";
           if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return "react";
         },
       },
