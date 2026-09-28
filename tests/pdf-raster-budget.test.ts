@@ -18,7 +18,7 @@ import {
   subscribeLivePdfPages,
   TOTAL_BUDGET_BYTES,
 } from "../src/services/pdf-viewer/pdf-raster-budget.ts";
-import { BoundedPromiseCache } from "../src/services/pdf-viewer/bounded-promise-cache.ts";
+import { BoundedPromiseCache } from "../src/lib/bounded-promise-cache.ts";
 
 const MiB = 1024 * 1024;
 const desktop = pageBudgetPixels("desktop", 1);

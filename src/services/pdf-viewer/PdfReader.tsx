@@ -3,7 +3,7 @@ import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { dataUrlToArrayBuffer } from "@/lib/markdown/document-utils";
 import type { PdfBookProps } from "./PdfReaderLazy";
 import { configurePdfWorker, PDFJS_CMAP_URL, PDFJS_STANDARD_FONT_URL } from "./pdf-worker";
-import { BoundedPromiseCache } from "./bounded-promise-cache";
+import { BoundedPromiseCache } from "@/lib/bounded-promise-cache";
 import { PdfPageArea } from "./PdfPageArea";
 import { PdfSidebar } from "./PdfSidebar";
 import { PdfSearchOverlay } from "./PdfSearchOverlay";

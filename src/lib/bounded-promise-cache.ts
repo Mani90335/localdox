@@ -17,6 +17,9 @@ export interface BoundedPromiseCacheOptions<K, V> {
  * transient failure made that page fail forever. Here a rejection evicts its
  * own entry (only if it hasn't been replaced since), and `onEvict` lets the
  * owner release resources held by the evicted value.
+ *
+ * The diagram caches use it too, weighted by bytes: Mermaid's SVG strings
+ * (mermaid-render-cache.ts) and the GPU engine's scenes (engine/engine.ts).
  */
 export class BoundedPromiseCache<K, V> {
   private readonly entries = new Map<K, { promise: Promise<V>; weight: number }>();

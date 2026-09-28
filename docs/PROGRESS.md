@@ -1,4 +1,148 @@
-Latest update — 2026-09-29 (D03 one storage budget for every import)
+Latest update — 2026-09-29 (R02 one Mermaid job at a time, byte-budgeted diagram caches, heavy diagrams on request)
+
+Completed R02 (Package 5). With it every Package 5 item except R04's bounded
+mass-import queue is done. Mermaid jobs no longer overwrite each other's
+settings. The SVG and scene caches are bounded by bytes. A diagram Mermaid
+would lay out on the main thread for seconds is shown as source until the
+reader asks for it.
+
+Before (HEAD 164c4fc, Chromium via Playwright):
+- Configuration race, from reading Mermaid 11.16:
+  - `initialize()` replaces one global configuration.
+  - `render()` resets to it when it starts, and the diagram's renderer reads
+    `getConfig()` again after its first await.
+  - Five call sites initialized with different settings: the SVG cache, the
+    GPU theme lookup, the GPU parse (maxEdges 500,000), mermaid-animator's
+    Flow mode and its WebM export.
+- Direct probe (dev server): a normal render racing `diagramTheme()` or a
+  performance-mode render came out with `htmlLabels: false`: 0 foreignObject
+  labels instead of 61. The cache kept it under the normal key.
+- Real documents, production preview, 3 loads × 5 layouts: small flowcharts
+  lost all 25 HTML labels in 7 of 15 loads.
+  - Small diagram first, beside performance-mode images: 3/3.
+  - Behind a 700-edge GPU diagram: 2/3.
+  - Beside a GPU diagram: 1/3; performance-mode image first: 1/3.
+- Main-thread render cost for kinds the GPU engine doesn't draw (dev server):
+  - Linear kinds: sequence 2,000 messages 540 ms, gantt 1,000 tasks 215 ms,
+    timeline 1,000 events 420 ms, kanban 1,500 cards 1.4 s.
+  - Mindmaps: 200 nodes 1.0 s, 400 nodes 2.8 s, 1,000 nodes 18.7 s then a
+    TypeError, 2,000 nodes more than 60 s. Nothing held them: the source
+    scan counts no edge lines in a mindmap, so none reached performance
+    mode.
+- Caches were bounded by count: 6 SVGs and 3 scenes. Three 60,000-node scenes
+  are ~130 MiB by the new estimate (33 MiB measured heap each).
+
+Fix:
+- src/services/diagrams/mermaid-runtime.ts (new): `withMermaid(job, opts)`
+  is a FIFO queue (`opts` carries `config` and `label`).
+  - Each job loads Mermaid, applies its own `initialize()`, and runs alone. A
+    failed job doesn't block the next.
+  - Each job leaves a User Timing entry `mermaid:<label>` with
+    `detail.waitedMs`.
+  - `createMermaidQueue` takes an injectable loader, for tests.
+- All five call sites go through it:
+  - `renderMermaid`, `diagramTheme` and `parseWithMermaid`. The parse also
+    reads the model inside the job, because a diagram's db can be module state
+    the next render clears.
+  - AnimatorStage's `MermaidAnimator.create`, which skips the work if the
+    stage unmounted while queued.
+  - The WebM export, which holds the queue while it records.
+- Byte budgets through the shared `BoundedPromiseCache`, moved from
+  pdf-viewer/ to src/lib/. It is LRU, drops rejected promises, and always
+  keeps the newest entry.
+  - SVGs: 12 MiB, weighed as `svg.length × 2`. Before, 6 entries.
+  - Scenes: 48 MiB, weighed by `sceneBytes()` (scene.ts): exact typed-array
+    bytes, label text, and 256 B per node/edge. Against node's heap it
+    estimated 42 vs 33 MiB measured at 60,000 nodes and 14 vs 13 MiB at
+    20,000. Before, 3 entries.
+  - `mermaidRenderCacheStats()` and `sceneCacheStats()` for debugging.
+- src/services/diagrams/preflight.ts (new): held before Mermaid is imported,
+  for kinds the GPU engine doesn't draw:
+  - mindmaps past 200 content lines (nodes)
+  - anything else past 3,000 lines or 300,000 characters
+- render-decision.ts:
+  - A new `held` renderer.
+  - `allowHeavyRender` / `heldBack` remember "Draw anyway" per source for the
+    session (hashed, trimmed, LRU 64), so a remount, a second pane and exports
+    respect it.
+  - Mermaid.tsx keeps the choice for the block while its source is edited.
+- `renderMermaid` refuses a held source with `DiagramHeldError`. PDF, HTML and
+  DOCX exports already keep the source when a render throws, so a huge
+  mindmap no longer freezes an export.
+- HeldStage.tsx (new): "Diagram not drawn yet", the reason, a Draw anyway
+  button (44 px on touch), and the source in a focusable
+  `role="region"` panel capped at 20rem. Stepped and Flow are disabled with a
+  reason.
+  - The first version used a `<pre>`. DevTools showed `.docs-prose pre`
+    bleeding it 88 px past the card and clipping the text, so it is a div.
+- gate.ts exports `headerLine` for the preflight.
+- documentation/diagram-runtime.md: the model, the flow, the measurements,
+  the trade-offs and debugging.
+
+After:
+- Same 5 layouts × 3 loads on the production build: 15/15 small flowcharts
+  kept all 25 HTML labels. The recorded Mermaid jobs never overlap.
+- A 1,000-node mindmap: held, zero Mermaid jobs, no long task over 1 s.
+  "Draw anyway" on 230 nodes: one render, reused by full screen.
+
+Validation:
+- Unit: tests/diagram-runtime.test.ts, 10 tests.
+  - The queue is tested against a fake Mermaid that re-reads its config after
+    an await. The same interleaving without the queue reproduces the leak.
+  - Also: preflight limits and counting, GPU kinds never held, the held
+    decision and its allowance (including untrimmed export sources),
+    `sceneBytes` scaling, and byte-weighted eviction.
+  - Mutation checks: no serialization, a failed job blocking the queue,
+    config not applied, the mindmap limit off by one, comments counted as
+    nodes, and the allowance ignored each fail a test.
+  - npm test: 390/390 on the branch base.
+- Browser: tests/e2e/diagram-runtime.spec.ts, 4 tests on the production
+  preview:
+  - Two layouts × 3 loads keep 25 HTML labels with no overlapping jobs.
+  - A 1,000-node mindmap is held (source inside the card, tabs disabled, no
+    job, no long task over 1 s).
+  - "Draw anyway" renders once, and full screen doesn't render again.
+  - 12/12 with --repeat-each=3. Against the HEAD build all four fail on
+    substance: flowcharts drew `flowchart-v2:0` on loads 2–3, and the held
+    stage doesn't exist.
+- Existing diagram-modes, diagram-players and media specs: 16/16.
+- Full production suite: on the branch base (164c4fc + R02), isolated
+  worktree on port 4232: 119 passed, 3 failed, 1 skipped (8.5 min). The three
+  failures are the known plain-HEAD failures (mobile-navigation drawer close,
+  both sharing.spec previews).
+- After rebasing onto d3ac770 (A05, A12 and D03): typecheck passes, npm test
+  430/432 (the 2 skipped are A12's live Gemini checks, which need a key),
+  and the build passes. diagram-runtime, diagram-modes, diagram-players,
+  media and long-markdown specs: 25/25; diagram-runtime --repeat-each=3:
+  12/12.
+- Chrome DevTools MCP, production preview (port 4234) and dev server, isolated
+  context:
+  - Two small flowcharts, a 1,600-message sequence and a 600-node mindmap:
+    `flowchart-v2:25 | image | flowchart-v2:25 | held`. The three
+    `mermaid:render` entries ran back to back (waited 1 / 316 / 971 ms).
+  - Accessibility tree: the Stepped and Flow tabs are disabled with
+    "Draw the diagram first…", and the source is `region "Diagram source"`.
+  - 390 px mobile: the panel stays inside the card, with no horizontal page
+    scroll. No console errors or issues.
+- npm run typecheck, npm run build, ESLint (0 problems on changed files) and
+  Prettier on changed files pass.
+
+Limits:
+- Thresholds come from one fast machine. A phone may take 3–5× as long, so a
+  200-node mindmap can still take a few seconds after "Draw anyway". Devices
+  aren't scaled the way the GPU engine's limits are.
+- The WebM export holds the Mermaid queue while it records (seconds); other
+  diagrams wait meanwhile.
+- A queued job can't be withdrawn. An unmounted Flow stage skips its work, but
+  a shared cache render still runs, and its result is kept for the next
+  reader.
+- `sceneBytes` is an estimate (within ~30% of measured heap), not a heap
+  measurement.
+- Mermaid kinds that throw at scale (a 1,000-node mindmap threw a TypeError)
+  still show Mermaid's error after "Draw anyway".
+- Chromium only.
+
+Previous update — 2026-09-29 (D03 one storage budget for every import)
 
 Completed D03 (Package 6). The 5%-of-quota documents limit is now counted
 one way (stored bytes), across every workspace, for every import path. Room
@@ -1934,7 +2078,7 @@ Pending (not started, or started but not committed)
 
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
-- Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04's spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) is done (latest update); its bounded mass-import queue in DocsApp.tsx remains. R01 (diagram players: coarse React updates, no frames while unseen, reduced motion) is done (latest update). A05 (3,000-section Markdown) is done (latest update; fold latency and the 4× CPU tasks are listed as limits there). R02 (byte-budgeted diagram caches, serialized Mermaid configuration) remains pending.
+- Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04's spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) is done (latest update); its bounded mass-import queue in DocsApp.tsx remains. R01 (diagram players: coarse React updates, no frames while unseen, reduced motion) is done (latest update). A05 (3,000-section Markdown) is done (latest update; fold latency and the 4× CPU tasks are listed as limits there). R02 (one Mermaid job at a time, byte-budgeted diagram and scene caches, mindmaps and other heavy main-thread diagrams held as source until the reader asks) is done (latest update). Only R04's bounded mass-import queue remains in Package 5.
 - Package 6: B01 is done (B01 update above) and D03 is done (latest update); B02–B03 (startup loading), D01–D02 (loading whole workspaces, binary storage) remain.
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).

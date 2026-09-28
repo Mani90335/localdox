@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import type { MermaidAnimator as MermaidAnimatorInstance } from "mermaid-animator";
 import { largeDiagramMermaidConfig } from "./mermaid-config";
+import { withMermaid } from "./mermaid-runtime";
 import { useSvgViewport } from "./use-svg-viewport";
 import { useStageVisibility } from "./use-stage-visibility";
 import { MAX_STAGE_RATIO, MIN_STAGE_RATIO } from "./stage-ratio";
@@ -75,16 +76,26 @@ export function AnimatorStage({
       try {
         const { MermaidAnimator } = await import("mermaid-animator");
         if (disposed || generation !== renderGenerationRef.current) return;
-        let animator: MermaidAnimatorInstance;
-        try {
-          animator = await MermaidAnimator.create(container, code, options);
-        } catch (error) {
-          const alternative = /^\s*(?:---[\s\S]*?---\s*)?erDiagram\b/.test(code)
-            ? quoteErEntities(code)
-            : code;
-          if (alternative === code) throw error;
-          animator = await MermaidAnimator.create(container, alternative, options);
-        }
+        // mermaid-animator initializes the shared Mermaid itself, so its
+        // render runs as a queued job (mermaid-runtime.ts): its settings can't
+        // leak into another diagram's render, nor theirs into this one. A stage
+        // unmounted while waiting in the queue skips the work.
+        const animator = await withMermaid<MermaidAnimatorInstance | null>(
+          async () => {
+            if (disposed || generation !== renderGenerationRef.current) return null;
+            try {
+              return await MermaidAnimator.create(container, code, options);
+            } catch (error) {
+              const alternative = /^\s*(?:---[\s\S]*?---\s*)?erDiagram\b/.test(code)
+                ? quoteErEntities(code)
+                : code;
+              if (alternative === code) throw error;
+              return await MermaidAnimator.create(container, alternative, options);
+            }
+          },
+          { label: "animate" },
+        );
+        if (!animator) return;
         if (disposed || generation !== renderGenerationRef.current) {
           animator.destroy();
           return;

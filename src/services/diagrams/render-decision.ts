@@ -15,18 +15,23 @@
  */
 import { diagramKind, shouldUseGpuEngine } from "./engine/gate.ts";
 import { shouldUseDiagramPerformanceMode } from "./mermaid-performance.ts";
+import { preflightDiagram, type DiagramPreflight } from "./preflight.ts";
 
 /**
  * - `svg`: Mermaid's own SVG, live. Every mode is available.
  * - `gpu`: the WebAssembly layout and WebGL renderer. Raw and Stepped only.
  * - `image`: Mermaid's SVG flattened to one image. Raw only.
+ * - `held`: not drawn until the reader asks, because Mermaid would lay it out
+ *   on the main thread for seconds (preflight.ts). The source is shown.
  */
-export type DiagramRenderer = "svg" | "gpu" | "image";
+export type DiagramRenderer = "svg" | "gpu" | "image" | "held";
 
 export interface DiagramRenderDecision {
   renderer: DiagramRenderer;
   /** What settled it: the source scan, or the size of Mermaid's render. */
   basis: "source" | "render";
+  /** Why a `held` diagram was held. */
+  preflight?: DiagramPreflight;
 }
 
 /**
@@ -40,6 +45,8 @@ export function decideDiagramRender(
   renderedTooLarge = false,
 ): DiagramRenderDecision {
   if (shouldUseGpuEngine(source)) return { renderer: "gpu", basis: "source" };
+  const preflight = heldBack(source);
+  if (preflight) return { renderer: "held", basis: "source", preflight };
   if (shouldUseDiagramPerformanceMode(source)) return { renderer: "image", basis: "source" };
   if (renderedTooLarge || isKnownOversized(source)) {
     return { renderer: diagramKind(source) ? "gpu" : "image", basis: "render" };
@@ -55,9 +62,11 @@ const oversized = new Set<string>();
  * FNV-1a of the source, with its length.
  *
  * A hash rather than the source itself, because the diagrams worth
- * remembering are the ones with hundreds of kilobytes of source.
+ * remembering are the ones with hundreds of kilobytes of source. Trimmed, as
+ * the viewer trims its fence and an export may not.
  */
-function sourceKey(source: string): string {
+function sourceKey(raw: string): string {
+  const source = raw.trim();
   let hash = 0x811c9dc5;
   for (let i = 0; i < source.length; i++) {
     hash ^= source.charCodeAt(i);
@@ -66,24 +75,48 @@ function sourceKey(source: string): string {
   return `${source.length}:${(hash >>> 0).toString(36)}`;
 }
 
+/** Add a verdict at the newest end, dropping the oldest past `REMEMBERED`. */
+function remember(set: Set<string>, source: string): void {
+  const key = sourceKey(source);
+  set.delete(key);
+  set.add(key);
+  while (set.size > REMEMBERED) {
+    const oldest = set.values().next();
+    if (oldest.done) break;
+    set.delete(oldest.value);
+  }
+}
+
 /** Record that Mermaid's render of this source measured too large for live SVG. */
 export function rememberOversized(source: string): void {
-  const key = sourceKey(source);
-  // Re-inserting moves the entry to the newest end.
-  oversized.delete(key);
-  oversized.add(key);
-  while (oversized.size > REMEMBERED) {
-    const oldest = oversized.values().next();
-    if (oldest.done) break;
-    oversized.delete(oldest.value);
-  }
+  remember(oversized, source);
 }
 
 export function isKnownOversized(source: string): boolean {
   return oversized.has(sourceKey(source));
 }
 
-/** Forget every measured verdict. For tests. */
+/** Sources the reader chose to draw despite the preflight. Hashes, as above. */
+const allowed = new Set<string>();
+
+/** Remember that the reader asked for this held diagram to be drawn. */
+export function allowHeavyRender(source: string): void {
+  remember(allowed, source);
+}
+
+/**
+ * Why this diagram shouldn't be drawn without asking, or null.
+ *
+ * Remembered per source for the session, so a remount, a second pane, and an
+ * export of the same document all respect the reader's choice.
+ */
+export function heldBack(source: string): DiagramPreflight | null {
+  const preflight = preflightDiagram(source);
+  return preflight && !allowed.has(sourceKey(source)) ? preflight : null;
+}
+
+/** Forget every measured verdict and every choice to draw anyway. For tests. */
 export function clearOversizedVerdicts(): void {
   oversized.clear();
+  allowed.clear();
 }

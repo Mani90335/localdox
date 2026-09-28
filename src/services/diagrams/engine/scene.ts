@@ -118,6 +118,40 @@ export interface Scene {
   layoutMs: number;
 }
 
+/**
+ * Per node and per edge, what the typed arrays don't show: the planner's graph
+ * objects, the id maps, and the array slots holding labels and colours.
+ */
+const OBJECT_BYTES_PER_ITEM = 256;
+
+function textBytes(lines: string[][]): number {
+  let chars = 0;
+  for (const group of lines) for (const line of group) chars += line.length;
+  return chars * 2;
+}
+
+/**
+ * Roughly how much memory a scene holds, for the scene cache's byte budget.
+ *
+ * Exact for the typed arrays, which dominate a large diagram's geometry. The
+ * label text is counted at two bytes a character. Objects and maps get a flat
+ * allowance per node and edge. The result is an estimate for comparing scenes,
+ * not a heap measurement.
+ */
+export function sceneBytes(scene: Scene): number {
+  let bytes = 0;
+  for (const value of Object.values(scene)) {
+    if (ArrayBuffer.isView(value)) bytes += value.byteLength;
+  }
+  bytes += textBytes(scene.nodeLines) + textBytes(scene.edgeLines);
+  for (const table of scene.nodeTable) {
+    if (!table) continue;
+    bytes += textBytes([table.header]);
+    for (const section of table.sections) bytes += textBytes(section);
+  }
+  return bytes + (scene.nodeCount + scene.edgeCount) * OBJECT_BYTES_PER_ITEM;
+}
+
 function layoutShape(shape: NodeShape): LayoutShape {
   if (shape === "ellipse" || shape === "start" || shape === "end") return "ellipse";
   if (shape === "diamond") return "diamond";
