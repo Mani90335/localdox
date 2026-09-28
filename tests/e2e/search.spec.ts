@@ -391,3 +391,92 @@ test("a search worker that crashes mid-search falls back and still answers", asy
   await page.getByPlaceholder("Search all documents...").fill("freshly");
   await expect(results.getByRole("button", { name: "freshly typed", exact: true })).toBeVisible();
 });
+
+type HighlightRegistry = { highlights: Map<string, Iterable<Range>> };
+
+/** Clicks a search result and returns the passage its jump flashed: the
+ *  matched text and a little of what follows it. */
+async function jumpTo(page: Page, result: ReturnType<Page["locator"]>) {
+  await page.evaluate(() =>
+    (CSS as unknown as HighlightRegistry).highlights.delete("dc-saved-flash"),
+  );
+  await result.click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          [
+            ...((CSS as unknown as HighlightRegistry).highlights.get("dc-saved-flash") ?? []),
+          ][0]?.toString() ?? "",
+      ),
+    )
+    .not.toBe("");
+  return page.evaluate(() => {
+    const range = [
+      ...((CSS as unknown as HighlightRegistry).highlights.get("dc-saved-flash") ?? []),
+    ][0] as Range;
+    const after = document.createRange();
+    after.selectNodeContents(range.endContainer.parentElement!.closest("p, li, td, pre")!);
+    after.setStart(range.endContainer, range.endOffset);
+    return { text: range.toString(), after: after.toString().slice(0, 9).trimEnd() };
+  });
+}
+
+test("search lists exactly the occurrences of the query and lands on the one clicked", async ({
+  page,
+}) => {
+  const filler = Array.from({ length: 400 }, (_, i) => `Haystack line ${i} with nothing to find.`);
+  await page.goto("/");
+  await page
+    .locator('input[type="file"]')
+    .first()
+    .setInputFiles({
+      name: "notes.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from(
+        [
+          "# Guide",
+          "",
+          ...filler.slice(0, 200),
+          "",
+          "## Noodle shop",
+          "",
+          "The noodle shop is not what we want.",
+          "",
+          "The **needle** is here, and a second needle follows.",
+          "",
+          "| name | note |",
+          "|------|------|",
+          "| row  | needle cell |",
+          "",
+          "```js",
+          "const needle = 1;",
+          "```",
+          "",
+          ...filler.slice(200),
+          "",
+          "# Appendix",
+          "",
+          "Final needle mention.",
+        ].join("\n"),
+      ),
+    });
+  await expect(page.getByRole("heading", { name: "Guide", exact: true })).toBeVisible();
+  await openSearch(page, "needle");
+  const results = page.locator("aside");
+  await expect(results.getByText("5 results in 1 file")).toBeVisible();
+  const rows = results.locator("button[title] mark");
+  await expect(rows).toHaveText(["needle", "needle", "needle", "needle", "needle"]);
+  await expect(results).not.toContainText("Noodle");
+
+  // The second occurrence on a line with two.
+  const result = (n: number) => results.locator("button[title]:has(mark)").nth(n);
+  expect(await jumpTo(page, result(1))).toEqual({ text: "needle", after: " follows." });
+
+  // One on another page of the document.
+  expect(await jumpTo(page, result(4))).toEqual({ text: "needle", after: " mention." });
+  await expect(page.getByRole("article").getByText("Final needle mention.")).toBeVisible();
+
+  // And back, into the fenced code.
+  expect(await jumpTo(page, result(3))).toEqual({ text: "needle", after: " = 1;" });
+});

@@ -7,6 +7,7 @@ import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { FolderRecord, ReadingMode } from "@/lib/workspace/persistence";
 import type { MathPreferences } from "@/services/math";
 import type { SavedDraft, SavedItem } from "@/lib/workspace/saved-items";
+import type { PendingSearch } from "@/lib/search/schema";
 
 const EMPTY_HIGHLIGHTS: Highlight[] = [];
 const EMPTY_SAVED: SavedItem[] = [];
@@ -100,7 +101,7 @@ export function PaneDocument({
    */
   activeSubtopicId?: string | null;
   highlightQuery?: string | null;
-  pendingSearch?: { text: string; query: string } | null;
+  pendingSearch?: PendingSearch | null;
   onSearchShown?: () => void;
 }) {
   const fileHighlights = useMemo(() => {

@@ -79,13 +79,13 @@ test("replies are matched by request id, in any order, through one listener", as
 
   const [a, b, c] = worker.posted.map((request) => request.reqId);
   assert.equal(new Set([a, b, c]).size, 3);
-  worker.reply({ reqId: c, type: "hits", hits: [] });
+  worker.reply({ reqId: c, type: "hits", hits: [], total: 0 });
   worker.reply({ reqId: b, type: "ack", generation: 7 });
-  worker.reply({ reqId: 999, type: "hits", hits: [] }); // unknown: ignored
-  worker.reply({ reqId: a, type: "hits", hits: [] });
-  assert.deepEqual(await first, []);
+  worker.reply({ reqId: 999, type: "hits", hits: [], total: 0 }); // unknown: ignored
+  worker.reply({ reqId: a, type: "hits", hits: [], total: 0 });
+  assert.deepEqual(await first, { hits: [], total: 0 });
   assert.equal(await second, 7);
-  assert.deepEqual(await third, []);
+  assert.deepEqual(await third, { hits: [], total: 0 });
 });
 
 test("an error reply rejects only its own request", async () => {
@@ -118,7 +118,7 @@ for (const event of ["error", "messageerror"] as const)
     assert.equal(worker.listeners, 0, "listeners removed");
     assert.ok(client.closed);
     // A late reply from the dead worker, and requests after the failure.
-    worker.reply({ reqId: worker.posted[0].reqId, type: "hits", hits: [] });
+    worker.reply({ reqId: worker.posted[0].reqId, type: "hits", hits: [], total: 0 });
     await assert.rejects(client.search("b", ["w"]), SearchClosedError);
     assert.equal(worker.posted.length, 3, "nothing posted to a failed worker");
   });
@@ -143,8 +143,8 @@ test("a message the worker can't receive rejects that request and nothing else",
   await assert.rejects(client.sync("w", []), /could not clone/);
   worker.failPost = false;
   const later = client.search("a", ["w"]);
-  worker.reply({ reqId: worker.posted[0].reqId, type: "hits", hits: [] });
-  assert.deepEqual(await later, []);
+  worker.reply({ reqId: worker.posted[0].reqId, type: "hits", hits: [], total: 0 });
+  assert.deepEqual(await later, { hits: [], total: 0 });
 });
 
 test("through a real index, a burst of edits, a drop and a search settle correctly", async () => {
@@ -163,7 +163,7 @@ test("through a real index, a burst of edits, a drop and a search settle correct
     client.drop("other"),
     client.sync("current", docs("third")),
   ];
-  const hits = await client.search("third", ["current", "other"]);
+  const { hits } = await client.search("third", ["current", "other"]);
   const generations = await Promise.all(requests);
   assert.deepEqual(
     [...generations].sort((a, b) => a - b),
@@ -172,7 +172,7 @@ test("through a real index, a burst of edits, a drop and a search settle correct
   );
   assert.equal(new Set(hits.map((hit) => hit.fileId)).size, 40);
   for (const stale of ["first", "second", "elsewhere"])
-    assert.deepEqual(await client.search(stale, ["current", "other"]), [], stale);
+    assert.deepEqual((await client.search(stale, ["current", "other"])).hits, [], stale);
 
   // The worker's error reply for a bad request, then normal service.
   await assert.rejects(
@@ -183,7 +183,7 @@ test("through a real index, a burst of edits, a drop and a search settle correct
     SearchRequestError,
   );
   assert.equal(
-    new Set((await client.search("third", ["current"])).map((hit) => hit.fileId)).size,
+    new Set((await client.search("third", ["current"])).hits.map((hit) => hit.fileId)).size,
     40,
   );
 });
@@ -192,7 +192,7 @@ test("the main-thread client indexes, reports errors and settles once closed", a
   const client = createLocalSearchClient();
   const generation = await client.sync("w", [{ id: "1", name: "a.md", content: "local text" }]);
   assert.ok(generation > 0);
-  assert.equal((await client.search("local", ["w"])).length, 1);
+  assert.equal((await client.search("local", ["w"])).hits.length, 1);
   await assert.rejects(
     client.sync("w", [{ id: "2", name: "b.md", content: null as unknown as string }]),
     SearchRequestError,

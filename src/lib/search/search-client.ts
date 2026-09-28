@@ -1,6 +1,6 @@
 import { DocumentIndex } from "./document-index.ts";
 import { handleSearchRequest, type SearchRequest, type SearchResponse } from "./protocol.ts";
-import type { SearchFile, SearchHit } from "./schema.ts";
+import type { SearchFile, SearchResults } from "./schema.ts";
 
 /** The client was closed (or its worker died) before the request settled. */
 export class SearchClosedError extends Error {
@@ -23,7 +23,7 @@ export class SearchRequestError extends Error {
 export interface SearchClient {
   sync(workspaceId: string, files: SearchFile[]): Promise<number>;
   drop(workspaceId: string): Promise<number>;
-  search(query: string, workspaceIds: string[]): Promise<SearchHit[]>;
+  search(query: string, workspaceIds: string[]): Promise<SearchResults>;
   close(): void;
   readonly closed: boolean;
 }
@@ -45,8 +45,10 @@ function clientOver(send: Send, close: () => void, isClosed: () => boolean): Sea
     sync: async (workspaceId, files) =>
       (await expect({ type: "sync", workspaceId, files }, "ack")).generation,
     drop: async (workspaceId) => (await expect({ type: "drop", workspaceId }, "ack")).generation,
-    search: async (query, workspaceIds) =>
-      (await expect({ type: "search", query, workspaceIds }, "hits")).hits,
+    search: async (query, workspaceIds) => {
+      const { hits, total } = await expect({ type: "search", query, workspaceIds }, "hits");
+      return { hits, total };
+    },
     close,
     get closed() {
       return isClosed();

@@ -18,7 +18,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Sheet, SheetClose, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useSearchIndex } from "@/hooks/use-search-index";
-import type { SearchHit } from "@/lib/search/schema";
+import type { PendingSearch, SearchHit } from "@/lib/search/schema";
 import type { SearchPanelState } from "./workspace/sidebar/SearchPanel";
 import { Header } from "./docs-app/Header";
 import { EmptyWorkspace } from "./docs-app/EmptyWorkspace";
@@ -399,13 +399,9 @@ export function DocsApp() {
    * A search hit the reader just opened, held until the viewer has scrolled to
    * it. Cleared through `onSearchShown` so it is not replayed on re-render.
    */
-  const [pendingSearch, setPendingSearch] = useState<{
-    fileId: string;
-    text: string;
-    query: string;
-    /** Which occurrence of `query` within `text` to land on, when it repeats. */
-    occurrence: number;
-  } | null>(null);
+  const [pendingSearch, setPendingSearch] = useState<({ fileId: string } & PendingSearch) | null>(
+    null,
+  );
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   // File ids in most-recently-opened order — drives the "Recent" chip.
   const [recentFileIds, setRecentFileIds] = useState<string[]>([]);
@@ -1239,6 +1235,7 @@ export function DocsApp() {
       query?: string,
       matchedLine?: string,
       occurrence?: number,
+      lineIndex?: number,
     ) => {
       if (!confirmDiscardDraft(fileId)) return;
       setActiveFileId(fileId);
@@ -1248,7 +1245,13 @@ export function DocsApp() {
       // running the same search twice still moves the reader the second time.
       setPendingSearch(
         matchedLine
-          ? { fileId, text: matchedLine, query: query?.trim() || "", occurrence: occurrence ?? 0 }
+          ? {
+              fileId,
+              text: matchedLine,
+              query: query?.trim() || "",
+              occurrence: occurrence ?? 0,
+              lineIndex: lineIndex ?? -1,
+            }
           : null,
       );
 
@@ -3137,6 +3140,7 @@ flowchart LR
 
   const {
     hits: searchHits,
+    total: searchTotal,
     pending: searchPending,
     loadingWorkspaces,
     indexing: searchIndexing,
@@ -3154,7 +3158,15 @@ flowchart LR
     async (hit: SearchHit) => {
       await switchWorkspace(hit.workspaceId);
       if (showSettings) await openFromHome(hit.fileId, hit.headingId);
-      else handleSelect(hit.fileId, hit.headingId, searchQuery, hit.line, hit.occurrence);
+      else
+        handleSelect(
+          hit.fileId,
+          hit.headingId,
+          searchQuery,
+          hit.line,
+          hit.occurrence,
+          hit.lineIndex,
+        );
       // Clicking a result jumps the reader to it; the panel stays open so more
       // results can be tried without reopening it, the way VS Code's does.
     },
@@ -3167,6 +3179,7 @@ flowchart LR
         crossWorkspace: searchCrossWorkspace,
         onCrossWorkspaceChange: setSearchCrossWorkspace,
         hits: searchHits,
+        total: searchTotal,
         pending: searchPending,
         loadingWorkspaces,
         indexing: searchIndexing,

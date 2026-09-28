@@ -54,6 +54,7 @@ export function useSearchIndex({
   crossWorkspace,
 }: Options) {
   const [hits, setHits] = useState<SearchHit[]>([]);
+  const [total, setTotal] = useState(0);
   const [pending, setPending] = useState(false);
   const [loadingIds, setLoadingIds] = useState<string[]>([]);
   const [fallback, setFallback] = useState(false);
@@ -172,6 +173,7 @@ export function useSearchIndex({
     const id = ++searchReqId.current;
     if (!session || !query.trim() || !currentWorkspaceId) {
       setHits([]);
+      setTotal(0);
       setPending(false);
       setError((current) => (current === "search" ? null : current));
       return;
@@ -182,7 +184,8 @@ export function useSearchIndex({
       session.client.search(query, workspaceIds).then(
         (next) => {
           if (id !== searchReqId.current) return;
-          setHits(next);
+          setHits(next.hits);
+          setTotal(next.total);
           setPending(false);
           setError((current) => (current === "search" ? null : current));
         },
@@ -192,6 +195,7 @@ export function useSearchIndex({
           if (id !== searchReqId.current || reason instanceof SearchClosedError) return;
           console.warn("Search failed", reason);
           setHits([]);
+          setTotal(0);
           setPending(false);
           setError("search");
         },
@@ -207,6 +211,8 @@ export function useSearchIndex({
 
   return {
     hits,
+    /** Every match, including those past the returned hits. */
+    total,
     pending,
     loadingWorkspaces,
     /** The current workspace's rows aren't in the index yet. */

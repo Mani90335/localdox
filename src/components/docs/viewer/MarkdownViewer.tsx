@@ -65,7 +65,12 @@ import {
   sameQuote,
   textBetween,
   queryRanges,
+  nthQueryRange,
+  firstQueryRangeInLine,
+  rangeOffsets,
 } from "@/lib/markdown/text-offsets";
+import { occurrenceOrdinal, parseRows } from "@/lib/search/rows";
+import type { PendingSearch } from "@/lib/search/schema";
 import { createHighlightPainter } from "@/lib/markdown/highlight-registry";
 import {
   findSaved,
@@ -93,7 +98,7 @@ import {
   type CollapseContextValue,
   type SavedContextValue,
 } from "./markdown-viewer/contexts";
-import { elementOf, flashPassage } from "./markdown-viewer/flash-passage";
+import { elementOf, flashPassage, scrollToPassage } from "./markdown-viewer/flash-passage";
 import { HeadingLink } from "./markdown-viewer/HeadingLink";
 import { SavableBlock } from "./markdown-viewer/SavableBlock";
 import { CodeBlock } from "./markdown-viewer/CodeBlock";
@@ -174,7 +179,7 @@ interface Props {
    * own) not even that far, leaving the reader at the top of the page with the
    * match somewhere below the fold.
    */
-  pendingSearch?: { text: string; query: string } | null;
+  pendingSearch?: PendingSearch | null;
   onSearchShown?: () => void;
   onHome?: () => void;
   workspaceId?: string | null;
@@ -995,6 +1000,20 @@ function MarkdownViewerImpl({
     else scrollToTop();
   }, [singleMode, activeSubtopicId, file.id]);
 
+  /** Search rows for the source lines this view renders: the whole file in
+   *  single-page mode, else the active page without the heading that
+   *  `renderContent` strips from its top. */
+  const searchRowsOnScreen = useCallback(() => {
+    const rows = parseRows(file.content);
+    if (singleMode) return rows;
+    const chunkStart = file.content.indexOf(activeChunk.content);
+    if (chunkStart < 0) return [];
+    const first = file.content.slice(0, chunkStart).split("\n").length - 1;
+    const end = first + activeChunk.content.split("\n").length;
+    const page = rows.filter((row) => row.lineIndex >= first && row.lineIndex < end);
+    return /^\s*#{1,6}\s+\S/.test(activeChunk.content) && page[0]?.isHeading ? page.slice(1) : page;
+  }, [file.content, singleMode, activeChunk.content]);
+
   /**
    * Land on the search hit itself.
    *
@@ -1003,10 +1022,12 @@ function MarkdownViewerImpl({
    * the heading (or given up and gone to the top) by the time this runs, and a
    * second smooth scroll simply retargets the first.
    *
-   * Anchored by the matched line, falling back to the query itself — a line may
-   * render differently from its source (markdown syntax is stripped, a match
-   * inside a link or emphasis is split across elements), and the query is the
-   * shortest thing guaranteed to be somewhere in the text.
+   * The hit is one particular occurrence of the query, and the word itself
+   * usually recurs all over the page, so the hit is located by counting: it
+   * is the Nth occurrence among the source lines on screen, and — when the page
+   * holds exactly as many occurrences as those lines do — the Nth on the page.
+   * When the counts disagree (a diagram or embed renders differently from its
+   * source), it falls back to the hit's line, then to the query anywhere.
    */
   useEffect(() => {
     if (!pendingSearch || editMode) return;
@@ -1014,19 +1035,38 @@ function MarkdownViewerImpl({
     const frame = requestAnimationFrame(() => {
       const container = contentRef.current;
       if (!container) return;
-      const range =
-        firstTextRange(container, pendingSearch.text) ??
-        (pendingSearch.query ? firstTextRange(container, pendingSearch.query) : null);
+      const { query, text, occurrence, lineIndex } = pendingSearch;
+      let range: Range | null = null;
+      if (query && lineIndex >= 0) {
+        const at = occurrenceOrdinal(searchRowsOnScreen(), query, lineIndex, occurrence);
+        if (at) {
+          const nth = nthQueryRange(container, query, at.ordinal);
+          if (nth.count === at.total) range = nth.range;
+        }
+      }
+      range ??= text
+        ? firstQueryRangeInLine(container, text, query, occurrence)
+        : query
+          ? firstTextRange(container, query)
+          : null;
       const target = elementOf(range);
-      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const landed = range && rangeOffsets(container, range);
+      const landedText = range?.toString();
+      // The passage in the container's current DOM, should a re-render have
+      // replaced the nodes `range` points into.
+      const reanchor = () =>
+        landed && textBetween(container, landed.start, landed.end) === landedText
+          ? buildRange(container, landed.start, landed.end)
+          : null;
+      if (range) scrollToPassage(range, () => (range.collapsed ? reanchor() : range));
       // The same one-shot flash a saved item gets, for the same reason: on a
       // dense page, arriving is not the same as seeing where you arrived.
-      flashPassage(range, target);
+      flashPassage(range, target, landed ? { container, reanchor } : undefined);
 
       onSearchShown?.();
     });
     return () => cancelAnimationFrame(frame);
-  }, [pendingSearch, editMode, renderContent, fullRender, onSearchShown]);
+  }, [pendingSearch, editMode, renderContent, fullRender, onSearchShown, searchRowsOnScreen]);
 
   // Reading progress now lives in <ReadingProgress>, which writes the
   // percentage straight to its own DOM node. It used to be state up here, and

@@ -1,142 +1,111 @@
-import GithubSlugger from "github-slugger";
+import { parseRows, queryPattern, type SearchRow } from "./rows.ts";
 import {
-  create,
-  insertMultiple,
-  removeMultiple,
-  search as oramaSearch,
-  type AnyOrama,
-} from "@orama/orama";
-import {
-  rowSchema,
   SEARCH_RESULT_LIMIT,
   type SearchFile,
   type SearchHit,
-  type SearchRowDoc,
+  type SearchResults,
 } from "./schema.ts";
 
-interface ParsedRow {
-  text: string;
-  headingId: string;
-  headingText: string;
-  isHeading: boolean;
-  lineIndex: number;
-}
-
-/** Splits a file's content into matchable rows: one per non-fenced line,
- *  tracking the nearest enclosing heading. Ported from the previous
- *  substring engine — fence/heading detection stays regex-based because
- *  Orama has no opinion on markdown structure. */
-function parseRows(content: string): ParsedRow[] {
-  const rows: ParsedRow[] = [];
-  const slugger = new GithubSlugger();
-  let heading: { id: string; text: string } | undefined;
-  let fence: { marker: string; length: number } | undefined;
-  let lineIndex = 0;
-  for (const match of content.matchAll(/[^\n]+/g)) {
-    const line = match[0].replace(/\r$/, "");
-    const fenceMatch = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-    if (fenceMatch) {
-      const marker = fenceMatch[1][0];
-      if (!fence) fence = { marker, length: fenceMatch[1].length };
-      else if (
-        marker === fence.marker &&
-        fenceMatch[1].length >= fence.length &&
-        !fenceMatch[2].trim()
-      )
-        fence = undefined;
-      lineIndex++;
-      continue;
-    }
-    if (fence) {
-      lineIndex++;
-      continue;
-    }
-    const hm = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
-    const text = hm ? hm[2].trim() : line;
-    if (hm) heading = { id: slugger.slug(text || "section"), text };
-    rows.push({
-      text,
-      headingId: heading?.id ?? "",
-      headingText: heading?.text ?? "",
-      isHeading: !!hm,
-      lineIndex,
-    });
-    lineIndex++;
-  }
-  return rows;
-}
-
-function rowDoc(
-  workspaceId: string,
-  file: SearchFile,
-  row: ParsedRow,
-): SearchRowDoc & { id: string } {
-  return {
-    id: `${workspaceId}\u0000${file.id}\u0000${row.lineIndex}`,
-    workspaceId,
-    fileId: file.id,
-    fileName: file.name,
-    text: row.text,
-    headingText: row.headingText,
-    headingOwnText: row.isHeading ? row.text : "",
-    headingId: row.headingId,
-    lineIndex: row.lineIndex,
-    isHeading: row.isHeading,
-  };
-}
-
-function filenameDoc(workspaceId: string, file: SearchFile): SearchRowDoc & { id: string } {
-  return {
-    id: `${workspaceId}\u0000${file.id}\u0000-1`,
-    workspaceId,
-    fileId: file.id,
-    fileName: file.name,
-    text: file.name,
-    headingText: "",
-    headingOwnText: "",
-    headingId: "",
-    lineIndex: -1,
-    isHeading: false,
-  };
-}
-
-async function yieldToMainThread(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-/** How many files' worth of rows to insert before yielding to the event
- *  loop — matters only for a large batch (a lazily-fetched other workspace
- *  indexed on the main thread when the worker is unavailable); the common
- *  case of re-indexing a handful of changed files never hits this. */
-const FILES_PER_INSERT_BATCH = 15;
-
-interface FileCacheEntry {
+/** One file as the index holds it: its rows, plus their text joined with
+ *  "\n" so a query runs as a single regex pass over the whole file. */
+interface IndexedFile {
   name: string;
   content: string;
-  rowIds: string[];
+  rows: SearchRow[];
+  joined: string;
+  /** starts[i] = offset of rows[i] within `joined`. */
+  starts: number[];
 }
 
-/** Owns one shared Orama index across every currently-synced workspace.
- *  One shared index (rather than one per workspace) is what makes BM25
- *  ranking comparable across workspaces when cross-workspace search is on —
- *  scores from separate indexes can't be merged meaningfully, but scores
- *  within one index, filtered by `where`, can.
+function indexFile(file: SearchFile): IndexedFile {
+  const rows = parseRows(file.content);
+  const starts: number[] = [];
+  let at = 0;
+  for (const row of rows) {
+    starts.push(at);
+    at += row.text.length + 1;
+  }
+  return {
+    name: file.name,
+    content: file.content,
+    rows,
+    joined: rows.map((row) => row.text).join("\n"),
+    starts,
+  };
+}
+
+/** Index of the last row starting at or before `offset`. */
+function rowAt(starts: number[], offset: number): number {
+  let lo = 0;
+  let hi = starts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (starts[mid] <= offset) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+const WORD_CHAR = /[\p{L}\p{N}_]/u;
+
+/** True when the match is a whole word, not part of a longer one. */
+function wholeWord(text: string, start: number, end: number): boolean {
+  return !WORD_CHAR.test(text[start - 1] ?? "") && !WORD_CHAR.test(text[end] ?? "");
+}
+
+/** How strongly one occurrence suggests the file is what was looked for. */
+function hitScore(row: SearchRow, text: string, start: number, end: number): number {
+  return (row.isHeading ? 2 : 0) + (wholeWord(text, start, end) ? 2 : 1);
+}
+
+const FILENAME_SCORE = 5;
+
+/** Characters of context kept before a match in a result's snippet. The
+ *  sidebar row truncates the end, so a short lead keeps the match visible. */
+const SNIPPET_LEAD = 24;
+const SNIPPET_TAIL = 80;
+
+function snippetAround(text: string, start: number, length: number) {
+  let from = Math.max(0, start - SNIPPET_LEAD);
+  // Start on a word boundary when one is close, so the snippet doesn't open
+  // on half a word.
+  if (from > 0) {
+    const space = text.indexOf(" ", from);
+    if (space >= 0 && space < start) from = space + 1;
+  }
+  const to = Math.min(text.length, start + length + SNIPPET_TAIL);
+  const lead = from > 0 ? "…" : "";
+  return {
+    snippet: lead + text.slice(from, to) + (to < text.length ? "…" : ""),
+    matchStart: lead.length + start - from,
+  };
+}
+
+interface FileResult {
+  hits: SearchHit[];
+  score: number;
+  count: number;
+}
+
+/**
+ * The search index for every currently-synced workspace: exact,
+ * case-insensitive find-in-files over what each line renders as.
  *
- *  Operations run one at a time, in the order they were called. A sync
- *  yields between batches, so without this two syncs of one workspace would
- *  both replace the same rows (one fails on a duplicate id and the older
- *  content stays), a drop mid-sync would orphan rows the cache no longer
- *  knows, and a search would see a half-applied sync. */
+ * A reader searching for a word expects every place that word appears and
+ * nothing else — so there is no stemming, no typo tolerance and no matching
+ * a line because of the heading or file it sits under. Ranking only orders
+ * files (filename and heading matches, then whole-word matches, first);
+ * within a file, hits stay in document order.
+ *
+ * Operations run one at a time, in the order they were called, so a search
+ * always sees every sync and drop sent before it.
+ */
 export class DocumentIndex {
-  private db: AnyOrama = create({
-    schema: rowSchema,
-    components: { tokenizer: { language: "english", stemming: true } },
-  });
-  private cache = new Map<string, Map<string, FileCacheEntry>>();
+  private workspaces = new Map<string, Map<string, IndexedFile>>();
   private queue: Promise<unknown> = Promise.resolve();
   private generation = 0;
 
-  private exclusive<T>(operation: () => Promise<T>): Promise<T> {
+  private exclusive<T>(operation: () => T | Promise<T>): Promise<T> {
     const run = this.queue.then(operation);
     this.queue = run.catch(() => undefined);
     return run;
@@ -145,159 +114,134 @@ export class DocumentIndex {
   /** Brings the workspace's rows in line with `files`. Resolves with the
    *  index generation afterwards, which advances only when rows changed. */
   syncWorkspace(workspaceId: string, files: SearchFile[]): Promise<number> {
-    return this.exclusive(async () => {
-      try {
-        if (await this.applySync(workspaceId, files)) this.generation++;
-      } catch (error) {
-        // Earlier batches may have applied; results can differ from before.
-        this.generation++;
-        throw error;
-      }
+    return this.exclusive(() => {
+      if (this.applySync(workspaceId, files)) this.generation++;
       return this.generation;
     });
   }
 
-  private async applySync(workspaceId: string, files: SearchFile[]): Promise<boolean> {
-    let workspaceCache = this.cache.get(workspaceId);
-    if (!workspaceCache) {
-      workspaceCache = new Map();
-      this.cache.set(workspaceId, workspaceCache);
-    }
-
-    const seen = new Set(files.map((file) => file.id));
-    const staleIds: string[] = [];
-    for (const [fileId, entry] of workspaceCache) {
-      if (!seen.has(fileId)) {
-        staleIds.push(...entry.rowIds);
-        workspaceCache.delete(fileId);
+  private applySync(workspaceId: string, files: SearchFile[]): boolean {
+    const previous = this.workspaces.get(workspaceId);
+    const next = new Map<string, IndexedFile>();
+    let changed = !previous || previous.size !== files.length;
+    for (const file of files) {
+      const cached = previous?.get(file.id);
+      if (cached && cached.content === file.content && cached.name === file.name) {
+        next.set(file.id, cached);
+        continue;
       }
+      // Built before anything is replaced, so a file that fails to parse
+      // leaves the workspace exactly as it was.
+      next.set(file.id, indexFile(file));
+      changed = true;
     }
-    if (staleIds.length) await removeMultiple(this.db, staleIds);
-
-    const changed = files.filter((file) => {
-      const cached = workspaceCache!.get(file.id);
-      return cached?.content !== file.content || cached?.name !== file.name;
-    });
-    for (let i = 0; i < changed.length; i += FILES_PER_INSERT_BATCH) {
-      const batch = changed.slice(i, i + FILES_PER_INSERT_BATCH);
-      const toRemove = batch.flatMap((file) => workspaceCache!.get(file.id)?.rowIds ?? []);
-      if (toRemove.length) await removeMultiple(this.db, toRemove);
-
-      const rowsByFile = batch.map((file) => parseRows(file.content));
-      const docs = batch.flatMap((file, i) => [
-        filenameDoc(workspaceId, file),
-        ...rowsByFile[i].map((row) => rowDoc(workspaceId, file, row)),
-      ]);
-      const ids = docs.length ? await insertMultiple(this.db, docs) : [];
-
-      let cursor = 0;
-      for (let i = 0; i < batch.length; i++) {
-        const rowCount = 1 + rowsByFile[i].length;
-        workspaceCache.set(batch[i].id, {
-          name: batch[i].name,
-          content: batch[i].content,
-          rowIds: ids.slice(cursor, cursor + rowCount),
-        });
-        cursor += rowCount;
-      }
-      if (i + FILES_PER_INSERT_BATCH < changed.length) await yieldToMainThread();
-    }
-    return staleIds.length > 0 || changed.length > 0;
+    this.workspaces.set(workspaceId, next);
+    return changed;
   }
 
   /** Removes every row for the workspace. Resolves with the generation. */
   dropWorkspace(workspaceId: string): Promise<number> {
-    return this.exclusive(async () => {
-      const workspaceCache = this.cache.get(workspaceId);
-      if (!workspaceCache) return this.generation;
-      const ids = [...workspaceCache.values()].flatMap((entry) => entry.rowIds);
-      if (ids.length) await removeMultiple(this.db, ids);
-      this.cache.delete(workspaceId);
-      return ++this.generation;
+    return this.exclusive(() => {
+      if (this.workspaces.delete(workspaceId)) this.generation++;
+      return this.generation;
     });
   }
 
   /** Searches after every sync or drop called before it has applied. */
-  search(query: string, workspaceIds: string[], limit = SEARCH_RESULT_LIMIT): Promise<SearchHit[]> {
+  search(
+    query: string,
+    workspaceIds: string[],
+    limit = SEARCH_RESULT_LIMIT,
+  ): Promise<SearchResults> {
     return this.exclusive(() => this.runSearch(query, workspaceIds, limit));
   }
 
-  private async runSearch(
-    query: string,
-    workspaceIds: string[],
-    limit: number,
-  ): Promise<SearchHit[]> {
+  private runSearch(query: string, workspaceIds: string[], limit: number): SearchResults {
     const term = query.trim();
-    if (!term || !workspaceIds.length) return [];
-    const results = await oramaSearch(this.db, {
-      term,
-      properties: ["headingOwnText", "headingText", "fileName", "text"],
-      boost: { headingOwnText: 3, headingText: 1.4, fileName: 1.6, text: 1 },
-      tolerance: 1,
-      limit,
-      where: { workspaceId: { in: workspaceIds } },
-    });
+    if (!term) return { hits: [], total: 0 };
+    const pattern = queryPattern(term);
     const hits: SearchHit[] = [];
-    for (const { document, score } of results.hits) {
-      const row = document as unknown as SearchRowDoc;
-      const base = {
-        workspaceId: row.workspaceId,
-        fileId: row.fileId,
-        fileName: row.fileName,
-        headingId: row.headingId || undefined,
-        headingText: row.headingText || undefined,
-        lineIndex: row.lineIndex,
-        score,
-      };
-      if (row.lineIndex < 0) {
-        hits.push({ ...base, snippet: row.fileName, line: "", occurrence: 0 });
-        continue;
+    let total = 0;
+    // Workspaces in the order asked for (the current one first), files by
+    // relevance within each.
+    for (const workspaceId of new Set(workspaceIds)) {
+      const files = this.workspaces.get(workspaceId);
+      if (!files) continue;
+      const results: FileResult[] = [];
+      for (const [fileId, file] of files) {
+        const result = this.searchFile(workspaceId, fileId, file, pattern);
+        if (result.count) results.push(result);
       }
-      // A line is one row, but the query can occur in it more than once — each
-      // occurrence gets its own hit, so the sidebar lists (and can jump to)
-      // every one of them rather than just the line as a whole.
-      const at = literalOccurrences(row.text, term);
-      if (!at.length) {
-        hits.push({ ...base, snippet: headSnippet(row.text), line: row.text, occurrence: 0 });
-        continue;
+      results.sort((a, b) => b.score - a.score || b.count - a.count);
+      for (const result of results) {
+        total += result.count;
+        for (const hit of result.hits) {
+          if (hits.length >= limit) break;
+          hits.push(hit);
+        }
       }
-      at.forEach((start, occurrence) => {
-        hits.push({
-          ...base,
-          snippet: snippetAt(row.text, start, term.length),
-          line: row.text,
-          occurrence,
-        });
+    }
+    return { hits, total };
+  }
+
+  private searchFile(
+    workspaceId: string,
+    fileId: string,
+    file: IndexedFile,
+    pattern: RegExp,
+  ): FileResult {
+    const hits: SearchHit[] = [];
+    let score = 0;
+    const base = { workspaceId, fileId, fileName: file.name };
+
+    pattern.lastIndex = 0;
+    const nameMatch = pattern.exec(file.name);
+    if (nameMatch) {
+      score = FILENAME_SCORE;
+      hits.push({
+        ...base,
+        snippet: file.name,
+        matchStart: nameMatch.index,
+        matchLength: nameMatch[0].length,
+        line: "",
+        lineIndex: -1,
+        occurrence: 0,
+        score: FILENAME_SCORE,
       });
     }
-    return hits;
+
+    pattern.lastIndex = 0;
+    let lastRow = -1;
+    let occurrence = 0;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(file.joined))) {
+      const index = rowAt(file.starts, match.index);
+      const row = file.rows[index];
+      const start = match.index - file.starts[index];
+      // A query can't span two lines; one that ran past this row's end
+      // matched the "\n" joining it to the next.
+      if (start + match[0].length > row.text.length) {
+        pattern.lastIndex = match.index + 1;
+        continue;
+      }
+      occurrence = index === lastRow ? occurrence + 1 : 0;
+      lastRow = index;
+      const hitValue = hitScore(row, row.text, start, start + match[0].length);
+      score = Math.max(score, hitValue);
+      const { snippet, matchStart } = snippetAround(row.text, start, match[0].length);
+      hits.push({
+        ...base,
+        headingId: row.headingId || undefined,
+        headingText: row.headingText || undefined,
+        snippet,
+        matchStart,
+        matchLength: match[0].length,
+        line: row.text,
+        lineIndex: row.lineIndex,
+        occurrence,
+        score: hitValue,
+      });
+    }
+    return { hits, score, count: hits.length };
   }
-}
-
-/** Every case-insensitive occurrence of `term` in `text`, left to right. */
-function literalOccurrences(text: string, term: string): number[] {
-  const lowerText = text.toLowerCase();
-  const lowerTerm = term.toLowerCase();
-  const out: number[] = [];
-  let from = 0;
-  for (;;) {
-    const at = lowerText.indexOf(lowerTerm, from);
-    if (at < 0) return out;
-    out.push(at);
-    from = at + lowerTerm.length;
-  }
-}
-
-/** Truncates around one located occurrence of the query. */
-function snippetAt(text: string, at: number, termLength: number): string {
-  const start = Math.max(0, at - 40);
-  const end = Math.min(text.length, at + termLength + 60);
-  return (start ? "…" : "") + text.slice(start, end) + (end < text.length ? "…" : "");
-}
-
-/** A stemmed or fuzzy/typo match may have no literal occurrence in the row
- *  (query "run" hitting stored "running") — falls back to a head-truncated
- *  snippet, same as VS Code's own fuzzy mode does. */
-function headSnippet(text: string): string {
-  return text.length > 100 ? `${text.slice(0, 100)}…` : text;
 }

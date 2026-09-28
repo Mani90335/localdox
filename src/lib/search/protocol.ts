@@ -1,5 +1,5 @@
 import type { DocumentIndex } from "./document-index.ts";
-import type { SearchFile, SearchHit } from "./schema.ts";
+import type { SearchFile, SearchResults } from "./schema.ts";
 
 // The messages exchanged with the search worker. Every request gets exactly
 // one reply carrying its reqId: a result, or a terminal "error" when the
@@ -13,7 +13,7 @@ export type SearchRequest =
 export type SearchResponse =
   /** `generation` is the index generation once this mutation has applied. */
   | { reqId: number; type: "ack"; generation: number }
-  | { reqId: number; type: "hits"; hits: SearchHit[] }
+  | ({ reqId: number; type: "hits" } & SearchResults)
   | { reqId: number; type: "error"; message: string };
 
 /** Runs one request against `index`. Never rejects: failures become an
@@ -40,7 +40,7 @@ export async function handleSearchRequest(
         return {
           reqId: request.reqId,
           type: "hits",
-          hits: await index.search(request.query, request.workspaceIds),
+          ...(await index.search(request.query, request.workspaceIds)),
         };
     }
   } catch (error) {
