@@ -1,4 +1,122 @@
-Latest update — 2026-09-28 (A08 PDF zoom pixel budget)
+Latest update — 2026-09-28 (A04 diagram mode parity and bounded Stepped stage)
+
+Completed A04 / Package 5's diagram item. Raw and Stepped now use one
+renderer decision for each diagram. Stepped plays in a stage one screenful
+tall, whatever the diagram's shape.
+
+Before (HEAD 4178f45, production build, 1280×800, `flowchart TD` chains):
+- 499, 500 and 599 edges: Raw drew on the GPU canvas, because its render
+  measured too large for live SVG. Stepped re-ran only the source check
+  (GPU threshold 600 edges) and mounted the whole SVG.
+  - 500 edges: a 52,126 px stage on a 52,543 px page (the audit measured
+    52,311).
+  - 599 edges: a 62,422 px stage.
+  - The transport was off screen in every case.
+- 600 and 1,000 edges: both modes used the canvas, with bounded stages.
+- A tall chain small enough to stay SVG played at natural height with the
+  camera off: 40 nodes gave a 4,286 px Stepped stage, 150 nodes 15,726 px.
+- The results were the same whether Stepped was chosen after Raw finished or
+  straight away.
+
+Fix:
+- src/services/diagrams/render-decision.ts: `decideDiagramRender(source,
+  renderedTooLarge)` returns svg / gpu / image and what settled it (source or
+  render). The rules are unchanged: the source scan first, then a measured
+  render sends flowchart/ER/class/state to the GPU engine and other kinds to
+  an image. A measured verdict is remembered per source (a 64-entry list of
+  hashes), so a remount or a second pane doesn't lay the diagram out again to
+  rediscover it.
+- Mermaid.tsx computes the decision once. It passes `engine` to Stepped and
+  records a verdict from either stage. The verdict is keyed by source, so an
+  edited diagram starts fresh.
+- MermaidExplainer.tsx:
+  - Takes `engine` from the parent and no longer runs its own source gate.
+  - After rendering, applies the same measured check as Raw. An oversized
+    SVG is reported instead of mounted, and the stage moves to the GPU
+    engine (or the diagram becomes a still image with Stepped disabled).
+- stage-ratio.ts `playbackBoxStyle`: a tall diagram's Stepped stage takes the
+  full column width and `min(32rem, 70vh)` of height, plus the transport
+  gutter. The old natural-height CSS rule is gone. Raw keeps natural height
+  for tall diagrams, as a still picture you scroll past.
+- explainer/camera.ts + player.ts: an optional `CameraView` (the stage's
+  aspect ratio, and a floor of natural size).
+  - For a tall diagram, the home frame is widened to the stage's proportions.
+  - Close-ups take that aspect, at no more than 1 diagram unit per pixel, and
+    the camera now follows tall diagrams.
+  - Without a view (every fitted diagram), framing is unchanged.
+  - The stage is sized with `flushSync` before the camera measures it.
+  - Zoom ceiling: enough to reach 2× natural size.
+
+After (same script and build settings):
+- 499/500/599/600/1,000 edges, with Stepped chosen after Raw and straight
+  away: canvas in both modes, frame ≤ 367 px, page 800 px, transport on
+  screen.
+- 40- and 150-node chains in Stepped: SVG in a 568 px stage (512 + 56 gutter)
+  on a 985 px page. The camera shows each step at natural size.
+- Raw is unchanged: 40 nodes stays at 4,286 px natural height.
+- Stepped after Raw has measured does no SVG layout at all. Stepped straight
+  away lays it out once (shared render cache) and never mounts it.
+
+Validation:
+- Unit: tests/diagram-render-decision.test.ts, 7 tests.
+  - Both sides of the 600-edge threshold (499/500/599/600/1,000).
+  - Measured verdicts by kind, and the source scan still winning.
+  - Per-source memory, an edited source not inheriting it, and the LRU bound.
+  - playbackBoxStyle against stageBoxStyle.
+  - Camera: a tall chain follows only with a view; frames have the stage
+    aspect at natural width and stay inside home, with the active node in
+    frame. Fitted framing is unchanged.
+  - npm test: 281/281.
+- Browser: tests/e2e/diagram-modes.spec.ts, 6 tests, production preview. An
+  init-script MutationObserver records the tallest Stepped stage ever
+  attached, so a tall SVG mounted briefly still fails.
+  - 499/500/600 edges: canvas in Raw → Stepped → Raw, Flow disabled, frame ≤
+    viewport, page < 2 viewports, transport in view, "/N" caption.
+  - Stepped clicked before Raw's measurement arrives.
+  - A 40-node chain: bounded Stepped stage, camera viewBox at the stage
+    width, legible labels, and Raw still at natural height.
+  - A fitted diagram keeps its aspect-ratio stage.
+  - Against a HEAD build: 4 of 6 fail (499, 500, straight-to-Stepped, the
+    40-node chain). The 600-edge and fitted cases pass on both, as controls.
+- Full production suite on HEAD + this change (private port): 87 passed,
+  1 skipped, 4 failed. The 4 are mobile-navigation drawer close, both
+  sharing previews and viewers spreadsheet controls. They fail the same way
+  on a clean HEAD build.
+- npm run typecheck and npm run build pass. ESLint and Prettier are clean on
+  every changed file. explainer.css's one Prettier warning is already on
+  HEAD.
+- Chrome DevTools MCP, isolated contexts on the production preview,
+  1280×800:
+  - 500-edge chain: Raw → Stepped both canvas, frame 354 px, page 800 px,
+    transport in view.
+  - 60-node chain: Stepped SVG, 568 px stage, the camera following step by
+    step. Zoom out, then "Follow the explanation", handed control back.
+  - Full screen kept playing with the transport visible.
+  - No console errors or warnings.
+
+Environment: another session had uncommitted search/Markdown work and
+started R03's PDF outline work during this one. All building and testing ran
+in a detached worktree of HEAD plus only these files. This commit contains
+only the diagram files, their tests and this log.
+
+Limits:
+- A 499–599-edge diagram still costs one main-thread Mermaid layout (about
+  3 s here) before the measured gate can move it. R02's pre-layout
+  complexity limit is still open. The render cache and the verdict memory
+  keep it to one layout per source per session.
+- Flow is only disabled once Raw or Stepped has measured. A reader who picks
+  Flow in the seconds before Raw's first render finishes still gets the
+  animator. It clamps its stage to a screenful, so the page stays bounded.
+- The camera view is measured when playback starts. Entering full screen
+  keeps those proportions: close-ups are about 1.5× natural size and have
+  extra side context, but aren't letterboxed away.
+- The zoom percentage for a tall Stepped diagram is relative to the whole
+  chain, so a natural-size close-up reads around 1,000%.
+- R01 (per-frame React updates and offscreen playback), R02, A05 and R04
+  remain in Package 5. Chromium desktop only; no real phone, Safari or
+  Firefox check.
+
+Previous update — 2026-09-28 (A08 PDF zoom pixel budget)
 
 Completed A08 / Package 5's PDF memory item. Zooming a PDF no longer grows
 its canvases without limit. Each visible page stays within 32 MiB of backing
@@ -759,7 +877,7 @@ Pending (not started, or started but not committed)
 
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
-- Package 5: R03's PDF keyboard isolation is done (R03 update above), and A08's PDF zoom pixel budget is done (latest update); R03's outline work remains pending. A04 (500-edge Stepped diagram makes a 52,311 px page), A05 (3,000-section Markdown), R01–R02 and R04 remain pending.
+- Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), and A04's diagram mode parity and bounded Stepped stage is done (latest update); R03's outline work remains pending. A05 (3,000-section Markdown), R01–R02 and R04 remain pending.
 - Package 6: B01 is done (latest update above); B02–B03 (startup loading), D01–D03 (loading whole workspaces, binary storage, the storage cap).
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).

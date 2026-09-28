@@ -37,7 +37,7 @@ import {
 } from "./plan";
 import { stepNumber, type ExplainerPlan, type ExplainerStep } from "./plan";
 import { canFollow, frameFor, framesEqual, homeFrame } from "./camera";
-import type { Frame } from "./camera";
+import type { CameraView, Frame } from "./camera";
 import { travelDuration, travelFrame } from "./camera-path";
 import { groupBeats, type Beat } from "./beats";
 
@@ -93,6 +93,8 @@ export interface PlayerOptions {
   onFrame: (frame: Frame) => void;
   /** Put each arrow's step number on it as it is drawn. */
   numbers?: boolean;
+  /** The stage's shape, for a tall diagram framed in a shorter stage. */
+  view?: CameraView;
 }
 
 /** How far along its edge a step-number badge sits: near the arrival end, so
@@ -168,8 +170,8 @@ export class ExplainerPlayer {
   ) {
     for (const edge of graph.edges) this.edgesById.set(edge.id, edge);
     this.pace = paceFor(plan.steps.length);
-    this.follow = options.camera && canFollow(graph);
-    this.home = homeFrame(graph);
+    this.follow = options.camera && canFollow(graph, options.view);
+    this.home = homeFrame(graph, options.view);
 
     // Lay the timeline out beat by beat: a rest, the camera's move if the
     // framing changes, then the beat's own steps back to back.
@@ -177,7 +179,7 @@ export class ExplainerPlayer {
     let previousFrame: Frame | null = null;
     const pause = BEAT_PAUSE_MS * this.pace;
     for (const beat of groupBeats(plan.steps)) {
-      const frame = this.follow ? frameFor(graph, beat.nodeIds) : this.home;
+      const frame = this.follow ? frameFor(graph, beat.nodeIds, options.view) : this.home;
       let activeFrom = cursor;
       if (previousFrame) {
         cursor += pause;

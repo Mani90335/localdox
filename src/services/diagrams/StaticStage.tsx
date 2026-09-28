@@ -89,7 +89,7 @@ export function StaticStage({
    * even though the source scan let it through. The caller uses this to drop
    * the animated modes, exactly as it would for a source-flagged diagram.
    */
-  onOversized?: () => void;
+  onOversized?: (code: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
@@ -216,7 +216,7 @@ export function StaticStage({
           setAsImage(true);
           // Tell the parent only when the source scan had cleared it; a
           // source-flagged diagram has already disabled those modes.
-          if (!performanceMode) onOversized?.();
+          if (!performanceMode) onOversized?.(code);
           const view = readSvgViewBox(svg);
           if (view) {
             const measured = clampStageRatio(view.height / view.width);
