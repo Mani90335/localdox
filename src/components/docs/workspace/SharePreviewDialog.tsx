@@ -1,3 +1,4 @@
+import { dataBytes } from "@/lib/workspace/binary";
 import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, Download, Globe, Link2, Trash2 } from "lucide-react";
 
@@ -72,7 +73,7 @@ export function SharePreviewDialog({
   const picked = candidates.filter((f) => selected.has(f.id));
   const annotationCount = mode === "workspace" ? countAnnotations(record, selected) : 0;
   // What travels: the text plus the base64 body of any binary file.
-  const approxBytes = picked.reduce((sum, f) => sum + f.content.length + (f.data?.length ?? 0), 0);
+  const approxBytes = picked.reduce((sum, f) => sum + f.content.length + (typeof f.data === "string" ? f.data.length : Math.ceil(dataBytes(f.data) / 3) * 4), 0);
   const binned = candidates.filter((f) => f.deletedAt != null).length;
 
   const build = () =>
@@ -82,13 +83,12 @@ export function SharePreviewDialog({
     });
 
   const upload = async () => {
-    const shared = build();
-    const json =
-      mode === "workspace"
-        ? serializeWorkspace(shared)
-        : serializeSharedFiles(shared.files, record.name);
     setPhase({ step: "uploading" });
     try {
+      const shared = build();
+      const json = mode === "workspace"
+        ? await serializeWorkspace(shared)
+        : await serializeSharedFiles(shared.files, record.name);
       const url = await onUpload(mode, json);
       setPhase({ step: "done", url, copied: await onCopy(url) });
     } catch (e) {
@@ -100,7 +100,15 @@ export function SharePreviewDialog({
     }
   };
 
-  const download = () => onDownload(serializeWorkspace(build()), record.name);
+  const download = async () => {
+    setPhase({ step: "uploading" });
+    try {
+      onDownload(await serializeWorkspace(build()), record.name);
+      setPhase({ step: "review" });
+    } catch {
+      setPhase({ step: "failed", message: "Could not prepare the download. Please try again." });
+    }
+  };
 
   const toggle = (id: string) =>
     setSelected((prev) => {

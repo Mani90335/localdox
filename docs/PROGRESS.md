@@ -2643,3 +2643,20 @@ Pending (not started, or started but not committed)
 None of PLAN.md's release gates are formally met yet. A01–A03 and A09/A10 now have passing reproductions, which is what the reliability gate asks for, and Package 3's offline criterion now has a passing reproduction too.
 
 Historical working-tree note (superseded by the clean-tree check on 2026-09-28)
+
+
+
+PROGRESS on D02:
+I’ll locate the audit and progress files in this checkout, read D02’s requirements, then implement, test, update the progress log, and commit the fix.
+
+
+
+
+Read files, ran commands
+
+
+D02 is still open. Binary files currently stay as base64 strings through import, storage, and several viewers. I’m tracing those paths so Blob storage preserves backups, sharing, editing, and transaction safety. I’ll use IndexedDB Blobs first, as the plan recommends.
+
+The fix needs a stable binary revision identifier: IndexedDB returns new Blob objects on reads, so object identity alone would cause false cross-tab conflicts. I’m adding that identifier, keeping base64 only at the portable JSON backup/share boundary, and retaining the existing file keys and atomic transactions.
+
+Stopped in middle, complete it

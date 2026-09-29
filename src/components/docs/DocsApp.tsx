@@ -1,3 +1,4 @@
+import { dataBytes } from "@/lib/workspace/binary";
 import { ConversionContext } from "@/services/doc-conversion/ConversionContext";
 import { ensureEmbedMediaFolder } from "@/lib/workspace/embed-media";
 import type { DocumentUpdate } from "@/services/office-editing";
@@ -1111,7 +1112,7 @@ export function DocsApp() {
         const pool = [...snapshotRef.current.files];
 
         for (const file of parsed) {
-          const dup = findDuplicate(file, pool);
+          const dup = await findDuplicate(file, pool);
           if (dup?.kind === "content") {
             skipped.push(file.name);
             if (attachments) {
@@ -1281,7 +1282,7 @@ export function DocsApp() {
   const workspaceRevision = useMemo(
     () =>
       files
-        .map((file) => `${file.id}:${file.name}:${file.content.length}:${file.data?.length ?? 0}`)
+        .map((file) => `${file.id}:${file.name}:${file.content.length}:${dataBytes(file.data)}`)
         .join("|"),
     [files],
   );
@@ -2625,9 +2626,13 @@ flowchart LR
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, []);
 
-  const exportWorkspace = useCallback(() => {
+  const exportWorkspace = useCallback(async () => {
     const rec = buildRecord();
-    downloadJson(serializeWorkspace(rec), rec.name);
+    try {
+      downloadJson(await serializeWorkspace(rec), rec.name);
+    } catch {
+      toast.error("Could not export the workspace backup. Please try again.");
+    }
   }, [buildRecord, downloadJson]);
 
   // Sharing uploads to a third party, so it never happens straight from a menu

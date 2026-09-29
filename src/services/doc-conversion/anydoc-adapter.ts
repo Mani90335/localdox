@@ -1,3 +1,4 @@
+import { dataBuffer } from "../../lib/workspace/binary.ts";
 import init, { formatFromBytes, formatFromPath, toMarkdownBytes } from "@firecrawl/anydoc-wasm";
 import { MAX_CONVERSION_INPUT, MAX_CONVERSION_OUTPUT } from "./types.ts";
 import type { ConversionResult, ConversionSource } from "./types.ts";
@@ -6,9 +7,9 @@ import type { ConversionResult, ConversionSource } from "./types.ts";
 export async function convertDocument(source: ConversionSource): Promise<ConversionResult> {
   let bytes: Uint8Array;
   if (source.data) {
-    const encoded = source.data.slice(source.data.indexOf(",") + 1);
-    if (encoded.length > Math.ceil(MAX_CONVERSION_INPUT / 3) * 4) throw { code: "resourceLimit" };
-    bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
+    const size = typeof source.data === "string" ? source.data.length * 0.75 : source.data.blob.size;
+    if (size > MAX_CONVERSION_INPUT + 256) throw { code: "resourceLimit" };
+    bytes = new Uint8Array((await dataBuffer(source.data))!);
   } else {
     bytes = new TextEncoder().encode(source.content);
   }

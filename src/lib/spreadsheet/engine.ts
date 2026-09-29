@@ -11,7 +11,7 @@ import type * as XLSXModule from "xlsx";
 export type Xlsx = Pick<typeof XLSXModule, "read" | "utils">;
 
 export type SpreadsheetSource =
-  { format: "text"; text: string } | { format: "binary"; dataUrl: string };
+  { format: "text"; text: string } | { format: "binary"; dataUrl: string } | { format: "buffer"; buffer: ArrayBuffer } | { format: "blob"; blob: Blob };
 
 export type SheetSort = { column: number; direction: 1 | -1 } | null;
 
@@ -207,7 +207,8 @@ export class SpreadsheetEngine {
       if (this.names.length) this.materialize(0, book.Sheets[this.names[0]]);
       else this.names = ["Sheet1"];
     } else {
-      this.bytes = decodeDataUrl(source.dataUrl);
+      if (source.format === "blob") throw new Error("Blob must be read before parsing");
+      this.bytes = source.format === "buffer" ? new Uint8Array(source.buffer) : decodeDataUrl(source.dataUrl);
       this.names = this.xlsx.read(this.bytes, { type: "array", bookSheets: true }).SheetNames;
     }
     return { sheets: [...this.names] };

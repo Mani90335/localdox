@@ -154,7 +154,7 @@ function SheetEditor({ file, register, changed, onError }: EditorProps) {
     let alive = true;
     void (async () => {
       try {
-        const buffer = dataUrlToArrayBuffer(file.data);
+        const buffer = await dataUrlToArrayBuffer(file.data);
         const workbook = XLSX.read(csv ? file.content : buffer, {
           type: csv ? "string" : "array",
           raw: csv,
@@ -424,7 +424,7 @@ function WordEditor({ file, register, changed, onError }: EditorProps) {
     let alive = true;
     void (async () => {
       try {
-        const buffer = dataUrlToArrayBuffer(file.data);
+        const buffer = await dataUrlToArrayBuffer(file.data);
         if (!buffer) throw new Error("The Word document data is missing.");
         const zip = await JSZip.loadAsync(buffer);
         const entry = zip.file("word/document.xml");

@@ -73,15 +73,13 @@ export function PresentationViewer({
     setSlides([]);
     setCurrent(0);
     setError("");
-    const buffer = dataUrlToArrayBuffer(file.data);
-    if (!buffer) {
-      setError(
-        "This presentation was saved before binary previews were available. Remove it and upload the original .ppt or .pptx file again.",
-      );
-      return;
-    }
+    let alive = true;
     void (async () => {
+      let buffer: ArrayBuffer | null = null;
       try {
+        buffer = await dataUrlToArrayBuffer(file.data);
+        if (!alive) return;
+        if (!buffer) throw new Error("Missing presentation data");
         const { default: JSZip } = await import("jszip");
         const zip = await JSZip.loadAsync(buffer);
         const paths = Object.keys(zip.files)
@@ -101,13 +99,15 @@ export function PresentationViewer({
             };
           }),
         );
+        if (!alive) return;
         setSlides(next);
         setCurrent(0);
       } catch {
         // Binary .ppt files do not share the OOXML slide tree used by PPTX.
         // Preserve their readable text as a deck so the same slide controls
         // remain useful instead of dropping the reader into a download-only flow.
-        const legacySlides = extractLegacyPptSlides(buffer);
+        if (!alive) return;
+        const legacySlides = buffer ? extractLegacyPptSlides(buffer) : [];
         if (legacySlides.length) {
           setSlides(legacySlides);
           setCurrent(0);
@@ -116,6 +116,7 @@ export function PresentationViewer({
         }
       }
     })();
+    return () => { alive = false; };
   }, [file.id, file.data]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
