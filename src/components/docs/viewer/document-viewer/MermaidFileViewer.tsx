@@ -3,7 +3,7 @@ import { Pencil } from "lucide-react";
 import { DISCARD_PROMPT } from "@/lib/markdown/document-utils";
 import { ESCAPE_DEPTH, useNavEscape } from "@/hooks/use-nav-history";
 import { MermaidBlock } from "@/services/diagrams";
-import { MarkdownEditor } from "../../editor/MarkdownEditor";
+import { MarkdownEditor } from "../../editor/MarkdownEditorLazy";
 import { ViewerFrame } from "./shared";
 import type { Props } from "./shared";
 

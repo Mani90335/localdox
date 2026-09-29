@@ -3,7 +3,6 @@ import type { MdFile } from "@/lib/markdown/markdown-utils";
 import { persistence } from "@/lib/workspace/persistence";
 import type { SearchHit } from "@/lib/search/schema";
 import {
-  createLocalSearchClient,
   createWorkerSearchClient,
   SearchClosedError,
   type SearchClient,
@@ -58,6 +57,8 @@ export function useSearchIndex({
   const [pending, setPending] = useState(false);
   const [loadingIds, setLoadingIds] = useState<string[]>([]);
   const [fallback, setFallback] = useState(false);
+  /** The fallback index is downloading; no session exists yet. */
+  const [starting, setStarting] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [generation, setGeneration] = useState(0);
   const [readyWorkspaceId, setReadyWorkspaceId] = useState<string | null>(null);
@@ -69,32 +70,58 @@ export function useSearchIndex({
   const currentIdRef = useRef(currentWorkspaceId);
   currentIdRef.current = currentWorkspaceId;
 
+  // Retry re-attempts a main-thread fallback that failed to download; with a
+  // working worker it only re-syncs (the effects below), not a new session.
+  const fallbackAttempt = fallback ? retry : 0;
   useEffect(() => {
     if (!active) return;
-    let client: SearchClient;
-    if (fallback) client = createLocalSearchClient();
-    else {
+    let next: Session | null = null;
+    let cancelled = false;
+    const start = (client: SearchClient) => {
+      next = { client, indexed: new Set() };
+      setSession(next);
+      setGeneration(0);
+      setReadyWorkspaceId(null);
+      setError(null);
+    };
+    if (fallback) {
+      // Only reached when the worker can't run, so the main-thread index is
+      // downloaded then rather than with every startup.
+      setStarting(true);
+      import("@/lib/search/local-search-client").then(
+        ({ createLocalSearchClient }) => {
+          if (cancelled) return;
+          setStarting(false);
+          start(createLocalSearchClient());
+        },
+        (reason: unknown) => {
+          if (cancelled) return;
+          console.warn("Search fallback failed to load", reason);
+          setStarting(false);
+          setError("index");
+        },
+      );
+    } else {
       try {
         const worker = new Worker(
           new URL("../lib/search/document-index.worker.ts", import.meta.url),
           { type: "module" },
         );
-        client = createWorkerSearchClient(worker, () => setFallback(true));
+        start(createWorkerSearchClient(worker, () => setFallback(true)));
       } catch {
         setFallback(true);
         return;
       }
     }
-    const next: Session = { client, indexed: new Set() };
-    setSession(next);
-    setGeneration(0);
-    setReadyWorkspaceId(null);
-    setError(null);
     return () => {
-      client.close();
-      setSession((current) => (current === next ? null : current));
+      cancelled = true;
+      setStarting(false);
+      if (!next) return;
+      const closing = next;
+      closing.client.close();
+      setSession((current) => (current === closing ? null : current));
     };
-  }, [active, fallback]);
+  }, [active, fallback, fallbackAttempt]);
 
   const otherWorkspaces = useMemo(
     () => (crossWorkspace ? workspaces.filter((w) => w.id !== currentWorkspaceId) : []),
@@ -216,7 +243,8 @@ export function useSearchIndex({
     pending,
     loadingWorkspaces,
     /** The current workspace's rows aren't in the index yet. */
-    indexing: !!session && !!currentWorkspaceId && readyWorkspaceId !== currentWorkspaceId,
+    indexing:
+      !!currentWorkspaceId && (starting || (!!session && readyWorkspaceId !== currentWorkspaceId)),
     error,
     retry: () => {
       setError(null);

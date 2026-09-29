@@ -1,6 +1,6 @@
 import type { DocumentUpdate } from "@/services/office-editing";
 import { lazy, useCallback, useMemo } from "react";
-import { MarkdownViewer } from "./MarkdownViewer";
+import { MarkdownViewer } from "./MarkdownViewerLazy";
 import { getDocumentKind } from "@/lib/markdown/document-utils";
 import type { Highlight } from "@/lib/markdown/dom-highlighter";
 import type { MdFile } from "@/lib/markdown/markdown-utils";

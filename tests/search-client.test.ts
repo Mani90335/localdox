@@ -7,11 +7,11 @@ import {
   type SearchResponse,
 } from "../src/lib/search/protocol.ts";
 import {
-  createLocalSearchClient,
   createWorkerSearchClient,
   SearchClosedError,
   SearchRequestError,
 } from "../src/lib/search/search-client.ts";
+import { createLocalSearchClient } from "../src/lib/search/local-search-client.ts";
 
 // A07: every request must settle (result, error reply, worker failure or
 // close), and a replaced worker must not inherit anything.

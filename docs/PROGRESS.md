@@ -1,4 +1,145 @@
-Latest update — 2026-09-29 (R04 bounded import queue: per-file failures, Cancel)
+Latest update — 2026-09-29 (B02 small startup shell: reader, editor, split view and search fallback on demand)
+
+Completed B02 (Package 6). An empty workspace used to download the Markdown
+reader, the Markdown parser, the editor, split view's panes and search's
+main-thread index before it could paint. Now it paints with the shell and
+loads the rest when it's needed.
+
+Before (HEAD ac2fad3, production build, Chromium via Playwright, empty
+workspace, service worker blocked):
+- 19 scripts on the startup path, 338 KB gzip (1,098 KB raw). The DocsApp
+  chunk alone was 121 KB gzip. It statically held MarkdownViewer,
+  MarkdownEditor, react-resizable-panels, Radix select/menu/popper and search's
+  fallback client. It also pulled in the parser chunk (micromark, mdast, hast,
+  45 KB gzip).
+- Orama is already gone (c93cc27). The "synchronous fallback" is now
+  DocumentIndex, imported statically by search-client.ts.
+
+Fix:
+- src/lib/app/deferred-module.ts (new): `deferredModule(load)` returns
+  `load`, `preload` and a `useModule` hook. Callers share one download. After
+  it arrives, the module renders at once and later mounts skip the
+  placeholder. A failure is rethrown during render, so LazyBoundary and B04's
+  recovery handle it like a lazy chunk. A failure isn't kept, so a later mount
+  tries again.
+  - Why not React.lazy: the first version used lazy + Suspense, and reload with
+    a document open went from 173 to 886 ms at 4× CPU. The chunk arrived in
+    29 ms, but React 19 holds a revealed boundary until 300 ms after its
+    fallback committed (FALLBACK_THROTTLE_MS). A MutationObserver timeline
+    showed the placeholder at 30 ms and the heading at 332 ms. With the hook,
+    the heading appears at 47 ms (HEAD: 46 ms).
+- viewer/MarkdownViewerLazy.tsx: the MarkdownViewer that DocsApp and
+  PaneDocument render.
+  - Its placeholder is a reading-column skeleton with role="status" and the
+    name "Opening <file>". It stays invisible for 300 ms, then fades in, so a
+    cached load never flashes.
+  - `preloadMarkdownViewer()` runs in DocsApp's existing post-FCP idle
+    callback (next to the font warm-up), when text files are being added, and
+    when a document is created.
+- editor/MarkdownEditorLazy.tsx: the same for MarkdownEditor. The `select`
+  handle is forwarded. It is used by MarkdownViewer and MermaidFileViewer.
+  `preloadMarkdownEditor()` runs when a file menu with Edit opens (FileMenu),
+  on Edit, and on New document.
+- MarkdownViewer: the editor handle is state (callback ref), not a ref.
+  "Inspect source" sets a pending selection that now waits until the editor
+  exists. Before, it was consumed while the handle was still null and the jump
+  was lost. A pending selection is dropped if the reader leaves edit mode
+  first.
+- ui/resizable-lazy.tsx: split view's group, panel and handle load on the first
+  split. The group renders nothing until then.
+- lib/search/local-search-client.ts (new): createLocalSearchClient moved out of
+  search-client.ts (`clientOver` and `Send` are exported for it).
+  - use-search-index imports it only after the worker fails. While it
+    downloads, `indexing` is true, so the panel says "Indexing documents…", not
+    "No results".
+  - If it fails to download, the panel shows the index error, and Retry tries
+    the download again.
+- vite.config.ts: the viewer, editor, resizable and local-search-client
+  modules are in the offline shell's `core` list, so the service worker
+  precaches them and they never need the network offline.
+- documentation/startup-loading.md: the model, what loads when, why not
+  React.lazy, why the idle warm-up, measurements, limits, debugging.
+
+After (production build on 4348ff1):
+- Startup path: 20 scripts, 220.8 KB gzip (714 KB raw), −35%.
+- After first paint (idle warm-up): the reader and parser, 17 scripts,
+  118.6 KB gzip.
+- On first edit: the editor, 8.6 KB gzip.
+- Journeys, 4× CPU, 5 runs each, medians, HEAD → this change:
+  - Localhost: shell ready 243 → 231 ms. First open 165 → 181 ms (measured
+    before the idle warm-up existed). Reload with a document open 179–189 →
+    184 ms. First edit 199–214 → 207 ms. No long tasks on either build.
+  - Slow network (150 ms RTT, 1.6 Mbps down, CDP):
+    - shell ready 7.07 → 5.56 s, FCP 6.90 → 5.32 s
+    - first open after idle 163 → 156 ms
+    - reload with a document open 346 → 365 ms
+    - first edit with a 300 ms pause after opening the menu 496 → 505 ms
+    - first edit clicked the instant the menu opens 208 → 454 ms (one round
+      trip for the editor)
+  - Without the idle warm-up, first open on the slow network was 2.3 s, which
+    is why it is there.
+
+Validation:
+- Unit: tests/deferred-module.test.ts, 3 tests: a shared download, retry after
+  a failure, and no unhandled rejection from a failed preload.
+  tests/search-client.test.ts imports the moved client. npm test 440/440
+  (2 skipped, as on HEAD).
+- e2e: tests/e2e/startup-loading.spec.ts (production only), 5 tests. Scripts
+  are recognized by strings in their code, not by chunk names.
+  - Empty startup has no reader, editor, parser or panes code, and no search
+    fallback. The reader arrives at idle; the editor doesn't.
+  - The editor is fetched when the file menu opens. Edit, Done, a save, and a
+    reload keep the edit.
+  - Inspect source on a fresh page selects "target passage" in the editor as it
+    arrives.
+  - A split view survives a reload.
+  - A reader chunk that can't be downloaded shows "This part of Localdox didn't
+    load" while the shell and the file stay.
+  - Against the HEAD build, 4 of 5 fail. The split-restore test passes there,
+    as it should, since it guards the new lazy path. Reverting the pending
+    selection fix makes the Inspect test fail (the editor is never focused).
+- Full production browser suite (private port 4410, ac2fad3 + this change):
+  140 passed, 1 skipped, 3 failed. The 3 are the mobile-navigation drawer
+  close and the two sharing.spec link checks, which hard-code port 4175. All
+  three fail identically on the HEAD build.
+- Rebased onto 4348ff1 (R04 import queue, which also edits addFiles): the merge
+  was clean. Typecheck and build pass. startup-loading, import-queue, search,
+  stale-chunk, export-loading, offline, editing, highlighting, durability,
+  long-markdown and persistence: 63/63.
+- ESLint on the touched files: no new errors. DocsApp and MarkdownViewer have
+  the same 14 warnings as HEAD. The two *Lazy.tsx files each have one
+  react-refresh warning, because they export a preload function beside a
+  component.
+- Chrome DevTools MCP against the production build:
+  - 20 scripts before FCP, none of them the reader or editor. The reader's 17
+    files come after FCP, and no editor is fetched.
+  - Opening a note through the file input renders it with no console errors.
+  - On Slow 3G the placeholder mounted at opacity 0 with 488 px reserved and
+    role="status" "Opening devtools.md". It was replaced 16 ms later with no
+    flash.
+  - A Playwright screenshot with the reader chunk held 2.5 s shows the
+    skeleton in the reading column.
+
+Environment: detached worktree with its own node_modules. Ports 4401–4411 and
+4410 (e2e). HEAD comparisons ran from a copy of the HEAD `.output`
+(`node .output/server/index.mjs`).
+
+Limits:
+- Startup is 220.8 KB gzip (≈216 KiB), still above PLAN.md's 200 KiB target.
+  The next lever is zod (~18 KB gzip). import-schema.ts pulls it into
+  persistence.ts for backup and share validation. Moving it out means making
+  parseWorkspaceImport and parseSharedFiles async.
+- Most sessions still download the reader, just after first paint rather than
+  before it. On a slow network, a file opened within about a second of the
+  shell appearing waits for it.
+- A failed idle warm-up goes through B04's chunk recovery. Offline with the
+  service worker installed it can't fail, because the chunk is precached.
+- The empty and first-open journeys changed; the per-journey budgets of B03
+  (first PDF, conversion, diagram, export) weren't measured.
+- Chromium only; no Safari, Firefox, phone or screen reader. Slow-network
+  numbers are CDP emulation against localhost, not a real network.
+
+Previous update — 2026-09-29 (R04 bounded import queue: per-file failures, Cancel)
 
 Completed R04's import half (Package 5), so R04 is done, and with it every
 Package 5 item. A picked or dropped batch is read a few files at a time. A
@@ -2172,7 +2313,7 @@ Pending (not started, or started but not committed)
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
 - Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04 is done: the spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) and the bounded import queue with per-file failures and Cancel (latest update). R01 (diagram players: coarse React updates, no frames while unseen, reduced motion) is done (latest update). A05 (3,000-section Markdown) is done (latest update; fold latency and the 4× CPU tasks are listed as limits there). R02 (one Mermaid job at a time, byte-budgeted diagram and scene caches, mindmaps and other heavy main-thread diagrams held as source until the reader asks) is done (latest update). Package 5 is now complete.
-- Package 6: B01 is done (B01 update above) and D03 is done (latest update); B02–B03 (startup loading), D01–D02 (loading whole workspaces, binary storage) remain.
+- Package 6: B01 is done (B01 update above), D03 is done (D03 update above) and B02 is done (latest update: small startup shell; 338 → 220.8 KB gzip, still above the 200 KiB target, with zod in persistence as the next lever). B03 (per-journey optional bundles) and D01–D02 (loading whole workspaces, binary storage) remain.
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
 - Package 8: R06 is done (latest update). B04 is done (B04 update above). A12 is done (latest update). B05, R05 and the lint debt (76 errors) remain.

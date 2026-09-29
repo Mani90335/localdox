@@ -1,5 +1,4 @@
-import { DocumentIndex } from "./document-index.ts";
-import { handleSearchRequest, type SearchRequest, type SearchResponse } from "./protocol.ts";
+import type { SearchRequest, SearchResponse } from "./protocol.ts";
 import type { SearchFile, SearchResults } from "./schema.ts";
 
 /** The client was closed (or its worker died) before the request settled. */
@@ -29,9 +28,10 @@ export interface SearchClient {
 }
 
 type Payload<T> = T extends unknown ? Omit<T, "reqId"> : never;
-type Send = (request: Payload<SearchRequest>) => Promise<SearchResponse>;
+export type Send = (request: Payload<SearchRequest>) => Promise<SearchResponse>;
 
-function clientOver(send: Send, close: () => void, isClosed: () => boolean): SearchClient {
+/** A SearchClient over any request/response transport. */
+export function clientOver(send: Send, close: () => void, isClosed: () => boolean): SearchClient {
   const expect = async <T extends SearchResponse["type"]>(
     request: Payload<SearchRequest>,
     type: T,
@@ -118,28 +118,6 @@ export function createWorkerSearchClient(
   return clientOver(
     send,
     () => shutdown("Search index closed"),
-    () => closed,
-  );
-}
-
-/** Runs the index on this thread, for when a worker isn't available. */
-export function createLocalSearchClient(index = new DocumentIndex()): SearchClient {
-  let nextReqId = 0;
-  let closed = false;
-  const send: Send = async (request) => {
-    if (closed) throw new SearchClosedError();
-    const response = await handleSearchRequest(index, {
-      ...request,
-      reqId: ++nextReqId,
-    } as SearchRequest);
-    if (closed) throw new SearchClosedError();
-    return response;
-  };
-  return clientOver(
-    send,
-    () => {
-      closed = true;
-    },
     () => closed,
   );
 }

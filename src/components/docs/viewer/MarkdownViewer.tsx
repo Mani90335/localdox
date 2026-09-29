@@ -39,7 +39,7 @@ import {
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { ReadingMode } from "@/lib/workspace/persistence";
 import { ReadingProgress } from "../navigation/ReadingProgress";
-import { MarkdownEditor, type MarkdownEditorHandle } from "../editor/MarkdownEditor";
+import { MarkdownEditor, type MarkdownEditorHandle } from "../editor/MarkdownEditorLazy";
 import { isVideoUrl, VideoPlayer } from "@/lib/markdown/media-embeds";
 import { Lightbox } from "./Lightbox";
 import { HL_COLORS, hlGroup, type Highlight } from "@/lib/markdown/dom-highlighter";
@@ -591,7 +591,9 @@ function MarkdownViewerImpl({
   // "Inspect" — the reader's answer to DevTools' inspect element. Take the
   // rendered text under the pointer, find where it lives in the markdown
   // source, and drop the editor's caret on it, selected and scrolled into view.
-  const editorRef = useRef<MarkdownEditorHandle>(null);
+  // State rather than a ref: the editor downloads on first use, so the jump
+  // below has to wait for it to exist rather than find it missing and drop.
+  const [editor, setEditor] = useState<MarkdownEditorHandle | null>(null);
   // Whether the open editor holds changes that leaving would throw away.
   const [editorDirty, setEditorDirty] = useState(false);
 
@@ -658,11 +660,14 @@ function MarkdownViewerImpl({
 
   // Applied once the editor has mounted with the document's source.
   useEffect(() => {
-    if (!pendingSelect || !editMode) return;
+    if (!pendingSelect) return;
+    // Left the editor before it arrived: the jump belongs to that visit only.
+    if (!editMode) return setPendingSelect(null);
+    if (!editor) return;
     const { start, end } = pendingSelect;
     setPendingSelect(null);
-    editorRef.current?.select(start, end);
-  }, [pendingSelect, editMode]);
+    editor.select(start, end);
+  }, [pendingSelect, editMode, editor]);
 
   // The "couldn't find it" notice is per-jump, not sticky.
   useEffect(() => {
@@ -1510,7 +1515,7 @@ function MarkdownViewerImpl({
                 // builds a new one, rather than handing the previous document's
                 // draft to the next document's instance.
                 key={file.id}
-                ref={editorRef}
+                ref={setEditor}
                 fileId={file.id}
                 initialContent={file.content}
                 onSave={saveDraft}

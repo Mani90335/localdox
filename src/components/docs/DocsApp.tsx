@@ -12,9 +12,14 @@ import {
   type NavEntry,
 } from "@/hooks/use-nav-history";
 import { Sidebar, AddMenu, DEFAULT_VIEW, type SidebarView } from "./workspace/Sidebar";
-import { MarkdownViewer } from "./viewer/MarkdownViewer";
+import { MarkdownViewer, preloadMarkdownViewer } from "./viewer/MarkdownViewerLazy";
+import { preloadMarkdownEditor } from "./editor/MarkdownEditorLazy";
 import { PaneDocument } from "./viewer/PaneDocument";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable-lazy";
 import { Sheet, SheetClose, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useSearchIndex } from "@/hooks/use-search-index";
@@ -545,14 +550,19 @@ export function DocsApp() {
 
   const { sidebarWrapRef, sidebarInnerRef } = useSidebarCollapseAnimation(sidebarCollapsed);
 
-  // Warm the UI font after first contentful paint. Markdown plugins stay
-  // demand-loaded; idle importing them still adds download and execution work
-  // to every session, even when the reader never opens code or equations.
+  // Warm the UI font and the Markdown reader after first contentful paint. The
+  // reader is out of the startup download so the shell paints sooner, but
+  // nearly every visit opens a document next: fetching it while the reader is
+  // still choosing a file keeps that first open as quick as when it was
+  // bundled (on a slow connection it is a ~120 KB download). Markdown plugins
+  // stay demand-loaded; idle importing them still adds download and execution
+  // work to every session, even when the reader never opens code or equations.
   useEffect(() => {
     let idle = 0;
     const start = () => {
       idle = requestIdleCallbackSafe(() => {
         warmAppFonts();
+        preloadMarkdownViewer();
       });
     };
 
@@ -1025,6 +1035,15 @@ export function DocsApp() {
       }
       const accepted = fileList.filter((f) => f.size <= MAX_UPLOAD_BYTES);
       if (accepted.length === 0) return [];
+      // Download the reader while the files are being read, not after.
+      if (
+        !attachments &&
+        accepted.some((f) => {
+          const kind = getDocumentKind(f.name, f.type);
+          return kind === "markdown" || kind === "text";
+        })
+      )
+        preloadMarkdownViewer();
 
       const total = accepted.length;
       let room: StorageReservation | undefined;
@@ -1742,7 +1761,13 @@ flowchart LR
       setActiveHeadingId(null);
       // A board opens straight onto its canvas — the canvas *is* its editor, so
       // there is no separate edit mode to request.
-      if (!isBoard) setAutoEditFileId(id);
+      if (!isBoard) {
+        // Both are needed at once; fetch them side by side rather than the
+        // editor only after the reader has arrived and asked for it.
+        preloadMarkdownViewer();
+        preloadMarkdownEditor();
+        setAutoEditFileId(id);
+      }
       setDrawerOpen(false);
       if (location.pathname !== "/") navigate({ to: "/" });
       markDirty();
@@ -2982,6 +3007,7 @@ flowchart LR
   const editFile = useCallback(
     (fileId: string) => {
       if (fileId !== activeFileIdRef.current) handleSelect(fileId);
+      preloadMarkdownEditor();
       setAutoEditFileId(fileId);
     },
     // handleSelect is redefined every render; calling the latest one is correct.
@@ -3778,9 +3804,10 @@ flowchart LR
               </SheetContent>
             </Sheet>
 
-            {/* One boundary for the whole content column. The settings page and the
-            binary-document viewers are code-split; the markdown viewer is not,
-            so the common case never suspends here. */}
+            {/* One boundary for the whole content column: the settings page and the
+            binary-document viewers suspend here. The Markdown reader has its own
+            placeholder (MarkdownViewerLazy), so a first open keeps the column's
+            layout; a failed download of any of them lands here. */}
             <ConversionContext.Provider
               value={{
                 files,
