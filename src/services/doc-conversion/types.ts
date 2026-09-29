@@ -1,3 +1,5 @@
+import { sameData } from "../../lib/workspace/binary.ts";
+import type { FileData } from "../../lib/workspace/binary.ts";
 export const CONVERTER_VERSION = "0.2.4";
 export const MAX_CONVERSION_INPUT = 30 * 1024 * 1024;
 export const MAX_CONVERSION_OUTPUT = 5 * 1024 * 1024;
@@ -16,7 +18,7 @@ export interface ConversionSource {
   id: string;
   name: string;
   content: string;
-  data?: string;
+  data?: FileData;
   deletedAt?: number | null;
   folderId?: string | null;
   derivedFrom?: Derivation;
@@ -70,7 +72,7 @@ export function sameSource(a: ConversionSource | undefined, b: ConversionSource)
     !a.deletedAt &&
     a.id === b.id &&
     a.content === b.content &&
-    a.data === b.data &&
+    sameData(a.data, b.data) &&
     a.name === b.name
   );
 }

@@ -1,3 +1,5 @@
+import { binaryBody } from "../workspace/binary.ts";
+export { dataBuffer as dataUrlToArrayBuffer, dataBlob as dataUrlToBlob } from "../workspace/binary.ts";
 import type { DocumentKind, MdFile } from "./markdown-utils";
 
 const kindByExtension: Record<string, DocumentKind> = {
@@ -97,24 +99,15 @@ export function isEditableKind(kind: DocumentKind) {
   );
 }
 
-function dataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("Could not read file"));
-    reader.onload = () => resolve(String(reader.result));
-    reader.readAsDataURL(file);
-  });
-}
-
 /**
- * Kinds whose bytes are stored as text in `content` rather than as a data URL
+ * Kinds whose bytes are stored as text in `content` rather than as a Blob
  * in `data`.
  *
  * An `.excalidraw` board is JSON, so it is stored as text — but it is not
  * an `isTextKind`, because that flag also decides who may edit a document, and
  * a board's editor is its canvas, never the markdown editor.
  *
- * Both the read and the data-URL branch below must agree on this, or a board
+ * Both the read and the binary branch below must agree on this, or a board
  * gets stored twice: once as text and again as base64. That matters here, where
  * the workspace enforces a hard storage cap against the bytes actually stored.
  */
@@ -131,7 +124,7 @@ export async function importDocumentFile(file: File): Promise<MdFile> {
   }
   // CSV is read as text for its preview, but keep its original encoding/BOM
   // for downloads and conversion. Editing clears these original bytes.
-  const data = isTextSourced(kind) && kind !== "csv" ? undefined : await dataUrl(file);
+  const data = isTextSourced(kind) && kind !== "csv" ? undefined : binaryBody(file.slice(0, file.size, file.type));
   const id = `${file.name}-${crypto.randomUUID().slice(0, 8)}`;
   return {
     id,
@@ -149,38 +142,14 @@ export async function importDocumentFile(file: File): Promise<MdFile> {
 
 /**
  * What `importDocumentFile` will store for `file`, before reading it: text as
- * UTF-8, binaries as a base64 data URL, CSV as both. Room is held against this
+ * UTF-8, binaries as a Blob, CSV as both. Room is held against this
  * while the batch is read; the parsed files are then measured exactly.
  */
 export function estimateStoredBytes(file: File): number {
   const kind = getDocumentKind(file.name, file.type);
   const text = isTextSourced(kind) ? file.size : 0;
   if (isTextSourced(kind) && kind !== "csv") return text;
-  const prefix = `data:${file.type || "application/octet-stream"};base64,`.length;
-  return text + prefix + 4 * Math.ceil(file.size / 3);
-}
-
-export function dataUrlToArrayBuffer(data?: string): ArrayBuffer | null {
-  if (!data) return null;
-  const encoded = data.slice(data.indexOf(",") + 1);
-  const binary = atob(encoded);
-  const bytes = new Uint8Array(binary.length);
-  // Decoded in 32KB blocks. A plain per-byte loop over a 20MB workbook is
-  // 20M bounds-checked writes on the main thread; chunking lets the JIT keep
-  // the inner loop in a register and cuts the wall time by roughly half.
-  const BLOCK = 0x8000;
-  for (let offset = 0; offset < binary.length; offset += BLOCK) {
-    const end = Math.min(offset + BLOCK, binary.length);
-    for (let i = offset; i < end; i++) bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
-}
-
-export function dataUrlToBlob(data?: string, fallbackType = "application/octet-stream") {
-  const buffer = dataUrlToArrayBuffer(data);
-  if (!buffer) return null;
-  const type = data?.match(/^data:([^;,]+)/)?.[1] || fallbackType;
-  return new Blob([buffer], { type });
+  return text + file.size;
 }
 
 export function googleUrl(content: string): string | null {

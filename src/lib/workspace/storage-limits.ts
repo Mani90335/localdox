@@ -1,3 +1,5 @@
+import { dataBytes } from "./binary.ts";
+import type { FileData } from "./binary.ts";
 // Central upload/storage guards shared by every import path (DocsApp) and the
 // Settings storage panel so both agree on the same numbers.
 //
@@ -44,7 +46,7 @@ export function formatBytes(bytes: number): string {
 // ---- what counts ----
 //
 // One unit everywhere: a document's text as UTF-8 plus its binary exactly as
-// stored, a base64 data URL (about 4/3 of the original file). A file's `size`
+// stored: Blob bytes, or legacy data URL characters until migrated. A file's `size`
 // is what was picked from disk, so it undercounts binaries, goes stale after
 // an edit and arrives unchecked in backups and share links; nothing here reads
 // it.
@@ -60,11 +62,11 @@ export function utf8Length(text: string): number {
 }
 
 /** Bytes one document occupies in local storage. */
-export function storedFileBytes(file: { content: string; data?: string }): number {
-  return utf8Length(file.content) + (file.data?.length ?? 0);
+export function storedFileBytes(file: { content: string; data?: FileData }): number {
+  return utf8Length(file.content) + dataBytes(file.data);
 }
 
-export function storedBytes(files: readonly { content: string; data?: string }[]): number {
+export function storedBytes(files: readonly { content: string; data?: FileData }[]): number {
   let total = 0;
   for (const file of files) total += storedFileBytes(file);
   return total;

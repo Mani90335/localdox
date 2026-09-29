@@ -1,3 +1,5 @@
+import { sameData, migrateData, portableFiles } from "./binary.ts";
+import type { FileData } from "./binary.ts";
 // Local-first persistence, Excalidraw-style. No backend.
 //
 // - IndexedDB is the primary store: workspaces (markdown files + edits + UI
@@ -23,7 +25,7 @@ export interface PersistedFile {
   id: string;
   name: string;
   content: string;
-  data?: string;
+  data?: FileData;
   mimeType?: string;
   size?: number;
   addedAt?: number;
@@ -162,7 +164,7 @@ export class WorkspaceConflictError extends Error {
 }
 
 const DB_NAME = "localdox";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = "workspaces";
 const FILES = "files";
 const SUMMARIES = "workspace-summaries";
@@ -246,7 +248,7 @@ function sameFile(a: PersistedFile | undefined, b: PersistedFile): boolean {
     a.id === b.id &&
     a.name === b.name &&
     a.content === b.content &&
-    a.data === b.data &&
+    sameData(a.data, b.data) &&
     a.mimeType === b.mimeType &&
     a.size === b.size &&
     a.addedAt === b.addedAt &&
@@ -268,7 +270,7 @@ function openDb(): Promise<IDBDatabase> {
       return;
     }
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (event) => {
       if (blocked) {
         req.transaction!.abort();
         return;
@@ -277,6 +279,7 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: "id" });
       }
+      if (event.oldVersion < 2) {
       const files = db.createObjectStore(FILES, { keyPath: ["workspaceId", "id"] });
       files.createIndex("workspaceId", "workspaceId");
       const summaries = db.createObjectStore(SUMMARIES, { keyPath: "id" });
@@ -287,16 +290,39 @@ function openDb(): Promise<IDBDatabase> {
         const row = cursor.result;
         if (!row) return;
         const workspace = row.value as WorkspaceRecord;
-        for (const file of workspace.files) files.put({ ...file, workspaceId: workspace.id });
+        const migrated = workspace.files.map((file) => ({ ...file, data: migrateData(file.data) }));
+        for (const file of migrated) files.put({ ...file, workspaceId: workspace.id });
         const { files: documents, ...metadata } = workspace;
         row.update({
           ...metadata,
           fileIds: documents.map((f) => f.id),
           revision: crypto.randomUUID(),
         });
-        summaries.put(summaryOf(workspace, storedBytes(workspace.files)));
+        summaries.put(summaryOf(workspace, storedBytes(migrated)));
         row.continue();
       };
+      } else {
+        // v2 → v3 is one upgrade transaction. Cursor conversion bounds temporary
+        // decoding to one file; abort leaves every old body and summary intact.
+        const tx = req.transaction!;
+        const cursor = tx.objectStore(FILES).openCursor();
+        cursor.onsuccess = () => {
+          const row = cursor.result;
+          if (!row) return;
+          const file = row.value as StoredFile;
+          const data = migrateData(file.data);
+          if (data !== file.data) row.update({ ...file, data });
+          row.continue();
+        };
+        const summaries = tx.objectStore(SUMMARIES).openCursor();
+        summaries.onsuccess = () => {
+          const row = summaries.result;
+          if (!row) return;
+          const { bytes: _bytes, ...summary } = row.value as WorkspaceSummary;
+          row.update(summary); // Recomputed lazily using Blob sizes.
+          row.continue();
+        };
+      }
     };
     req.onsuccess = () => {
       const db = req.result;
@@ -418,7 +444,7 @@ export const persistence = {
    */
   async putWorkspaces(records: WorkspaceRecord[]): Promise<string[]> {
     // Snapshot before awaiting; callers may keep editing their objects.
-    const snapshots = records.map((w) => ({ ...w, files: w.files.map((file) => ({ ...file })) }));
+    const snapshots = records.map((w) => ({ ...w, files: w.files.map((file) => ({ ...file, data: migrateData(file.data) })) }));
     if (new Set(snapshots.map((w) => w.id)).size !== snapshots.length)
       throw new Error("A workspace can only be written once per transaction");
     const db = await openDb();
@@ -451,7 +477,7 @@ export const persistence = {
             let bytes = 0;
             for (const file of w.files) {
               const unchanged = sameFile(cached?.files.get(file.id), file);
-              if (!unchanged) fileStore.put({ ...file, workspaceId: w.id });
+              if (!unchanged) fileStore.put({ ...file, data: file.data, workspaceId: w.id });
               const size =
                 (unchanged ? cached!.bytes.get(file.id) : undefined) ?? storedFileBytes(file);
               sizes[index].set(file.id, size);
@@ -475,6 +501,10 @@ export const persistence = {
     });
     snapshots.forEach((w, index) => {
       records[index].revision = revisions[index];
+      for (const file of w.files) {
+        const original = records[index].files.find((item) => item.id === file.id);
+        if (original && typeof original.data === "string" && typeof file.data !== "string") original.data = file.data;
+      }
       lastWrite = {
         id: w.id,
         revision: revisions[index],
@@ -883,10 +913,10 @@ export { ImportValidationError };
 export const BACKUP_VERSION = 2;
 
 /** A complete, faithful backup — Bin, stars, notes and layout included. */
-export function serializeWorkspace(w: WorkspaceRecord): string {
+export async function serializeWorkspace(w: WorkspaceRecord): Promise<string> {
   const { revision: _revision, ...workspace } = w;
   return JSON.stringify(
-    { format: "localdox-workspace", version: BACKUP_VERSION, workspace },
+    { format: "localdox-workspace", version: BACKUP_VERSION, workspace: { ...workspace, files: await portableFiles(workspace.files) } },
     null,
     2,
   );
@@ -924,7 +954,7 @@ export function parseWorkspaceImport(json: string): WorkspaceRecord {
         content: file.content,
         folderId: file.folderId ?? null,
       };
-      if (file.data !== undefined) record.data = file.data;
+      if (file.data !== undefined) record.data = migrateData(file.data);
       if (file.mimeType !== undefined) record.mimeType = file.mimeType;
       if (file.size !== undefined) record.size = file.size;
       if (file.addedAt !== undefined) record.addedAt = file.addedAt;

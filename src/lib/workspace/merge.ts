@@ -1,3 +1,4 @@
+import { sameData } from "./binary.ts";
 // Three-way merge of workspace snapshots.
 //
 // Storage refuses a write whose expected revision is stale (see persistence.ts).
@@ -22,7 +23,7 @@ function sameFile(a: PersistedFile, b: PersistedFile): boolean {
     a === b ||
     (a.name === b.name &&
       a.content === b.content &&
-      a.data === b.data &&
+      sameData(a.data, b.data) &&
       a.mimeType === b.mimeType &&
       a.size === b.size &&
       a.addedAt === b.addedAt &&

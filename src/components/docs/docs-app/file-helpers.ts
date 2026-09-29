@@ -1,3 +1,5 @@
+import { dataFingerprint } from "@/lib/workspace/binary";
+import type { FileData } from "@/lib/workspace/binary";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import { getDocumentKind } from "@/lib/markdown/document-utils";
 import type { PersistedFile } from "@/lib/workspace/persistence";
@@ -49,20 +51,21 @@ export function uniqueFileName(name: string, taken: Set<string>): string {
  */
 export type DuplicateKind = "content" | "name";
 
-export function fileFingerprint(f: { content?: string; data?: string }): string {
+export async function fileFingerprint(f: { content?: string; data?: FileData }): Promise<string> {
   // Binary files carry their bytes in `data`; text ones in `content`. Either is
   // a faithful identity for "the same file uploaded twice".
-  return f.data ?? f.content ?? "";
+  return f.data ? dataFingerprint(f.data) : (f.content ?? "");
 }
 
-export function findDuplicate(
-  incoming: { name: string; content?: string; data?: string },
+export async function findDuplicate(
+  incoming: { name: string; content?: string; data?: FileData },
   existing: MdFile[],
-): { kind: DuplicateKind; file: MdFile } | null {
-  const print = fileFingerprint(incoming);
+): Promise<{ kind: DuplicateKind; file: MdFile } | null> {
+  const print = await fileFingerprint(incoming);
   if (print) {
-    const same = existing.find((f) => fileFingerprint(f) === print);
-    if (same) return { kind: "content", file: same };
+    for (const file of existing) {
+      if (await fileFingerprint(file) === print) return { kind: "content", file };
+    }
   }
   const clash = existing.find((f) => f.name === incoming.name);
   return clash ? { kind: "name", file: clash } : null;

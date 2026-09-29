@@ -70,7 +70,7 @@ export async function buildMarkdownHTML(
     if (!path) {
       path = `media/${assets.size + 1}-${safeName(artifact.file.name)}`;
       const bytes = artifact.file.data
-        ? dataUrlToArrayBuffer(artifact.file.data)
+        ? await dataUrlToArrayBuffer(artifact.file.data)
         : artifact.file.content;
       if (bytes === null) throw new Error(`Could not read ${artifact.file.name}.`);
       zip.file(path, bytes);

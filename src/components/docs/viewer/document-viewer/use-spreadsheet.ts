@@ -32,7 +32,8 @@ const blockKey = (viewId: number, rowBlock: number, columnBlock: number) =>
 function sourceOf(file: MdFile): SpreadsheetSource | null {
   const kind = file.kind ?? getDocumentKind(file.name, file.mimeType);
   if (kind === "csv") return { format: "text", text: file.content };
-  return file.data ? { format: "binary", dataUrl: file.data } : null;
+  return typeof file.data === "string" ? { format: "binary", dataUrl: file.data }
+    : file.data ? { format: "blob", blob: file.data.blob } : null;
 }
 
 /**
@@ -64,7 +65,7 @@ export function useSpreadsheet(
   const source = sourceOf(file);
   // The payload itself is the dependency: the same string compares by
   // reference, and a new file body is a new string.
-  const payload = source?.format === "text" ? source.text : source?.dataUrl;
+  const payload = file.kind === "csv" ? file.content : file.data;
 
   useEffect(() => {
     let alive = true;

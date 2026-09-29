@@ -1,3 +1,4 @@
+import { portableFiles, migrateData } from "./binary.ts";
 // Share links. Two shapes exist, both carrying only a short bytebin key in the
 // URL so a large document survives being pasted into a chat client:
 //
@@ -29,7 +30,7 @@ export interface SharedFilesPayload {
   files: PersistedFile[];
 }
 
-export function serializeSharedFiles(files: PersistedFile[], sourceName: string): string {
+export async function serializeSharedFiles(files: PersistedFile[], sourceName: string): Promise<string> {
   const includedIds = new Map(files.map((file) => [file.id, file.id]));
   const payload: SharedFilesPayload = {
     format: "localdox-files",
@@ -48,7 +49,7 @@ export function serializeSharedFiles(files: PersistedFile[], sourceName: string)
       derivedFrom: remapDerivation(f.derivedFrom, includedIds),
     })),
   };
-  return JSON.stringify(payload);
+  return JSON.stringify({ ...payload, files: await portableFiles(payload.files) });
 }
 
 /**
@@ -166,7 +167,7 @@ export function parseSharedFiles(json: string): SharedFilesPayload {
     id: f.id,
     name: f.name,
     content: f.content,
-    data: f.data,
+    data: migrateData(f.data),
     mimeType: f.mimeType,
     size: f.size,
     addedAt: f.addedAt,

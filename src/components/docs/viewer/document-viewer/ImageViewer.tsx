@@ -1,3 +1,4 @@
+import { useBinaryUrl } from "@/hooks/use-binary-url";
 import { useEffect, useRef, useState } from "react";
 import { Maximize, Minimize, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
 import { ESCAPE_DEPTH, useNavEscape } from "@/hooks/use-nav-history";
@@ -46,7 +47,7 @@ export function ImageViewer({
   // saves and linked images still render. SVG, GIF, WebP, AVIF, etc. all ride
   // the browser's native <img> decoder — no format-specific handling needed.
   const src =
-    file.data || (/^(data:|https?:)/.test(file.content.trim()) ? file.content.trim() : "");
+    useBinaryUrl(file.data) || (/^(data:|https?:)/.test(file.content.trim()) ? file.content.trim() : "");
 
   const reset = () => {
     setZoom(1);

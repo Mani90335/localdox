@@ -1,3 +1,4 @@
+import { dataBlob } from "@/lib/workspace/binary";
 /**
  * The one door out of the app for a document.
  *
@@ -179,12 +180,7 @@ export async function exportDocument(
   if (format === "original") {
     const filename = safeName(file.name);
     if (file.data) {
-      // A data URL can be handed to the anchor directly; converting it to a
-      // blob first would decode the whole file into memory for no gain.
-      const anchor = document.createElement("a");
-      anchor.href = file.data;
-      anchor.download = filename;
-      anchor.click();
+      triggerDownload(dataBlob(file.data)!, filename);
       return { kind: "downloaded", filename };
     }
     triggerDownload(

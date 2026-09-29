@@ -1,3 +1,4 @@
+import type { FileData } from "./binary.ts";
 // The documents limit (storage-limits.ts), enforced. Every import path asks
 // here before it writes: the bytes every workspace already holds, plus room
 // held for imports this tab has started but not yet written, plus the new
@@ -9,7 +10,7 @@
 import { persistence } from "./persistence.ts";
 import { StorageLimitError, getMaxStorageBytes, storedBytes } from "./storage-limits.ts";
 
-type Stored = { content: string; data?: string };
+type Stored = { content: string; data?: FileData };
 
 /**
  * The open workspace as this tab holds it, unsaved edits and all. It stands

@@ -1,4 +1,51 @@
-Latest update — 2026-09-29 (R05 interactive examples, part 2: compiled in a worker, cached, playground edits settle first)
+Latest update — 2026-09-29 (B05 font loading: remove unused Inter requests and offline assets)
+
+Completed B05 (Package 8). Measured the current production build before
+changing fonts: the UI follows the selected reading face (Atkinson
+Hyperlegible by default), but an obsolete idle loader still fetched four
+Inter weight stylesheets. All 28 registered Inter faces stayed unloaded;
+there was no Inter binary download or Inter swap on this startup journey.
+
+What changed:
+- Removed loadUiFont/warmAppFonts and the DocsApp call. The selected reading
+  font, code font, math styles and idle Markdown-reader preload keep their
+  existing loading paths.
+- Corrected stale font-loading comments: declaring all unicode subsets does
+  not download all of them; the browser chooses those used by rendered text.
+  System fallbacks keep text readable, but do not guarantee identical metrics.
+- Added documentation/font-loading.md and production browser regressions.
+
+Measured before/after (production preview, isolated Chromium contexts,
+Chrome DevTools MCP; deterministic request/asset counts, not a latency study):
+- Unused Inter stylesheet requests: 4 → 0; compressed response bodies
+  2,297 → 0 bytes (8,972 uncompressed).
+- Unused Inter binaries in the generated offline catalog: 56 → 0;
+  892,928 → 0 bytes. Including CSS, download-all loses 901,900 bytes.
+  These binaries were optional offline assets, not initial page transfers.
+- Default Atkinson requests are unchanged: Latin 400 and 700, 34,730 bytes
+  of WOFF2 in total. DevTools confirms the same computed UI family, and the
+  fixed page has no console warnings or errors.
+
+Validation:
+- New tests/e2e/fonts.spec.ts: 3/3 pass. The unused-CSS assertion fails on
+  the baseline build; the two preservation cases also pass on that baseline.
+  Tests check the offline catalog, absence of Mono for prose, on-demand
+  Mono for code, Latin/Cyrillic/Greek subset requests, and actual glyph
+  providers through CDP. Holding font downloads verifies readable system
+  fallback followed by the selected Atkinson face when downloads complete.
+- Production fonts + startup-loading + offline browser suites: 15/15 pass,
+  including download-all and opening a PDF offline with HTTP cache disabled.
+- npm run typecheck, npm run build, npm test: pass (456 passed, 2 live Gemini
+  tests skipped). Focused ESLint: 0 errors, 12 existing DocsApp hook warnings.
+  git diff --check passes.
+
+Limits: Chromium on this machine only. Selected webfonts still use swap and
+can change layout when they arrive; this change removes unused work without
+claiming a CLS or latency improvement. Custom/Google font lifecycle changes,
+package dependency cleanup and broader optional-bundle work remain separate.
+
+
+Previous update — 2026-09-29 (R05 interactive examples, part 2: compiled in a worker, cached, playground edits settle first)
 
 Completes R05's interactive-JSX half (Package 8); the math half was done
 earlier. Part 1 (previous update, 3b65bac) made React examples run at all.
@@ -2591,8 +2638,25 @@ Pending (not started, or started but not committed)
 - Package 6: B01 is done (B01 update above), D03 is done (D03 update above) and B02 is done (latest update: small startup shell; 338 → 220.8 KB gzip, still above the 200 KiB target, with zod in persistence as the next lever). B03 (per-journey optional bundles) and D01–D02 (loading whole workspaces, binary storage) remain.
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
-- Package 8: R06 is done. B04 is done (B04 update above). A12 is done. R05 is done: its math half (math typeset in the reader again, a per-task typesetting budget, a byte-bounded cache, MathJax published for production) and its interactive-JSX half (React examples run, in a self-contained sandboxed frame; Babel in a worker, a compile cache, playground edits settle first; latest two updates). B05 and the lint debt (76 errors) remain.
+- Package 8: R06 is done. B04 is done (B04 update above). A12 is done. R05 is done: its math half (math typeset in the reader again, a per-task typesetting budget, a byte-bounded cache, MathJax published for production) and its interactive-JSX half (React examples run, in a self-contained sandboxed frame; Babel in a worker, a compile cache, playground edits settle first; updates above). B05 is done (unused Inter loading and offline assets removed after measuring actual requests; latest update). Lint debt and CI budget enforcement remain.
 
 None of PLAN.md's release gates are formally met yet. A01–A03 and A09/A10 now have passing reproductions, which is what the reliability gate asks for, and Package 3's offline criterion now has a passing reproduction too.
 
 Historical working-tree note (superseded by the clean-tree check on 2026-09-28)
+
+
+
+PROGRESS on D02:
+I’ll locate the audit and progress files in this checkout, read D02’s requirements, then implement, test, update the progress log, and commit the fix.
+
+
+
+
+Read files, ran commands
+
+
+D02 is still open. Binary files currently stay as base64 strings through import, storage, and several viewers. I’m tracing those paths so Blob storage preserves backups, sharing, editing, and transaction safety. I’ll use IndexedDB Blobs first, as the plan recommends.
+
+The fix needs a stable binary revision identifier: IndexedDB returns new Blob objects on reads, so object identity alone would cause false cross-tab conflicts. I’m adding that identifier, keeping base64 only at the portable JSON backup/share boundary, and retaining the existing file keys and atomic transactions.
+
+Stopped in middle, complete it
