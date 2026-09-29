@@ -1,4 +1,86 @@
-Latest update — 2026-09-29 (R05 interactive examples, part 2: compiled in a worker, cached, playground edits settle first)
+Latest update — 2026-09-29 (D01 part 1: binary bodies in their own store; searching, listing and linking never read another workspace's PDFs)
+
+Starts D01 (Package 6). Details: documentation/workspace-storage-layout.md.
+
+What was wrong (measured on HEAD 88cb82c's production build):
+- Each file row held its whole binary as a base64 data URL, and IndexedDB
+  can't read part of a row. So "Search all workspaces", the attachment picker
+  and link resolution (`![](Library/photo.png)`) loaded every PDF and image of
+  every workspace they looked at, just for names and text. Search started all
+  those reads at once.
+- That full read of another workspace also replaced the open workspace's write
+  cache. The open workspace's next save then rewrote every file, images
+  included.
+- bench/d01-workspace-bodies.mjs (open workspace = 10 KB note + 5 MB image;
+  other workspace = 4 × 25 MB PDFs, ≈140 MB stored; 5 alternating rounds per
+  build, each build on its own Nitro server, medians): turning on "Search all
+  workspaces" made IndexedDB hand back 139.8 MB and grew the JS heap by 264 MB.
+  Renaming the note afterwards wrote 7 MB.
+
+What changed:
+- IndexedDB v3 adds a `file-bodies` store keyed like `files`
+  ([workspaceId, id]). File rows no longer carry `data`.
+- persistence.ts: `getWorkspace` joins rows and bodies (unchanged result).
+  New `getWorkspaceEntries(id)` reads rows only and leaves the write cache
+  alone. New `getFile(workspaceId, fileId)` reads one file with its body.
+  Writes put a body only when `data` changed, so renaming, filing or binning a
+  PDF rewrites its row, not the PDF. Removing a file or workspace, or clearing
+  storage, removes the bodies in the same transaction. Storage totals for
+  older summary rows count bodies too. The unused `listWorkspaces()`, which
+  read every workspace in full at once, is gone.
+- Migration: the upgrade moves each body out of its row with a cursor, one row
+  at a time, in the single versionchange transaction. An abort leaves v2
+  intact and the next open retries. v1 databases go straight to v3.
+- use-search-index.ts reads other workspaces with `getWorkspaceEntries`, at
+  most two at a time, and skips a queued read that's no longer wanted.
+  AttachmentPicker lists from entries and doesn't re-read the open workspace.
+  resolveWorkspaceArtifact matches paths on entries, then reads only the
+  matched file with `getFile`.
+
+Measured after (same bench, same fixture):
+| Search all workspaces, then rename the note | Before   | After   |
+| Bytes IndexedDB handed back for the search  | 139.8 MB | < 5 KB  |
+| JS heap growth during the search            | +264 MB  | +3 MB   |
+| Toggle → other workspace's hit shown        | 372 ms   | 247 ms  |
+| Bytes written by the next save (a rename)   | 7 MB     | 0.01 MB |
+Cost: the one-time migration made the first open after updating slower,
+112 → 312 ms median for this 140 MB database. Reopening afterwards took
+55–100 ms on both builds.
+
+Tests:
+- tests/workspace-bodies.test.ts (new, 11 cases): an aborted v2 → v3 upgrade
+  leaves v2 rows and bodies intact, and the retry reads back identical; rows
+  lose `data`; entries never touch the body store; another workspace's entries
+  keep the open workspace's saves at one row; rename or bin rewrites the row
+  only; changed, cleared and dropped bodies; getFile; a cross-workspace link
+  reads exactly one body; legacy totals include bodies; delete and clear
+  remove bodies.
+- tests/e2e/search.spec.ts: "searching all workspaces never reads another
+  workspace's images from storage". It checks the largest value any IndexedDB
+  read returns, so it doesn't depend on the layout. On HEAD's build it fails
+  (1,398,576 characters: the 1 MiB image); it passes after.
+- e2e helpers that read or seed raw storage now join `file-bodies`
+  (editing, storage-budget, media specs). tests/persistence.test.ts opens the
+  database at the current version; tests/media.test.ts also stubs the new
+  reads.
+- Unit suite: 469 passed, 0 failed, 2 skipped (471). Typecheck and production build pass. ESLint on changed
+  files: 3 errors, all Prettier line-width errors on lines this change doesn't
+  touch (HEAD had 15 in the same files).
+- Browser: the 6 storage-related specs, 35/35 on the new build. Full suite:
+  157 passed, 1 skipped, 3 failed on a private port (4741). All three also fail on HEAD's build: sharing.spec's two link checks hard-code port 4175, and mobile-navigation "close button and backdrop dismiss the drawer" (rerun A/B: fails identically on HEAD 88cb82c).
+- Checked in Chrome via DevTools MCP on the production build: a seeded v2
+  database with a note embedding an image opened as v3. `files` rows had no
+  `data`, the body was in `file-bodies`, the image rendered (naturalWidth 16)
+  and survived a reload. No console errors or warnings.
+
+Limits: the open workspace is still loaded whole, bodies included, into React
+state. PLAN.md's gate ("opening a 10 KB note in a workspace with 100 MB of
+PDFs loads no PDF bodies") needs bodies loaded on demand by the viewers. That
+is D01 part 2, with D02 (Blob records, which would live in this store). A move
+still reads the destination workspace in full and rewrites all of its files.
+Chromium only; no Safari, Firefox or real devices.
+
+Previous update — 2026-09-29 (R05 interactive examples, part 2: compiled in a worker, cached, playground edits settle first)
 
 Completes R05's interactive-JSX half (Package 8); the math half was done
 earlier. Part 1 (previous update, 3b65bac) made React examples run at all.
@@ -2588,7 +2670,7 @@ Pending (not started, or started but not committed)
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
 - Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04 is done: the spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) and the bounded import queue with per-file failures and Cancel (latest update). R01 (diagram players: coarse React updates, no frames while unseen, reduced motion) is done (latest update). A05 (3,000-section Markdown) is done (latest update; fold latency and the 4× CPU tasks are listed as limits there). R02 (one Mermaid job at a time, byte-budgeted diagram and scene caches, mindmaps and other heavy main-thread diagrams held as source until the reader asks) is done (latest update). Package 5 is now complete.
-- Package 6: B01 is done (B01 update above), D03 is done (D03 update above) and B02 is done (latest update: small startup shell; 338 → 220.8 KB gzip, still above the 200 KiB target, with zod in persistence as the next lever). B03 (per-journey optional bundles) and D01–D02 (loading whole workspaces, binary storage) remain.
+- Package 6: B01 is done (B01 update above), D03 is done (D03 update above) and B02 is done (latest update: small startup shell; 338 → 220.8 KB gzip, still above the 200 KiB target, with zod in persistence as the next lever). D01 part 1 is done (latest update: binary bodies in their own store; search, the attachment picker and link resolution read no other workspace's bodies; 139.8 MB → < 5 KB read for a cross-workspace search). D01 part 2 (load the open workspace's bodies on demand), D02 (Blob records) and B03 (per-journey optional bundles) remain.
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
 - Package 8: R06 is done. B04 is done (B04 update above). A12 is done. R05 is done: its math half (math typeset in the reader again, a per-task typesetting budget, a byte-bounded cache, MathJax published for production) and its interactive-JSX half (React examples run, in a self-contained sandboxed frame; Babel in a worker, a compile cache, playground edits settle first; latest two updates). B05 and the lint debt (76 errors) remain.

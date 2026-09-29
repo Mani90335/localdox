@@ -10,10 +10,15 @@ async function storedFile(page: Page, name: string) {
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const db = request.result;
-          const transaction = db.transaction("files", "readonly");
+          const transaction = db.transaction(["files", "file-bodies"], "readonly");
           const files = transaction.objectStore("files").getAll();
+          const bodies = transaction.objectStore("file-bodies").getAll();
           transaction.oncomplete = () => {
-            resolve(files.result.find((file) => file.name === name));
+            const file = files.result.find((file) => file.name === name);
+            const body = bodies.result.find(
+              (body) => body.workspaceId === file?.workspaceId && body.id === file?.id,
+            );
+            resolve(file && body ? { ...file, data: body.data } : file);
             db.close();
           };
         };

@@ -255,8 +255,15 @@ const archive = {
 
 /** alpha.md in the first workspace, then "Archive" imported and current, so
  *  alpha.md is only reachable through "Search all workspaces". */
-async function twoWorkspaces(page: Page) {
+async function twoWorkspaces(page: Page, image?: Buffer) {
   await upload(page);
+  if (image) {
+    await page
+      .locator('input[type="file"]')
+      .first()
+      .setInputFiles({ name: "scan.png", mimeType: "image/png", buffer: image });
+    await expect(page.getByRole("button", { name: /scan\.png/ }).first()).toBeVisible();
+  }
   await page.goto("/settings");
   await page.getByRole("tab", { name: "Workspace" }).click();
   await page.locator('input[type="file"][accept="application/json,.json"]').setInputFiles({
@@ -315,6 +322,42 @@ test("other workspaces are indexed again after search is closed and reopened", a
   await expect(results.getByRole("button", { name: /^alpha\.md/ })).toBeVisible();
   await page.getByPlaceholder("Search all documents...").fill("shelved");
   await expect(results.getByRole("button", { name: /^archived\.md/ })).toBeVisible();
+});
+
+test("searching all workspaces never reads another workspace's images from storage", async ({
+  page,
+}) => {
+  // 1 MiB of image bytes in the other workspace: about 1.4 MB once stored.
+  await twoWorkspaces(page, Buffer.alloc(1024 * 1024, 7));
+  // From here on, note the largest value any IndexedDB read hands back.
+  await page.evaluate(() => {
+    const w = window as unknown as { largestRead: number };
+    w.largestRead = 0;
+    const watch = (proto: object, method: string) => {
+      const original = (proto as Record<string, (...args: unknown[]) => IDBRequest>)[method];
+      (proto as Record<string, unknown>)[method] = function (this: unknown, ...args: unknown[]) {
+        const request = original.apply(this, args);
+        request.addEventListener("success", () => {
+          const value =
+            request.result instanceof IDBCursorWithValue ? request.result.value : request.result;
+          w.largestRead = Math.max(w.largestRead, JSON.stringify(value ?? null).length);
+        });
+        return request;
+      };
+    };
+    for (const proto of [IDBObjectStore.prototype, IDBIndex.prototype])
+      for (const method of ["get", "getAll", "openCursor"]) watch(proto, method);
+  });
+  const results = page.locator("aside");
+  await openSearch(page, "constant");
+  await setAllWorkspaces(page, true);
+  await expect(results.getByRole("button", { name: /^alpha\.md/ })).toBeVisible();
+  await expect(results.getByText(/Indexing \d+ other workspace/)).toHaveCount(0);
+  const largest = await page.evaluate(
+    () => (window as unknown as { largestRead: number }).largestRead,
+  );
+  expect(largest).toBeGreaterThan(0);
+  expect(largest).toBeLessThan(100_000);
 });
 
 test("turning all-workspaces off while another workspace is indexing settles the indicator", async ({

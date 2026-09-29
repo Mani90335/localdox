@@ -76,7 +76,8 @@ each unchanged file's byte count, so a save measures only the files it writes.
 The first save after a load measures everything once.
 
 A summary written by an older build has no `bytes`. The first measurement
-walks that workspace's files through a cursor, one row at a time, and writes
+walks that workspace's file rows, then its bodies (`file-bodies`, see
+workspace-storage-layout.md), through cursors, one row at a time, and writes
 the total back in the same readwrite transaction.
 
 ### Reservations

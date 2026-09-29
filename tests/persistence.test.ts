@@ -158,7 +158,7 @@ test("workspace storage migration, incremental writes and transaction safety", a
   await t.test("a different tab's revision refuses the write and keeps its data", async () => {
     const workspace = (await persistence.getWorkspace(legacy.id))!;
     const db = await new Promise<IDBDatabase>((resolve) => {
-      const req = indexedDB.open("localdox", 2);
+      const req = indexedDB.open("localdox");
       req.onsuccess = () => resolve(req.result);
     });
     await new Promise<void>((resolve) => {

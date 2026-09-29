@@ -162,10 +162,15 @@ export class WorkspaceConflictError extends Error {
 }
 
 const DB_NAME = "localdox";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = "workspaces";
 const FILES = "files";
 const SUMMARIES = "workspace-summaries";
+// Binary bodies (the base64 data URL of a PDF, image, …) live apart from the
+// file rows, keyed the same way. Reading a workspace's file list and text then
+// never deserializes a PDF: IndexedDB has no partial reads, so a body stored
+// inside its file row was loaded by every read of that row.
+const BODIES = "file-bodies";
 
 export interface WorkspaceSummary {
   id: string;
@@ -182,7 +187,24 @@ export interface WorkspaceSummary {
 }
 
 type StoredWorkspace = Omit<WorkspaceRecord, "files"> & { fileIds: string[]; revision: string };
-type StoredFile = PersistedFile & { workspaceId: string };
+type StoredFile = Omit<PersistedFile, "data"> & { workspaceId: string };
+type StoredBody = { workspaceId: string; id: string; data: string };
+
+/** A file without its binary body: everything a list, a link or search needs. */
+export type FileEntry = Omit<PersistedFile, "data">;
+/** A workspace read without binary bodies (`persistence.getWorkspaceEntries`). */
+export type WorkspaceEntries = Omit<WorkspaceRecord, "files"> & { files: FileEntry[] };
+
+/** Every key of one workspace in a store keyed by [workspaceId, id]. */
+function workspaceRange(workspaceId: string) {
+  return IDBKeyRange.bound([workspaceId], [workspaceId, []]);
+}
+
+/** Split a file into its row and its body. */
+function storedRow(workspaceId: string, file: PersistedFile): StoredFile {
+  const { data: _data, ...entry } = file;
+  return { ...entry, workspaceId };
+}
 
 function summaryOf(w: WorkspaceRecord, bytes: number): WorkspaceSummary {
   return {
@@ -268,7 +290,7 @@ function openDb(): Promise<IDBDatabase> {
       return;
     }
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (event) => {
       if (blocked) {
         req.transaction!.abort();
         return;
@@ -277,17 +299,41 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: "id" });
       }
+      const bodies = db.createObjectStore(BODIES, { keyPath: ["workspaceId", "id"] });
+      const putBody = (workspaceId: string, file: PersistedFile) => {
+        if (file.data !== undefined) bodies.put({ workspaceId, id: file.id, data: file.data });
+      };
+      // Each migration is one atomic upgrade: if it aborts, the previous
+      // version's data is untouched and the next open tries again.
+      if (event.oldVersion >= 2) {
+        // v2 → v3: move bodies out of their file rows, one row at a time.
+        const cursor = req.transaction!.objectStore(FILES).openCursor();
+        cursor.onsuccess = () => {
+          const row = cursor.result;
+          if (!row) return;
+          const file = row.value as StoredFile & { data?: string };
+          if (file.data !== undefined) {
+            putBody(file.workspaceId, file);
+            row.update(storedRow(file.workspaceId, file));
+          }
+          row.continue();
+        };
+        return;
+      }
       const files = db.createObjectStore(FILES, { keyPath: ["workspaceId", "id"] });
       files.createIndex("workspaceId", "workspaceId");
       const summaries = db.createObjectStore(SUMMARIES, { keyPath: "id" });
-      // One atomic migration: an aborted upgrade leaves the v1 data intact.
-      // Use a cursor so only one legacy workspace is materialized at a time.
+      // v1 → v3. Use a cursor so only one legacy workspace is materialized at
+      // a time.
       const cursor = req.transaction!.objectStore(STORE).openCursor();
       cursor.onsuccess = () => {
         const row = cursor.result;
         if (!row) return;
         const workspace = row.value as WorkspaceRecord;
-        for (const file of workspace.files) files.put({ ...file, workspaceId: workspace.id });
+        for (const file of workspace.files) {
+          files.put(storedRow(workspace.id, file));
+          putBody(workspace.id, file);
+        }
         const { files: documents, ...metadata } = workspace;
         row.update({
           ...metadata,
@@ -366,39 +412,92 @@ async function deleteDatabase(): Promise<void> {
   announce({ type: "cleared" });
 }
 
+/**
+ * Read one workspace's metadata and file rows, and with `withBodies` its
+ * binary bodies too, in one transaction.
+ */
+async function readWorkspace(
+  id: string,
+  withBodies: boolean,
+): Promise<{ record: StoredWorkspace; files: PersistedFile[] } | undefined> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(withBodies ? [STORE, FILES, BODIES] : [STORE, FILES], "readonly");
+    const metadata = tx.objectStore(STORE).get(id);
+    const documents = tx.objectStore(FILES).index("workspaceId").getAll(id);
+    const bodies = withBodies ? tx.objectStore(BODIES).getAll(workspaceRange(id)) : undefined;
+    tx.onabort = () => reject(tx.error ?? new Error("Could not read workspace"));
+    tx.oncomplete = () => {
+      const record = metadata.result as StoredWorkspace | undefined;
+      if (!record) {
+        resolve(undefined);
+        return;
+      }
+      const data = new Map(
+        ((bodies?.result ?? []) as StoredBody[]).map((body) => [body.id, body.data]),
+      );
+      const byId = new Map<string, PersistedFile>(
+        (documents.result as StoredFile[]).map(({ workspaceId: _id, ...file }) => {
+          const body = data.get(file.id);
+          return [file.id, body === undefined ? file : { ...file, data: body }];
+        }),
+      );
+      const files = record.fileIds.map((fileId) => byId.get(fileId));
+      if (files.some((file) => !file)) {
+        reject(new Error("Workspace has a missing file"));
+        return;
+      }
+      resolve({ record, files: files as PersistedFile[] });
+    };
+  });
+}
+
 export const persistence = {
+  /**
+   * The whole workspace, binary bodies included: what the open workspace
+   * holds and writes back. Anything that only lists, links or searches
+   * should use `getWorkspaceEntries`.
+   */
   async getWorkspace(id: string): Promise<WorkspaceRecord | undefined> {
+    const read = await readWorkspace(id, true);
+    if (!read) return undefined;
+    const { fileIds: _ids, revision, ...workspace } = read.record;
+    lastWrite = {
+      id,
+      revision,
+      files: new Map(read.files.map((file) => [file.id, { ...file }])),
+      bytes: new Map(),
+    };
+    return { ...workspace, revision, files: read.files };
+  },
+  /**
+   * A workspace's metadata, folders and files with their text, but no binary
+   * bodies. Cost follows the text, not the stored PDFs and images, and the
+   * open workspace's write cache is left alone.
+   */
+  async getWorkspaceEntries(id: string): Promise<WorkspaceEntries | undefined> {
+    const read = await readWorkspace(id, false);
+    if (!read) return undefined;
+    const { fileIds: _ids, ...workspace } = read.record;
+    return { ...workspace, files: read.files };
+  },
+  /** One file with its body, or undefined if it isn't stored. */
+  async getFile(workspaceId: string, fileId: string): Promise<PersistedFile | undefined> {
     const db = await openDb();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction([STORE, FILES], "readonly");
-      const metadata = tx.objectStore(STORE).get(id);
-      const documents = tx.objectStore(FILES).index("workspaceId").getAll(id);
-      tx.onabort = () => reject(tx.error ?? new Error("Could not read workspace"));
+      const tx = db.transaction([FILES, BODIES], "readonly");
+      const row = tx.objectStore(FILES).get([workspaceId, fileId]);
+      const body = tx.objectStore(BODIES).get([workspaceId, fileId]);
+      tx.onabort = () => reject(tx.error ?? new Error("Could not read file"));
       tx.oncomplete = () => {
-        const record = metadata.result as StoredWorkspace | undefined;
-        if (!record) {
+        const stored = row.result as StoredFile | undefined;
+        if (!stored) {
           resolve(undefined);
           return;
         }
-        const { fileIds, revision, ...workspace } = record;
-        const byId = new Map<string, PersistedFile>(
-          (documents.result as StoredFile[]).map(({ workspaceId: _id, ...file }) => [
-            file.id,
-            file,
-          ]),
-        );
-        const files = fileIds.map((fileId) => byId.get(fileId));
-        if (files.some((file) => !file)) {
-          reject(new Error("Workspace has a missing file"));
-          return;
-        }
-        lastWrite = {
-          id,
-          revision,
-          files: new Map([...byId].map(([key, file]) => [key, { ...file }])),
-          bytes: new Map(),
-        };
-        resolve({ ...workspace, revision, files: files as PersistedFile[] });
+        const { workspaceId: _id, ...file } = stored;
+        const data = (body.result as StoredBody | undefined)?.data;
+        resolve(data === undefined ? file : { ...file, data });
       };
     });
   },
@@ -424,7 +523,7 @@ export const persistence = {
     const db = await openDb();
     const sizes = snapshots.map(() => new Map<string, number>());
     const revisions = await new Promise<string[]>((resolve, reject) => {
-      const tx = db.transaction([STORE, FILES, SUMMARIES], "readwrite");
+      const tx = db.transaction([STORE, FILES, BODIES, SUMMARIES], "readwrite");
       const next = snapshots.map(() => crypto.randomUUID());
       let failure: unknown;
       snapshots.forEach((w, index) => {
@@ -444,14 +543,27 @@ export const persistence = {
                 ? lastWrite
                 : undefined;
             const fileStore = tx.objectStore(FILES);
+            const bodyStore = tx.objectStore(BODIES);
             const nextIds = new Set(w.files.map((file) => file.id));
             for (const id of previous?.fileIds ?? []) {
-              if (!nextIds.has(id)) fileStore.delete([w.id, id]);
+              if (nextIds.has(id)) continue;
+              fileStore.delete([w.id, id]);
+              bodyStore.delete([w.id, id]);
             }
             let bytes = 0;
             for (const file of w.files) {
-              const unchanged = sameFile(cached?.files.get(file.id), file);
-              if (!unchanged) fileStore.put({ ...file, workspaceId: w.id });
+              const before = cached?.files.get(file.id);
+              const unchanged = sameFile(before, file);
+              if (!unchanged) {
+                fileStore.put(storedRow(w.id, file));
+                // Renaming, filing or binning a PDF rewrites its row, not its
+                // body. Without a cached copy the stored body is unknown, so
+                // it is written (or cleared) too.
+                if (!before || before.data !== file.data) {
+                  if (file.data === undefined) bodyStore.delete([w.id, file.id]);
+                  else bodyStore.put({ workspaceId: w.id, id: file.id, data: file.data });
+                }
+              }
               const size =
                 (unchanged ? cached!.bytes.get(file.id) : undefined) ?? storedFileBytes(file);
               sizes[index].set(file.id, size);
@@ -519,14 +631,9 @@ export const persistence = {
   async deleteWorkspace(id: string): Promise<void> {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([STORE, FILES, SUMMARIES], "readwrite");
-      const cursor = tx.objectStore(FILES).index("workspaceId").openKeyCursor(id);
-      cursor.onsuccess = () => {
-        const row = cursor.result;
-        if (!row) return;
-        tx.objectStore(FILES).delete(row.primaryKey);
-        row.continue();
-      };
+      const tx = db.transaction([STORE, FILES, BODIES, SUMMARIES], "readwrite");
+      tx.objectStore(FILES).delete(workspaceRange(id));
+      tx.objectStore(BODIES).delete(workspaceRange(id));
       tx.objectStore(STORE).delete(id);
       tx.objectStore(SUMMARIES).delete(id);
       tx.onabort = () => reject(tx.error ?? new Error("Could not delete workspace"));
@@ -571,17 +678,29 @@ export const persistence = {
     if (missing.length === 0) return totals;
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([FILES, SUMMARIES], "readwrite");
+      const tx = db.transaction([FILES, BODIES, SUMMARIES], "readwrite");
       for (const id of missing) {
         let bytes = 0;
-        const cursor = tx.objectStore(FILES).index("workspaceId").openCursor(id);
-        cursor.onsuccess = () => {
-          const row = cursor.result;
+        const rows = tx.objectStore(FILES).index("workspaceId").openCursor(id);
+        rows.onsuccess = () => {
+          const row = rows.result;
           if (row) {
             bytes += storedFileBytes(row.value as StoredFile);
             row.continue();
             return;
           }
+          const bodies = tx.objectStore(BODIES).openCursor(workspaceRange(id));
+          bodies.onsuccess = () => {
+            const body = bodies.result;
+            if (body) {
+              bytes += (body.value as StoredBody).data.length;
+              body.continue();
+              return;
+            }
+            record();
+          };
+        };
+        const record = () => {
           const summary = tx.objectStore(SUMMARIES).get(id);
           summary.onsuccess = () => {
             const current = summary.result as WorkspaceSummary | undefined;
@@ -596,16 +715,12 @@ export const persistence = {
     });
     return totals;
   },
-  async listWorkspaces(): Promise<WorkspaceRecord[]> {
-    const list = await persistence.listWorkspaceSummaries();
-    const workspaces = await Promise.all(list.map((w) => persistence.getWorkspace(w.id)));
-    return workspaces.filter((w): w is WorkspaceRecord => !!w);
-  },
   async clearAll(): Promise<void> {
     const db = await openDb();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction([STORE, FILES, SUMMARIES], "readwrite");
-      for (const store of [STORE, FILES, SUMMARIES]) tx.objectStore(store).clear();
+      const stores = [STORE, FILES, BODIES, SUMMARIES];
+      const tx = db.transaction(stores, "readwrite");
+      for (const store of stores) tx.objectStore(store).clear();
       tx.onabort = () => reject(tx.error ?? new Error("Could not clear storage"));
       tx.oncomplete = () => {
         lastWrite = null;

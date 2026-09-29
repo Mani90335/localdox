@@ -42,14 +42,18 @@ async function storedFiles(page: Page) {
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const db = request.result;
-          const all = db.transaction("files").objectStore("files").getAll();
-          all.onsuccess = () => {
+          const tx = db.transaction(["files", "file-bodies"]);
+          const all = tx.objectStore("files").getAll();
+          const bodies = tx.objectStore("file-bodies").getAll();
+          tx.oncomplete = () => {
             db.close();
+            const body = (f: { workspaceId: string; id: string }) =>
+              bodies.result.find((b) => b.workspaceId === f.workspaceId && b.id === f.id);
             resolve(
               all.result.map((f) => ({
                 name: f.name,
                 workspaceId: f.workspaceId,
-                bytes: new TextEncoder().encode(f.content).byteLength + (f.data?.length ?? 0),
+                bytes: new TextEncoder().encode(f.content).byteLength + (body(f)?.data.length ?? 0),
               })),
             );
           };
