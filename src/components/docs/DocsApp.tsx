@@ -123,6 +123,7 @@ import {
   SUPPORTED_ACCEPT,
 } from "@/lib/markdown/document-utils";
 import { clearArtifactResolutionCache } from "@/lib/workspace/workspace-artifacts";
+import { IMPORT_QUEUE, runBounded } from "@/lib/workspace/import-queue";
 import { warmAppFonts } from "@/lib/fonts/fonts";
 import { toast } from "sonner";
 import { holdReload, registerReloadGuard, reloadConfirmed } from "@/lib/app/safe-reload";
@@ -1028,6 +1029,8 @@ export function DocsApp() {
       const total = accepted.length;
       let room: StorageReservation | undefined;
       let toastId: string | number | undefined;
+      // Cancel stops the batch any time before it is added to the workspace.
+      const cancel = new AbortController();
 
       try {
         // Room is held from here until the files are in the workspace, so a
@@ -1037,19 +1040,47 @@ export function DocsApp() {
           accepted.reduce((sum, f) => sum + estimateStoredBytes(f), 0),
           openWorkspace,
         );
-        toastId = toast.loading(`Uploading ${total} file${total > 1 ? "s" : ""}...`);
-        let loaded = 0;
-        const parsed: MdFile[] = await Promise.all(
-          accepted.map(async (f) => {
-            const imported = await importDocumentFile(f);
-            loaded++;
-            toast.loading(
-              `Uploading ${total} file${total > 1 ? "s" : ""}... ${Math.round((loaded / total) * 100)}%`,
-              { id: toastId },
-            );
-            return imported;
-          }),
-        );
+        const uploading = `Uploading ${total} file${total > 1 ? "s" : ""}...`;
+        toastId = toast.loading(uploading, {
+          action: { label: "Cancel", onClick: () => cancel.abort() },
+        });
+        // A few files at a time (import-queue.ts), each succeeding or failing
+        // on its own.
+        let shown = 0;
+        const results = await runBounded(accepted, importDocumentFile, {
+          ...IMPORT_QUEUE,
+          weigh: estimateStoredBytes,
+          signal: cancel.signal,
+          onSettled: (done) => {
+            const percent = Math.round((done / total) * 100);
+            if (percent === shown) return;
+            shown = percent;
+            toast.loading(`${uploading} ${percent}%`, { id: toastId });
+          },
+        });
+        const parsed: MdFile[] = [];
+        const unreadable: string[] = [];
+        results.forEach((result, i) => {
+          if (result.ok) {
+            parsed.push(result.value);
+          } else {
+            unreadable.push(accepted[i].name);
+            console.warn(`Could not read ${accepted[i].name}`, result.error);
+          }
+        });
+        // Every file is read. From here the batch goes in whole or not at all,
+        // so Cancel is no longer offered.
+        toast.loading(`${uploading} 100%`, { id: toastId, action: undefined });
+        if (unreadable.length) {
+          const one = unreadable.length === 1;
+          const names = one
+            ? `“${unreadable[0]}”`
+            : `${unreadable.length} files (${unreadable.slice(0, 3).join(", ")}${unreadable.length > 3 ? ", …" : ""})`;
+          toast.error(
+            `Couldn't read ${names}. If ${one ? "it was" : "they were"} moved or changed after you picked ${one ? "it" : "them"}, pick ${one ? "it" : "them"} again.`,
+            { duration: 10000 },
+          );
+        }
 
         // Duplicate check runs after parsing, because "the same file" means the
         // same bytes, not the same filename. A re-upload of something already
@@ -1101,6 +1132,8 @@ export function DocsApp() {
           return existing;
         }
         await room.resize(storedBytes(kept));
+        // A Cancel clicked before the toast lost its button still counts.
+        cancel.signal.throwIfAborted();
 
         let nextFolders = snapshotRef.current.folders;
         if (attachments) {
@@ -1153,6 +1186,11 @@ export function DocsApp() {
         if (!attachments) navigate({ to: "/" }); // Attachments keep the editor open.
         return [...kept, ...existing];
       } catch (error) {
+        if (cancel.signal.aborted && error === cancel.signal.reason) {
+          toast.dismiss(toastId);
+          toast.info("Upload cancelled. Nothing was added.");
+          return [];
+        }
         setSaveStatus((status) => (status === "saving" ? "idle" : status));
         toast.error(
           error instanceof StorageLimitError

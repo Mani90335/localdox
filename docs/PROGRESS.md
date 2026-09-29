@@ -1,4 +1,97 @@
-Latest update — 2026-09-29 (R02 one Mermaid job at a time, byte-budgeted diagram caches, heavy diagrams on request)
+Latest update — 2026-09-29 (R04 bounded import queue: per-file failures, Cancel)
+
+Completed R04's import half (Package 5), so R04 is done, and with it every
+Package 5 item. A picked or dropped batch is read a few files at a time. A
+file that can't be read is named and skipped, and the rest are stored. The
+batch can be cancelled while it is being read.
+
+Before (HEAD ac2fad3, production preview, Chromium via Playwright):
+- `addFiles` in DocsApp.tsx read the batch with one `Promise.all`. 40 picked
+  images put 40 `FileReader`s in flight at once (instrumented
+  `readAsDataURL`).
+- One unreadable file (`NotReadableError`, which Chrome raises when a picked
+  file was moved or edited, injected in `FileReader`) rejected the whole
+  batch. 4 picked, 0 stored, and a generic "Could not upload the selected
+  file(s)" that named no file.
+- No way to stop an import.
+
+Fix:
+- src/lib/workspace/import-queue.ts (new): `runBounded(items, task, opts)`.
+  - At most `concurrency` items and `maxBytes` of weight run at once. An item
+    always starts when nothing is running, so one large file is never stuck.
+  - Results keep input order, and each is `{ ok, value }` or
+    `{ ok: false, error }`. A synchronous throw is one failed item.
+  - Aborting rejects at once and starts nothing more. Reads already running
+    finish and are discarded.
+  - `IMPORT_QUEUE`: 4 reads, 48 MiB in flight, weighed with
+    `estimateStoredBytes`.
+- DocsApp.tsx `addFiles`:
+  - Reads through the queue.
+  - Its progress toast has a Cancel action while files are read, and a
+    percentage updated only when it changes.
+  - Unreadable files get one error toast naming up to three of them (10 s),
+    and a `console.warn` with the cause each. The rest go on through the
+    duplicate check and save.
+  - Cancel is re-checked after `room.resize`, the last await before the
+    workspace changes, so a click that races the toast update still wins.
+    Cancelling shows "Upload cancelled. Nothing was added."
+- documentation/import-queue.md: the model, flow, measurements, trade-offs
+  and debugging.
+
+After / verification:
+- tests/import-queue.test.ts (7): the concurrency peak, the byte budget
+  (including a lone oversize item), per-item failure (rejected and
+  synchronous), abort (rejects, starts nothing, no progress after), an
+  already-aborted signal, an empty batch, and progress counting failures.
+- tests/e2e/import-queue.spec.ts (3), on the production preview:
+  - 40 images: at most 4 reads in flight, all 40 stored.
+  - One unreadable file: the other 3 are stored, and the error names
+    `broken.png`.
+  - Cancel during a slowed 12-file read: no reads start afterwards, nothing
+    is stored, and the page stays on the home screen.
+  - 9/9 with --repeat-each=3. Against the HEAD build all three fail on
+    substance: 40 in flight, `[]` stored, and no Cancel button.
+  - The probe first counted 5 in flight. The app starts its next read from
+    the reader's `onload`, before `loadend` and before listeners added later
+    (capture phase included), so the probe now counts down inside the
+    reader's own handlers.
+- Timing, production preview, 3 runs each, fixtures from disk:
+  - 300 × 20 KB: HEAD 302–312 ms, now 280–299 ms.
+  - 24 × 5 MiB: HEAD 293–408 ms, now 346–391 ms.
+  - The bound costs no noticeable time. Whole-browser RSS (sampled with `ps`)
+    peaked at +207 to +402 MiB on both builds, which is noise at this scale.
+    No memory improvement is claimed.
+- Chrome DevTools MCP, production preview (port 4193), isolated contexts:
+  - A slowed 12-file pick showed "Uploading 12 files... 33%" with a Cancel
+    button, and only 4 reads had started.
+  - Clicking Cancel in the accessibility tree: "Upload cancelled. Nothing was
+    added." After 9 s, still 4 reads started, IndexedDB empty and still on `/`.
+  - An unreadable `broken.png` between two images: a.png and c.png in the
+    sidebar, the error toast naming broken.png, and one console warning
+    (`NotReadableError`). No other console errors.
+  - Without the delay, 12 files all landed.
+- Full production suite in an isolated worktree (ac2fad3 + this change, port
+  4191): 138 passed, 3 failed, 1 skipped (8.9 min). The failures are the known
+  ones: mobile-navigation's drawer close (it also fails on the HEAD build,
+  rechecked) and both sharing.spec link checks, which hard-code port 4175.
+  After a last toast-text change, a rebuild passed import-queue, storage-budget
+  and media 14/14.
+- npm run typecheck passes. npm test 437/439 (the 2 skipped are A12's live
+  Gemini checks). npm run build passes.
+- ESLint: DocsApp.tsx has 12 warnings, the same 12 as at HEAD, and 0 errors.
+  The new files have 0 problems, and Prettier passes on changed files.
+
+Limits:
+- Peak memory for a finished batch is unchanged. Every data URL is still held
+  in memory and written whole (D01/D02).
+- The unreadable-file case is injected. A real `NotReadableError` takes the
+  same path but wasn't automated.
+- Reads already running when Cancel is clicked are not interrupted
+  (`importDocumentFile` has no abort hook). Their results are dropped.
+- Duplicate-name prompts still use `window.prompt` (Package 7).
+- Chromium only.
+
+Previous update — 2026-09-29 (R02 one Mermaid job at a time, byte-budgeted diagram caches, heavy diagrams on request)
 
 Completed R02 (Package 5). With it every Package 5 item except R04's bounded
 mass-import queue is done. Mermaid jobs no longer overwrite each other's
@@ -2078,7 +2171,7 @@ Pending (not started, or started but not committed)
 
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
-- Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04's spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) is done (latest update); its bounded mass-import queue in DocsApp.tsx remains. R01 (diagram players: coarse React updates, no frames while unseen, reduced motion) is done (latest update). A05 (3,000-section Markdown) is done (latest update; fold latency and the 4× CPU tasks are listed as limits there). R02 (one Mermaid job at a time, byte-budgeted diagram and scene caches, mindmaps and other heavy main-thread diagrams held as source until the reader asks) is done (latest update). Only R04's bounded mass-import queue remains in Package 5.
+- Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04 is done: the spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) and the bounded import queue with per-file failures and Cancel (latest update). R01 (diagram players: coarse React updates, no frames while unseen, reduced motion) is done (latest update). A05 (3,000-section Markdown) is done (latest update; fold latency and the 4× CPU tasks are listed as limits there). R02 (one Mermaid job at a time, byte-budgeted diagram and scene caches, mindmaps and other heavy main-thread diagrams held as source until the reader asks) is done (latest update). Package 5 is now complete.
 - Package 6: B01 is done (B01 update above) and D03 is done (latest update); B02–B03 (startup loading), D01–D02 (loading whole workspaces, binary storage) remain.
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
