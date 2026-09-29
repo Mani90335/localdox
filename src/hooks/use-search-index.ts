@@ -16,6 +16,24 @@ function toSearchFiles(
     .map(({ id, name, content }) => ({ id, name, content }));
 }
 
+// Other workspaces are read at most two at a time: turning on "All
+// workspaces" with many of them doesn't start every read at once. A finished
+// read hands its slot straight to the next one waiting.
+const MAX_WORKSPACE_READS = 2;
+let workspaceReads = 0;
+const waitingReads: (() => void)[] = [];
+async function withReadSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (workspaceReads < MAX_WORKSPACE_READS) workspaceReads++;
+  else await new Promise<void>((resolve) => waitingReads.push(resolve));
+  try {
+    return await task();
+  } finally {
+    const next = waitingReads.shift();
+    if (next) next();
+    else workspaceReads--;
+  }
+}
+
 interface Options {
   active: boolean;
   currentWorkspaceId: string | null;
@@ -174,10 +192,15 @@ export function useSearchIndex({
     const load = async (id: string) => {
       changeLoading(id, 1);
       try {
-        const record = await persistence.getWorkspace(id);
         // Dropped meanwhile, or now the current workspace, whose live files
         // are newer than this stored copy.
-        if (client.closed || !indexed.has(id) || id === currentIdRef.current) return;
+        const unwanted = () => client.closed || !indexed.has(id) || id === currentIdRef.current;
+        // Text and names only: another workspace's PDFs and images are never
+        // read to search it.
+        const record = await withReadSlot(async () =>
+          unwanted() ? undefined : persistence.getWorkspaceEntries(id),
+        );
+        if (unwanted()) return;
         if (!record) return;
         acknowledge(await client.sync(id, toSearchFiles(record.files)));
       } catch (reason) {
