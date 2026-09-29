@@ -53,6 +53,23 @@ declare global {
 let loadPromise: Promise<MathJaxGlobal> | null = null;
 
 /**
+ * How long MathJax may take to start (its bundle and extensions) and to draw
+ * one expression (which can fetch an extension or fonts). A file that never
+ * arrives otherwise leaves the equation on its placeholder for good; this ends
+ * in the error panel, which shows the source.
+ */
+const STARTUP_TIMEOUT_MS = 20_000;
+const RENDER_TIMEOUT_MS = 10_000;
+
+function within<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
  * Load and configure MathJax once.
  *
  * The configuration is assigned *before* the script tag is inserted, which is
@@ -156,11 +173,17 @@ export function loadMathJax(): Promise<MathJaxGlobal> {
         reject(new Error("MathJax loaded without a startup promise"));
         return;
       }
-      global.startup.promise
+      const started = global.startup.promise;
+      within(started, STARTUP_TIMEOUT_MS, "MathJax did not finish loading")
         .then(() => resolve(global))
         .catch((error: unknown) => {
-          loadPromise = null;
           reject(error instanceof Error ? error : new Error("MathJax startup failed"));
+          // Timed out: this script may still finish, so another must not be
+          // added. Later equations use it if it does.
+          started.then(
+            () => (loadPromise = Promise.resolve(global)),
+            () => (loadPromise = null),
+          );
         });
     };
     document.head.appendChild(script);
@@ -255,7 +278,11 @@ export const mathjaxAdapter: MathRendererAdapter = {
     const source = stripRegistryCommands(latex);
 
     const node = global.tex2chtmlPromise
-      ? await global.tex2chtmlPromise(source, { display: displayMode })
+      ? await within(
+          global.tex2chtmlPromise(source, { display: displayMode }),
+          RENDER_TIMEOUT_MS,
+          "MathJax did not finish this expression",
+        )
       : global.tex2chtml?.(source, { display: displayMode });
     if (!node) throw new Error("MathJax produced no output");
 
@@ -277,7 +304,11 @@ export const mathjaxAdapter: MathRendererAdapter = {
     let mathml: string | undefined;
     try {
       mathml = global.tex2mmlPromise
-        ? await global.tex2mmlPromise(source, { display: displayMode })
+        ? await within(
+            global.tex2mmlPromise(source, { display: displayMode }),
+            RENDER_TIMEOUT_MS,
+            "MathJax did not finish this expression",
+          )
         : global.tex2mml?.(source, { display: displayMode });
     } catch {
       // Copy MathML degrades to unavailable; the visual render is unaffected.

@@ -109,7 +109,10 @@ function DisplayMath({ latex }: { latex: string }) {
         aria-label={equationLabel(number)}
       >
         {state.status === "pending" ? (
-          <pre className="docs-math-pending-block">{latex}</pre>
+          // A div, not a <pre>: `.docs-prose pre` would style it as a code
+          // block (padding, a 240px size estimate), several times the height
+          // of the equation that replaces it.
+          <div className="docs-math-pending-block">{latex}</div>
         ) : (
           <span
             className="docs-math-rendered"

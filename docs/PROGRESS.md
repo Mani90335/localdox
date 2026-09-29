@@ -1,4 +1,131 @@
-Latest update — 2026-09-29 (B02 small startup shell: reader, editor, split view and search fallback on demand)
+Latest update — 2026-09-29 (R05 math: typeset in the reader again, within a per-task budget; MathJax works in production)
+
+Completed R05's math half (Package 8). The interactive-JSX half (Babel off the
+main thread, compile cache, debounced playground) is not done yet.
+
+What was actually wrong (production build unless noted):
+- Math didn't render in the reader at all. Refactor 522ccac moved the math
+  components to src/services/math/ and dropped them from the viewer's
+  component map, so every `$…$` and `$$…$$` was an empty `<docs-math>`
+  element (A05 had noted this). `mathPreferences` reached the viewer and was
+  never read.
+- With math wired back in, 1,000 sections with 2,000 distinct equations
+  (7.5 MB of KaTeX markup): longest task 1,155–1,276 ms, 3.7–3.9 s of long
+  tasks in total (3 runs); the same text without math, none.
+  - Timeline: while KaTeX's module loads, ~1,130 equations mount as
+    placeholders. When it lands, all of them typeset and sanitize in one
+    microtask burst (962 ms task), then their state updates commit together
+    (820 ms task).
+  - CPU profile: KaTeX ~30 ms in total. DOMPurify ~400 ms for the workload,
+    partly re-parsing its config on every call, and cloning the allow-list
+    for every call because a hook is installed.
+- The render cache was bounded by count (2,000, oldest inserted out); an
+  entry is ~4 KB for an ordinary equation and hundreds of KB for a matrix.
+- MathJax was broken in every production build: only `tex-mml-chtml.js` was
+  published, but MathJax 4 fetches its TeX packages, assistive MathML and the
+  speech-rule engine. 404s, startup never settled, and anything KaTeX can't
+  draw (`multline`, malformed LaTeX) stayed on its placeholder forever. Dev
+  served the whole package, so dev worked.
+- Security (dev, where MathJax worked): MathJax autoloads its `html`
+  extension for `\style`/`\class`/`\href`. `\style{position:fixed;…}{x}` in a
+  document produced 2 fixed-position elements, a page-wide overlay.
+- The math DOMPurify hook was installed on the shared instance, so the DOCX
+  viewer's sanitizer also let `<mjx-…>` elements through.
+
+Fix:
+- Wiring: MATH_COMPONENTS in the constant markdown-components map;
+  MathProvider around the rendered page (whole-document numbering, reader's
+  preferences). `\eqref` navigation reaches equations on another page or not
+  yet mounted (`pendingEquation`, applied once the render settles), and
+  jumps instantly: a smooth scroll stopped short as blocks it passed rendered.
+- src/services/math/render-budget.ts (new): `TaskBudget` (12 ms of
+  typesetting per task, reset by a callback the first charge schedules) and
+  `SlicedQueue` (FIFO, at least one job per task).
+  - renderer.ts: the synchronous path declines once the task's budget is
+    spent (the equation shows its source, then the async path draws it). The
+    async path waits for KaTeX's module, then typesets and sanitizes as one
+    queued synchronous job. MathJax/Temml render outside the queue; only
+    their sanitizing is queued. Cache hits cost no budget.
+  - Byte-bounded LRU cache: 32 MiB, 8,000 entries, weighed as UTF-16 bytes of
+    key + HTML + MathML. `mathRenderStats()` for debugging.
+  - KaTeX's MathML is taken from the already sanitized HTML instead of being
+    sanitized again (identical for all 112 corpus equations, browser-checked).
+- sanitize.ts: math's own DOMPurify instance, configured once with
+  `setConfig`. Output identical to before for 19 KaTeX/MathJax/hostile inputs;
+  the shared instance no longer passes `<mjx-x>`. Note: `USE_PROFILES`
+  makes DOMPurify ignore the file's ALLOWED_TAGS/ALLOWED_ATTR; unchanged here.
+- styles.css: `.docs-math-block` joins the existing `content-visibility: auto`
+  rule (remembered intrinsic size). The action tray moved inside the block
+  (`top: 0`, was −0.35rem) and the focus ring is inset, since paint
+  containment clips at the edge; screenshots compared against HEAD's CSS.
+- MathNode: the waiting placeholder is a div. As a `<pre>`, `.docs-prose pre`
+  gave it code-block styling and a 240 px size estimate: 292 px tall for an
+  84 px equation.
+- build/vite-mathjax-asset.ts: publishes an allow-list of what MathJax
+  fetches (8 TeX extensions, a11y/*, the speech-rule engine and its maps;
+  vendor/mathjax 3.9 → 5.9 MB, fetched on demand, not precached). The dev
+  server serves the same list. `html.js`/`texhtml.js` stay out, so `\style`
+  fails in place (0 fixed elements, dev and production).
+- adapters/mathjax.ts: startup (20 s) and per-expression (10 s) timeouts, so a
+  missing file ends in the error panel. After a startup timeout the script
+  isn't injected twice; a late start is adopted.
+- documentation/math-rendering.md.
+
+After (production build, Chromium 1280×800):
+- 2,000 equations: no task over 50 ms in 3 runs (0 ms of long tasks), all
+  typeset at ~4.1 s (was ~5.1 s). Budget alone left 141–147 ms tasks; the
+  containment removed them.
+- Edit one equation and return from the editor: 0.8–1.0 s, 1–2 long tasks
+  (151 ms once); with the budget but no containment 1.6–1.9 s and 13–16
+  long tasks. The same document without math: ~200 ms. Only the edited
+  equation is re-typeset; the rest are cache hits.
+- `\eqref` to equation 551 of 600 lands centred.
+
+Validation:
+- Unit: tests/math-render-budget.test.ts (9 tests: budget and queue on a fake
+  clock, the renderer's synchronous budget, 600 equations spread over several
+  tasks, byte-bounded LRU with real 30×30 matrices, clear). tests/math.test.ts:
+  the count-based cache test is replaced, and the corpus test now renders
+  through the budgeted path and asserts every repeat is a cache hit.
+  - Mutations each fail a test: no synchronous budget, a queue that drains in
+    one task (3 tests), no LRU refresh, zero weights, no reset between tasks.
+- Browser: tests/e2e/math.spec.ts (6 tests, production preview): math
+  typeset/numbered/referenced; MathJax fallback draws `multline` and
+  `\style` fails in place with only html.js missing; cross-page `\eqref`;
+  `\eqref` far down a long document; 2,000 equations with no task ≥ 100 ms
+  and off-screen blocks skipped by the renderer; editing one equation.
+  - All 6 fail against the HEAD build (no math renders).
+  - Mutations: no containment + smooth jump fails 2; no budget fails the
+    2,000-equation test (1,097 ms).
+  - 18/18 with --repeat-each=3.
+- On the old base: long-markdown, highlighting, editing, durability,
+  export-loading, offline, viewers and search specs 41/41.
+- Rebased onto 4f494c3 (B02, R04): typecheck passes, npm test 448/450 (2
+  skipped: A12's live Gemini checks), build passes. Full production suite in an isolated
+  worktree (port 4614): 149 passed, 3 failed, 1 skipped (8.9 min). The three
+  are the known plain-HEAD failures: the mobile-navigation drawer close, and
+  both sharing.spec previews, which hard-code port 4175.
+- ESLint on the changed files: 0 errors; 2 warnings, both old MarkdownViewer
+  lines.
+- Chrome DevTools MCP, production preview, isolated context: 2,001 equations
+  typeset in ~4 s including a MathJax `multline`, the malformed one shows its
+  error, `\eqref` to (901) lands centred, every /vendor/mathjax request 200,
+  console only MathJax's own `[tex]/ams` version warning. That run built the
+  170 KB document inside the page and had four 52–109 ms tasks.
+
+Limits:
+- The interactive JSX half of R05 remains: Babel still loads and compiles on
+  the main thread, a playground recompiles and remounts per keystroke, and
+  compiled output isn't cached.
+- MathJax's own work isn't budgeted; it runs only for what KaTeX can't draw.
+- Queued typesetting isn't cancelled when the reader leaves a document.
+- The effective DOMPurify policy is its html/SVG/MathML profiles minus the
+  FORBID lists (see above); tightening it is a follow-up.
+- KaTeX numbers `align` rows itself beside the registry's number (unchanged).
+- Chromium only; no Safari, Firefox, phone or screen reader.
+
+
+Previous update — 2026-09-29 (B02 small startup shell: reader, editor, split view and search fallback on demand)
 
 Completed B02 (Package 6). An empty workspace used to download the Markdown
 reader, the Markdown parser, the editor, split view's panes and search's
@@ -2316,7 +2443,7 @@ Pending (not started, or started but not committed)
 - Package 6: B01 is done (B01 update above), D03 is done (D03 update above) and B02 is done (latest update: small startup shell; 338 → 220.8 KB gzip, still above the 200 KiB target, with zod in persistence as the next lever). B03 (per-journey optional bundles) and D01–D02 (loading whole workspaces, binary storage) remain.
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
-- Package 8: R06 is done (latest update). B04 is done (B04 update above). A12 is done (latest update). B05, R05 and the lint debt (76 errors) remain.
+- Package 8: R06 is done. B04 is done (B04 update above). A12 is done. R05's math half is done (latest update: math typeset in the reader again, a per-task typesetting budget, a byte-bounded cache, MathJax published for production); its interactive-JSX half (Babel off the main thread, compile cache, debounced playground) remains, as do B05 and the lint debt (76 errors).
 
 None of PLAN.md's release gates are formally met yet. A01–A03 and A09/A10 now have passing reproductions, which is what the reliability gate asks for, and Package 3's offline criterion now has a passing reproduction too.
 

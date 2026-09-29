@@ -11,6 +11,9 @@ import { createPortal } from "react-dom";
 import { ProgressiveMarkdown } from "./markdown-viewer/ProgressiveMarkdown";
 import { markdownComponents } from "./markdown-viewer/markdown-components";
 import { useSectionFolds } from "./markdown-viewer/section-folds";
+import { MathProvider } from "@/services/math/MathContext";
+import { DEFAULT_MATH_PREFERENCES } from "@/services/math/types";
+import { slugLabel } from "@/services/math/equation-registry";
 import { useMarkdownPlugins } from "@/lib/markdown/markdown-plugins";
 import {
   Copy,
@@ -191,6 +194,7 @@ interface Props {
 }
 
 const stripExt = (name: string) => name.replace(/\.(md|markdown|mdx|txt)$/i, "");
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
  * Viewer-specific remark passes, held at module scope so the array identity is
@@ -231,6 +235,7 @@ function MarkdownViewerImpl({
   workspaceFiles,
   workspaceName,
   workspaceFolders,
+  mathPreferences = DEFAULT_MATH_PREFERENCES,
   onImportAttachments,
   onOpenArtifact,
   onOpenPalette,
@@ -1005,6 +1010,29 @@ function MarkdownViewerImpl({
     else scrollToTop();
   }, [pendingHeading, settled]);
 
+  // A clicked `\eqref`. The equation may be on another page (paginated mode)
+  // or not mounted yet (a long document), so the jump waits for the render to
+  // settle. Kept apart from `pendingHeading`, which a page change clears.
+  const [pendingEquation, setPendingEquation] = useState<string | null>(null);
+  const navigateToEquation = useCallback(
+    (label: string) => {
+      const domId = `eq-${slugLabel(label)}`;
+      const labelled = new RegExp(`\\\\label\\s*\\{\\s*${escapeRegExp(label)}\\s*\\}`);
+      const owner = singleMode ? null : allChunks.find((chunk) => labelled.test(chunk.content));
+      if (owner && owner.id !== activeChunk.id) onNav(file.id, owner.id);
+      setPendingEquation(domId);
+    },
+    [singleMode, allChunks, activeChunk.id, onNav, file.id],
+  );
+  useEffect(() => {
+    if (!pendingEquation || !settled) return;
+    setPendingEquation(null);
+    // Instant, like a fragment link. A smooth scroll picks its destination
+    // once, and the display equations it passes (content-visibility) take
+    // their real size as they render, so it stopped short in long documents.
+    document.getElementById(pendingEquation)?.scrollIntoView({ block: "center" });
+  }, [pendingEquation, settled]);
+
   /** Search rows for the source lines this view renders: the whole file in
    *  single-page mode, else the active page without the heading that
    *  `renderContent` strips from its top. */
@@ -1545,14 +1573,23 @@ function MarkdownViewerImpl({
                 <MarkdownRenderContext.Provider value={renderCtx}>
                   <SavedContext.Provider value={savedCtx}>
                     <CollapseContext.Provider value={collapseCtx}>
-                      <ProgressiveMarkdown
-                        source={markdownSource}
-                        urlTransform={mediaUrlTransform}
-                        remarkPlugins={remarkPlugins}
-                        rehypePlugins={rehypePlugins}
-                        components={markdownComponents}
-                        onRendered={setRenderedSource}
-                      />
+                      {/* Numbered from the whole document, not the page on
+                          screen, so equation numbers and references stay put
+                          as the reader pages through. */}
+                      <MathProvider
+                        source={file.content}
+                        preferences={mathPreferences}
+                        navigateToEquation={navigateToEquation}
+                      >
+                        <ProgressiveMarkdown
+                          source={markdownSource}
+                          urlTransform={mediaUrlTransform}
+                          remarkPlugins={remarkPlugins}
+                          rehypePlugins={rehypePlugins}
+                          components={markdownComponents}
+                          onRendered={setRenderedSource}
+                        />
+                      </MathProvider>
                     </CollapseContext.Provider>
                   </SavedContext.Provider>
                 </MarkdownRenderContext.Provider>
