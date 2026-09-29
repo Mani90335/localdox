@@ -6,13 +6,11 @@
 
 /* Fonts and KaTeX's stylesheet are deliberately NOT imported here.
  *
- * Bundling them made this file render-blocking at ~212 kB and pulled 95 woff2
- * subsets into the first load, for faces most readers never select. They are
- * fetched on demand instead — see `src/lib/fonts.ts`:
- *   - Inter (--font-ui) and JetBrains Mono (--font-mono) load just after first
- *     paint, behind their system fallbacks.
- *   - Source Serif 4 / Newsreader / Atkinson load only when the reader picks
- *     that typeface in Settings.
+ * They are fetched on demand — see `src/lib/fonts/fonts.ts`:
+ *   - The UI follows the chosen reading font. Atkinson Hyperlegible is the
+ *     default; custom and Google fonts have their own loaders.
+ *   - JetBrains Mono (--font-mono) loads when Markdown contains code.
+ *   - Font binaries load only for weights/language subsets used on screen.
  *   - KaTeX's CSS loads only when a document actually contains math.
  * Every `--font-*` var below already declares a system fallback stack, so the
  * page is fully readable before any of them arrive.

@@ -103,24 +103,22 @@ function usePdfDocument(
     textCache.clear();
     setLoadErrorRef.current(null);
 
-    const arrayBuffer = dataUrlToArrayBuffer(file.data);
-    if (!arrayBuffer) {
-      setLoadErrorRef.current(
-        "This PDF is missing its file data. Remove it and upload the file again.",
-      );
-      return;
-    }
-
-    const loadingTask = pdfjs.getDocument({
-      data: arrayBuffer,
-      cMapUrl: PDFJS_CMAP_URL,
-      cMapPacked: true,
-      standardFontDataUrl: PDFJS_STANDARD_FONT_URL,
-    });
-
+    let loadingTask: ReturnType<typeof pdfjs.getDocument> | undefined;
     void (async () => {
       let doc: PDFDocumentProxy;
       try {
+        const arrayBuffer = await dataUrlToArrayBuffer(file.data);
+        if (!alive) return;
+        if (!arrayBuffer) {
+          setLoadErrorRef.current("This PDF is missing its file data. Remove it and upload the file again.");
+          return;
+        }
+        loadingTask = pdfjs.getDocument({
+          data: arrayBuffer,
+          cMapUrl: PDFJS_CMAP_URL,
+          cMapPacked: true,
+          standardFontDataUrl: PDFJS_STANDARD_FONT_URL,
+        });
         doc = await loadingTask.promise;
         if (!alive) return;
         setPdfDocument(doc);
@@ -147,7 +145,7 @@ function usePdfDocument(
 
     return () => {
       alive = false;
-      void loadingTask.destroy();
+      void loadingTask?.destroy();
     };
   }, [pdfjs, file.data, pageCache, textCache]);
 

@@ -1,10 +1,12 @@
+import { binaryBody } from "../../lib/workspace/binary";
+import type { FileData } from "../../lib/workspace/binary";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
 
 export const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const SHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 export type CellEdits = Map<string, Map<string, string>>;
-export type DocumentUpdate = { content: string; data?: string; size: number };
+export type DocumentUpdate = { content: string; data?: FileData; size: number };
 export function xml(source: string): XMLDocument {
   const document = new DOMParser().parseFromString(source, "application/xml");
   if (document.querySelector("parsererror")) throw new Error("The document contains invalid XML.");
@@ -14,12 +16,7 @@ const serialize = (document: XMLDocument) => new XMLSerializer().serializeToStri
 
 export async function binaryUpdate(bytes: Uint8Array, mime: string): Promise<DocumentUpdate> {
   const blob = new Blob([bytes as BlobPart], { type: mime });
-  const data = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("Could not prepare the edited file."));
-    reader.readAsDataURL(blob);
-  });
+  const data = binaryBody(blob);
   return { content: "", data, size: bytes.byteLength };
 }
 

@@ -14,7 +14,8 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:bundles": "node scripts/check-bundle-budgets.mjs"
   },
   "dependencies": {
     "@babel/standalone": "^7.29.7",

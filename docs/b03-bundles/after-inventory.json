@@ -1,0 +1,163 @@
+[
+  {
+    "file": "assets/anydoc_wasm_bg-CNV9QoDY.wasm",
+    "bytes": 6691779,
+    "gzip": 2948199
+  },
+  {
+    "file": "assets/compiler.worker-XDA3X9-5.js",
+    "bytes": 2967068,
+    "gzip": 668383
+  },
+  {
+    "file": "assets/chunk-EIO257PC-BiAg7S3S.js",
+    "bytes": 1821047,
+    "gzip": 735631,
+    "modules": [
+      "node_modules/@excalidraw/excalidraw/dist/prod/chunk-EIO257PC.js"
+    ]
+  },
+  {
+    "file": "assets/pdf.worker.min-Dswkl-cV.mjs",
+    "bytes": 1265413,
+    "gzip": 376093
+  },
+  {
+    "file": "vendor/mathjax/tex-mml-chtml.js",
+    "bytes": 997558,
+    "gzip": 282899
+  },
+  {
+    "file": "assets/mathlive.min-Ketwy1t6.js",
+    "bytes": 807992,
+    "gzip": 220192,
+    "modules": []
+  },
+  {
+    "file": "assets/chunk-KEIR6QF5-Dj-OpFgW.js",
+    "bytes": 662684,
+    "gzip": 142277,
+    "modules": []
+  },
+  {
+    "file": "assets/prod-4o_4tbrw.js",
+    "bytes": 551448,
+    "gzip": 165262,
+    "modules": [
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/primitive/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-compose-refs/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-context/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-slot/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-primitive/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-dismissable-layer/node_modules/@radix-ui/react-use-callback-ref/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-dismissable-layer/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-focus-guards/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-focus-scope/node_modules/@radix-ui/react-use-callback-ref/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-focus-scope/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-id/node_modules/@radix-ui/react-use-layout-effect/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-id/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-popper/node_modules/@radix-ui/react-arrow/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-popper/node_modules/@radix-ui/react-use-callback-ref/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-popper/node_modules/@radix-ui/react-use-layout-effect/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-popper/node_modules/@radix-ui/react-use-size/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-popper/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-portal/node_modules/@radix-ui/react-use-layout-effect/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-portal/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-presence/node_modules/@radix-ui/react-use-layout-effect/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-presence/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-use-controllable-state/node_modules/@radix-ui/react-use-callback-ref/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/node_modules/@radix-ui/react-use-controllable-state/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-popover/dist/index.mjs",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/primitive/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-context/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-roving-focus/node_modules/@radix-ui/react-compose-refs/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-roving-focus/node_modules/@radix-ui/react-collection/node_modules/@radix-ui/react-slot/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-roving-focus/node_modules/@radix-ui/react-collection/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-id/node_modules/@radix-ui/react-use-layout-effect/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-id/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-primitive/node_modules/@radix-ui/react-slot/node_modules/@radix-ui/react-compose-refs/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-primitive/node_modules/@radix-ui/react-slot/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-primitive/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-roving-focus/node_modules/@radix-ui/react-use-callback-ref/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-use-controllable-state/node_modules/@radix-ui/react-use-callback-ref/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-use-controllable-state/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-direction/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-roving-focus/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-presence/node_modules/@radix-ui/react-compose-refs/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-presence/node_modules/@radix-ui/react-use-layout-effect/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-presence/dist/index.module.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/dist/index.module.js",
+      "node_modules/@excalidraw/laser-pointer/dist/esm.js",
+      "node_modules/@excalidraw/excalidraw/dist/prod/index.js"
+    ]
+  },
+  {
+    "file": "assets/chunk-K2UTITRG-BHD4IXsU.js",
+    "bytes": 537077,
+    "gzip": 177047,
+    "modules": [
+      "node_modules/@excalidraw/excalidraw/dist/prod/chunk-ZUYEQ4TG.js",
+      "node_modules/@excalidraw/excalidraw/node_modules/clsx/dist/clsx.m.js",
+      "node_modules/@excalidraw/excalidraw/dist/prod/chunk-K2UTITRG.js"
+    ]
+  },
+  {
+    "file": "assets/mammoth.browser-DHhXrNvP.js",
+    "bytes": 491705,
+    "gzip": 118061,
+    "modules": []
+  },
+  {
+    "file": "assets/cytoscape.esm-CQFVGiJu.js",
+    "bytes": 435277,
+    "gzip": 136915,
+    "modules": []
+  },
+  {
+    "file": "assets/pdf-BjXxVvUT.js",
+    "bytes": 431181,
+    "gzip": 127899,
+    "modules": []
+  },
+  {
+    "file": "assets/spreadsheet.worker-DOMlalqE.js",
+    "bytes": 430570,
+    "gzip": 142699
+  },
+  {
+    "file": "vendor/mathjax/sre/speech-worker.js",
+    "bytes": 425256,
+    "gzip": 125754
+  },
+  {
+    "file": "assets/xlsx-CfqBtJmm.js",
+    "bytes": 424835,
+    "gzip": 140371,
+    "modules": []
+  },
+  {
+    "file": "vendor/mathjax/a11y/sre.js",
+    "bytes": 261018,
+    "gzip": 78979
+  },
+  {
+    "file": "assets/katex-DaHcgYfY.js",
+    "bytes": 257867,
+    "gzip": 76548,
+    "modules": [
+      "node_modules/katex/dist/katex.mjs"
+    ]
+  },
+  {
+    "file": "assets/chunk-WYO6CB5R-Dyyvru4m.js",
+    "bytes": 234809,
+    "gzip": 35354,
+    "modules": []
+  },
+  {
+    "file": "assets/temml-BtVvYCeY.js",
+    "bytes": 202039,
+    "gzip": 58896,
+    "modules": []
+  }
+]

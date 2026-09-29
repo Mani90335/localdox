@@ -255,21 +255,14 @@ const archive = {
 
 /** alpha.md in the first workspace, then "Archive" imported and current, so
  *  alpha.md is only reachable through "Search all workspaces". */
-async function twoWorkspaces(page: Page, image?: Buffer) {
+async function twoWorkspaces(page: Page, backup = archive) {
   await upload(page);
-  if (image) {
-    await page
-      .locator('input[type="file"]')
-      .first()
-      .setInputFiles({ name: "scan.png", mimeType: "image/png", buffer: image });
-    await expect(page.getByRole("button", { name: /scan\.png/ }).first()).toBeVisible();
-  }
   await page.goto("/settings");
   await page.getByRole("tab", { name: "Workspace" }).click();
   await page.locator('input[type="file"][accept="application/json,.json"]').setInputFiles({
     name: "archive.json",
     mimeType: "application/json",
-    buffer: Buffer.from(JSON.stringify(archive)),
+    buffer: Buffer.from(JSON.stringify(backup)),
   });
   await expect
     .poll(() =>
@@ -324,40 +317,50 @@ test("other workspaces are indexed again after search is closed and reopened", a
   await expect(results.getByRole("button", { name: /^archived\.md/ })).toBeVisible();
 });
 
-test("searching all workspaces never reads another workspace's images from storage", async ({
+test("searching all workspaces leaves the open workspace's next save at one file", async ({
   page,
 }) => {
-  // 1 MiB of image bytes in the other workspace: about 1.4 MB once stored.
-  await twoWorkspaces(page, Buffer.alloc(1024 * 1024, 7));
-  // From here on, note the largest value any IndexedDB read hands back.
-  await page.evaluate(() => {
-    const w = window as unknown as { largestRead: number };
-    w.largestRead = 0;
-    const watch = (proto: object, method: string) => {
-      const original = (proto as Record<string, (...args: unknown[]) => IDBRequest>)[method];
-      (proto as Record<string, unknown>)[method] = function (this: unknown, ...args: unknown[]) {
-        const request = original.apply(this, args);
-        request.addEventListener("success", () => {
-          const value =
-            request.result instanceof IDBCursorWithValue ? request.result.value : request.result;
-          w.largestRead = Math.max(w.largestRead, JSON.stringify(value ?? null).length);
-        });
-        return request;
-      };
-    };
-    for (const proto of [IDBObjectStore.prototype, IDBIndex.prototype])
-      for (const method of ["get", "getAll", "openCursor"]) watch(proto, method);
+  // Archive (the open workspace) also holds an image.
+  const scan = {
+    id: "scan",
+    name: "scan.png",
+    kind: "image",
+    mimeType: "image/png",
+    content: "",
+    data: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAHUlEQVR4nGP4z8BAEmIY1TCqYVTDqIZRDcNWAwCvRf8BjqzjYQAAAABJRU5ErkJggg==",
+    addedAt: 1,
+  };
+  await twoWorkspaces(page, {
+    ...archive,
+    workspace: { ...archive.workspace, files: [...archive.workspace.files, scan] },
   });
+  await page.evaluate(() => {
+    const w = window as unknown as { fileWrites: string[] };
+    w.fileWrites = [];
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value, ...args) {
+      if (this.name === "files") w.fileWrites.push((value as { name: string }).name);
+      return put.call(this, value, ...args);
+    };
+  });
+  const writes = () =>
+    page.evaluate(() => (window as unknown as { fileWrites: string[] }).fileWrites);
+  // Indexing alpha.md reads the other workspace; that must not make the open
+  // one forget what it last saved.
   const results = page.locator("aside");
   await openSearch(page, "constant");
   await setAllWorkspaces(page, true);
   await expect(results.getByRole("button", { name: /^alpha\.md/ })).toBeVisible();
   await expect(results.getByText(/Indexing \d+ other workspace/)).toHaveCount(0);
-  const largest = await page.evaluate(
-    () => (window as unknown as { largestRead: number }).largestRead,
-  );
-  expect(largest).toBeGreaterThan(0);
-  expect(largest).toBeLessThan(100_000);
+  await page.getByRole("button", { name: "Close search" }).click();
+
+  await page.getByRole("button", { name: "Options", exact: true }).first().click();
+  await page.getByText("Edit", { exact: true }).click();
+  await page.getByRole("textbox", { name: "Document name" }).fill("kept.md");
+  await page.getByRole("textbox", { name: "Document name" }).press("Enter");
+  await expect.poll(writes).toContain("kept.md");
+  await page.waitForTimeout(1000);
+  expect(await writes()).toEqual(["kept.md"]);
 });
 
 test("turning all-workspaces off while another workspace is indexing settles the indicator", async ({

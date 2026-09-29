@@ -1,4 +1,176 @@
-Latest update — 2026-09-29 (D01 part 1: binary bodies in their own store; searching, listing and linking never read another workspace's PDFs)
+Latest update — 2026-09-29 (D01 part 1 merged with upstream D02/B03/B05: other workspaces are read without bodies and without resetting the open workspace's save cache)
+
+Merged upstream/main (eb5424b: D02 Blob bodies, B03 bundle budgets, B05
+fonts) into main, which held D01 part 1's first version (2ab5273, entry
+below). Details: documentation/workspace-entries.md.
+
+Conflict and decision:
+- Both sides changed storage and both called their layout IndexedDB v3. D01
+  moved base64 bodies into a separate `file-bodies` store. D02 turned bodies
+  into Blobs inside the file rows. IndexedDB hands back a Blob as a handle
+  without reading its bytes, so D02 alone brought a cross-workspace search
+  from +264 MB heap to +3 MB. The separate store added nothing on top, so the
+  merge keeps D02's layout and drops it.
+- D01's API and callers stay: `getWorkspaceEntries` (no bodies, doesn't
+  replace the write cache), `getFile`, search reading at most two workspaces
+  at a time, the picker listing from entries, and link resolution reading only
+  the matched file. `listWorkspaces()` stays removed.
+- Database version 4: a database from the interim build (v3 with
+  `file-bodies`) gets each body folded back into its row as a Blob, in one
+  upgrade transaction. D02's v3 needs no work. Without this, those databases
+  would have opened as D02's v3 with their PDFs and images empty.
+- Conflicted tests and docs: took upstream's editing and storage-budget e2e
+  specs and storage-budget.md (my body-store joins no longer apply), and put
+  media.spec's seed back to its original form.
+
+Measured (bench/d01-workspace-bodies.mjs, now counting Blob sizes; open
+workspace = note + 5 MB image, another = 4 × 25 MB PDFs; search all
+workspaces, then rename the note; 5 alternating rounds, medians):
+| Build                | Heap during search | Search → hit | Next save writes |
+| Before D02 (88cb82c) | +264 MB            | 372 ms       | 7 MB             |
+| D02 only (eb5424b)   | +3 MB              | 248 ms       | 5.25 MB          |
+| This merge           | +3 MB              | 247 ms       | 0.01 MB          |
+First open (v2 fixture, including migration to Blobs) was 3.6 s on both
+builds, D02's migration decoding ≈140 MB of base64. Reopening took 55–100 ms.
+
+Tests:
+- tests/workspace-entries.test.ts (replaces workspace-bodies.test.ts, 9
+  cases): interim v3 → v4 fold restores exact bytes as Blobs and drops the
+  store; an aborted fold leaves v3 intact; D02's v3 opens with Blob ids
+  unchanged; entries carry no bodies; reading another workspace's entries
+  keeps the next save at one row (swapping in `getWorkspace` makes it fail:
+  2 rows); getFile; a cross-workspace link reads exactly one row.
+- tests/e2e/search.spec.ts: "searching all workspaces leaves the open
+  workspace's next save at one file". It fails on the D02-only build (it also
+  writes scan.png) and passes on the merge. It replaces the previous
+  "largest read" check, which Blob handles made meaningless.
+- Unit suite 476 passed, 0 failed, 2 skipped. Typecheck and production build
+  pass. ESLint on changed files: clean.
+- Full browser suite on the merged production build (private port 4741):
+  171 passed, 1 skipped, 3 failed. All three fail on upstream's build too:
+  sharing.spec's two link checks hard-code port 4175, and mobile-navigation
+  "close button and backdrop dismiss the drawer" fails on eb5424b as well.
+- Chrome via DevTools MCP, merged build: a seeded interim v3 database (note +
+  image in `file-bodies`) opened as v4. The store was gone, the image was back
+  in its row as an 85-byte Blob body and rendered. No console errors or
+  warnings.
+
+Limits: the open workspace is still loaded whole. Its bodies are Blob handles
+now, but loading them only when a viewer asks isn't verified end to end.
+A move still rewrites the whole destination workspace. Chromium only.
+
+Previous update — 2026-09-29 (B03 optional-feature bundle budgets and shared KaTeX)
+
+Completed B03 (Package 6). Measured production downloads by user journey,
+including worker scripts and conversion WASM. Added repeatable size ceilings
+through `npm run test:bundles` and a build report with client module ownership,
+imports, and raw/gzip sizes. Diagnostics are excluded from the offline catalog.
+
+What changed:
+- `vite.config.ts` deduplicates KaTeX to the app's 0.17.0 renderer. Previously
+  Mermaid and rehype-katex resolved separate nested 0.16.47 installations:
+  two named KaTeX chunks plus another copy inside HTML export. The client now
+  contains one implementation. No dependency versions or lockfile changed.
+- `build/vite-bundle-report.ts`, `scripts/check-bundle-budgets.mjs`, and
+  `tests/e2e/bundle-journeys.spec.ts` cover import, PDF, conversion, diagrams,
+  editing, export, XLSX, interactive React, and the math keyboard. The gate
+  checks rendered results, required engine/worker requests, optional-module
+  absence on empty startup, a single KaTeX implementation, and size ceilings.
+- Babel, MathLive, XLSX, PDF, and conversion stay optional. Babel's supported
+  TSX syntax is unchanged. The audit's 1.82 MB chunk belongs to Excalidraw and
+  is not downloaded by the nine measured journeys.
+
+Measured before → after (KiB gzip of additional JS/MJS/WASM after idle reader
+warm-up; fresh contexts, service-worker registration disabled):
+- Math flowchart: 420.1 → 345.2; HTML export after reading math: 215.3 → 140.4.
+- Unchanged: plain Markdown import 0; edit 8.4; PDF 517.4; CSV plus conversion
+  3,038.4; XLSX 156.6; interactive React 764.7; math keyboard 215.0.
+- Named renderer/export chunks lose 517,859 raw bytes (153,500 gzip bytes).
+  These are locally recompressed response-body sizes, not wire transfers or
+  latency measurements. The shell and reader prerequisite costs are additional.
+  The original diagram/export sizes exceed the new ceilings.
+
+Validation:
+- Chrome DevTools MCP: empty startup fetches no heavy optional engine;
+  a combined reader-math/diagram/export journey makes one KaTeX request,
+  renders both equations, exports MathML, and has no console warnings/errors.
+- All 10 new production bundle checks pass, including the finalized harness
+  on Nitro with unchanged executable byte totals. Typecheck, focused ESLint,
+  formatting, and diff checks pass. Unit suite: 467 passed, 2 credential-dependent
+  tests skipped. Final production build exits 0; its client bundle report is
+  byte-for-byte identical to the tested build.
+- Across reruns, 33/34 related browser regressions pass (conversion, export,
+  interactive examples, math, offline, startup, and viewers). Vite preview's
+  compression caused conversion/download-all timeouts; conversion passed on
+  Nitro. Nitro returns 404 for the generated `/_shell.html`, so offline testing
+  used static hosting, where download-all and opening a PDF offline passed.
+- The 2,000-equation stress gate is **not certified** on this host. An untouched
+  `cc6e4c5` baseline records a 257 ms task against its 100 ms limit; the changed
+  preview records 153 ms, while later changed-build runs time out waiting for
+  all equations. These single observations do not establish equivalent or
+  improved performance. The CSP test's missing HTML-image blocked-request event
+  also reproduced on baseline, then passed the final static-build rerun. No
+  existing test threshold, sandbox policy, or assertion was weakened.
+
+Details and reproduction: [optional-bundle-budgets.md](../documentation/optional-bundle-budgets.md).
+Raw before/after evidence: [b03-bundles](b03-bundles/), including
+[verification.json](b03-bundles/verification.json) and
+[devtools.json](b03-bundles/devtools.json). Chrome 154 on Windows only; no claim
+about mobile hardware, other browsers, or meeting the overall 200 KiB startup
+target. Other audit findings remain separate work.
+
+
+Previous update — 2026-09-29 (B05 font loading: remove unused Inter requests and offline assets)
+
+Completed B05 (Package 8). Measured the current production build before
+changing fonts: the UI follows the selected reading face (Atkinson
+Hyperlegible by default), but an obsolete idle loader still fetched four
+Inter weight stylesheets. All 28 registered Inter faces stayed unloaded;
+there was no Inter binary download or Inter swap on this startup journey.
+
+What changed:
+- Removed loadUiFont/warmAppFonts and the DocsApp call. The selected reading
+  font, code font, math styles and idle Markdown-reader preload keep their
+  existing loading paths.
+- Corrected stale font-loading comments: declaring all unicode subsets does
+  not download all of them; the browser chooses those used by rendered text.
+  System fallbacks keep text readable, but do not guarantee identical metrics.
+- Added documentation/font-loading.md and production browser regressions.
+
+Measured before/after (production preview, isolated Chromium contexts,
+Chrome DevTools MCP; deterministic request/asset counts, not a latency study):
+- Unused Inter stylesheet requests: 4 → 0; compressed response bodies
+  2,297 → 0 bytes (8,972 uncompressed).
+- Unused Inter binaries in the generated offline catalog: 56 → 0;
+  892,928 → 0 bytes. Including CSS, download-all loses 901,900 bytes.
+  These binaries were optional offline assets, not initial page transfers.
+- Default Atkinson requests are unchanged: Latin 400 and 700, 34,730 bytes
+  of WOFF2 in total. DevTools confirms the same computed UI family, and the
+  fixed page has no console warnings or errors.
+
+Validation:
+- New tests/e2e/fonts.spec.ts: 3/3 pass. The unused-CSS assertion fails on
+  the baseline build; the two preservation cases also pass on that baseline.
+  Tests check the offline catalog, absence of Mono for prose, on-demand
+  Mono for code, Latin/Cyrillic/Greek subset requests, and actual glyph
+  providers through CDP. Holding font downloads verifies readable system
+  fallback followed by the selected Atkinson face when downloads complete.
+- Production fonts + startup-loading + offline browser suites: 15/15 pass,
+  including download-all and opening a PDF offline with HTTP cache disabled.
+- npm run typecheck, npm run build, npm test: pass (456 passed, 2 live Gemini
+  tests skipped). Focused ESLint: 0 errors, 12 existing DocsApp hook warnings.
+  git diff --check passes.
+
+Limits: Chromium on this machine only. Selected webfonts still use swap and
+can change layout when they arrive; this change removes unused work without
+claiming a CLS or latency improvement. Custom/Google font lifecycle changes,
+package dependency cleanup and broader optional-bundle work remain separate.
+
+Previous update — 2026-09-29 (D01 part 1, first version: superseded by the D01 + D02 merge entry above)
+
+Superseded: this version's separate body store (and its DB v3) was dropped
+when D02 merged. D02's Blob bodies made it unnecessary. The API and caller
+changes below were kept; the latest update has the final design and numbers.
 
 Starts D01 (Package 6). Details: documentation/workspace-storage-layout.md.
 
@@ -2670,11 +2842,38 @@ Pending (not started, or started but not committed)
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
 - Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04 is done: the spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) and the bounded import queue with per-file failures and Cancel (latest update). R01 (diagram players: coarse React updates, no frames while unseen, reduced motion) is done (latest update). A05 (3,000-section Markdown) is done (latest update; fold latency and the 4× CPU tasks are listed as limits there). R02 (one Mermaid job at a time, byte-budgeted diagram and scene caches, mindmaps and other heavy main-thread diagrams held as source until the reader asks) is done (latest update). Package 5 is now complete.
-- Package 6: B01 is done (B01 update above), D03 is done (D03 update above) and B02 is done (latest update: small startup shell; 338 → 220.8 KB gzip, still above the 200 KiB target, with zod in persistence as the next lever). D01 part 1 is done (latest update: binary bodies in their own store; search, the attachment picker and link resolution read no other workspace's bodies; 139.8 MB → < 5 KB read for a cross-workspace search). D01 part 2 (load the open workspace's bodies on demand), D02 (Blob records) and B03 (per-journey optional bundles) remain.
+- Package 6 is now complete: B01, D03, B02 (updates above), B03 (per-journey optional bundle budgets, shared KaTeX), D02 (Blob bodies in IndexedDB) and D01 part 1 (latest update: other workspaces are read without bodies and without replacing the open workspace's write cache; the next save after a cross-workspace search writes 0.01 MB instead of 5.25 MB). Still open from D01: loading the open workspace's bodies only when a viewer asks (not verified end to end), and moves rewriting the whole destination workspace.
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
-- Package 8: R06 is done. B04 is done (B04 update above). A12 is done. R05 is done: its math half (math typeset in the reader again, a per-task typesetting budget, a byte-bounded cache, MathJax published for production) and its interactive-JSX half (React examples run, in a self-contained sandboxed frame; Babel in a worker, a compile cache, playground edits settle first; latest two updates). B05 and the lint debt (76 errors) remain.
+- Package 8: R06 is done. B04 is done (B04 update above). A12 is done. R05 is done: its math half (math typeset in the reader again, a per-task typesetting budget, a byte-bounded cache, MathJax published for production) and its interactive-JSX half (React examples run, in a self-contained sandboxed frame; Babel in a worker, a compile cache, playground edits settle first; updates above). B05 is done (unused Inter loading and offline assets removed after measuring actual requests; latest update). Lint debt and CI budget enforcement remain.
 
 None of PLAN.md's release gates are formally met yet. A01–A03 and A09/A10 now have passing reproductions, which is what the reliability gate asks for, and Package 3's offline criterion now has a passing reproduction too.
 
 Historical working-tree note (superseded by the clean-tree check on 2026-09-28)
+
+
+
+PROGRESS on D02:
+I’ll locate the audit and progress files in this checkout, read D02’s requirements, then implement, test, update the progress log, and commit the fix.
+
+
+
+
+Read files, ran commands
+
+
+D02 is still open. Binary files currently stay as base64 strings through import, storage, and several viewers. I’m tracing those paths so Blob storage preserves backups, sharing, editing, and transaction safety. I’ll use IndexedDB Blobs first, as the plan recommends.
+
+The fix needs a stable binary revision identifier: IndexedDB returns new Blob objects on reads, so object identity alone would cause false cross-tab conflicts. I’m adding that identifier, keeping base64 only at the portable JSON backup/share boundary, and retaining the existing file keys and atomic transactions.
+
+Stopped in middle, complete it
+
+D02 completed on 2026-09-29.
+
+- Finished the interrupted Blob implementation while preserving the existing file keys and atomic workspace transactions. Binary body IDs survive IndexedDB clones; replacement bytes receive a new ID. Legacy v1/v2 storage migrates atomically, and unreadable historical values remain recoverable.
+- Fixed save normalization so an edit made during a pending transaction is retained. Text records keep absent binary fields absent. UI-only saves from a cached revision still put zero file payloads; a binary replacement puts exactly its changed file.
+- Binary fingerprints now run inside the bounded import queue, retaining per-file failures and cancellation without base64 copies. Mounted image/media URLs are revoked on replacement or unmount. Backups/shares remain portable JSON, with asynchronous encoding only at export boundaries.
+- Updated backup, conversion, editing, import-queue and storage-limit regressions; added Blob migration/rollback, exact-byte round-trip, worker parsing, stable-ID merge, pending-edit and URL-lifetime coverage. Added `.gitattributes` to prevent Windows line-ending conversion from corrupting PDF fixture offsets.
+- Validation: typecheck and production build passed; the full unit suite passed 467 tests (2 credential-dependent tests skipped). All 29 relevant browser cases passed across the production run and corrected URL-selector rerun; the final media/URL run passed 3/3. Focused lint for binary/persistence helpers, URL consumers, benchmark and binary/browser regressions passed. Windows Nitro dev-server startup failed, so browser verification used production preview with installed Chrome 154.0.8037.58. Dependencies were restored from `bun.lock` without changing the manifest or lockfile.
+- Five alternating trials of eight 5 MiB binary bodies: logical storage fell from 55,924,288 to 41,943,040 bytes (25% less). Median preparation was 572.9 → 157.9 ms, committed write 412.4 → 174.1 ms, and IndexedDB read 185.3 → 33.0 ms. Blob reads return handles; decoding/viewer work is excluded. These local microbenchmarks do not measure disk overhead, retained heap, mobile hardware or OPFS.
+- Implementation/reproduction notes: [d02-binary-storage.md](d02-binary-storage.md); raw evidence: [d02-binary-storage-results.json](d02-binary-storage-results.json); harness: `scripts/bench-binary-storage.mjs`. IndexedDB Blobs are sufficient for this measured workload; D01 and other audit findings remain separate work.

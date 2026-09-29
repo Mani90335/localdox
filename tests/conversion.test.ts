@@ -113,7 +113,7 @@ test("provenance round trips and derivative-only shares never retain a live sour
   await persistence.putWorkspace(workspace);
   assert.deepEqual((await persistence.getWorkspace(workspace.id))?.files, workspace.files);
   assert.deepEqual(
-    parseWorkspaceImport(serializeWorkspace(workspace)).files[1].derivedFrom,
+    parseWorkspaceImport(await serializeWorkspace(workspace)).files[1].derivedFrom,
     derivedFrom,
   );
   workspace.files[1] = {
@@ -126,11 +126,12 @@ test("provenance round trips and derivative-only shares never retain a live sour
     "renamed.pdf",
   );
   assert.equal(
-    parseSharedFiles(serializeSharedFiles([derivative], "W")).files[0].derivedFrom?.sourceFileId,
+    parseSharedFiles(await serializeSharedFiles([derivative], "W")).files[0].derivedFrom
+      ?.sourceFileId,
     undefined,
   );
   assert.equal(
-    parseSharedFiles(serializeSharedFiles([source, derivative], "W")).files[1].derivedFrom
+    parseSharedFiles(await serializeSharedFiles([source, derivative], "W")).files[1].derivedFrom
       ?.sourceFileId,
     source.id,
   );
@@ -233,12 +234,10 @@ test("conversion commits reject another tab's revision instead of overwriting it
     };
   });
   await assert.rejects(
-    persistence.putWorkspace(
-      {
-        ...workspace,
-        files: [...workspace.files, { id: "derivative", name: "source.md", content: "Converted" }],
-      },
-    ),
+    persistence.putWorkspace({
+      ...workspace,
+      files: [...workspace.files, { id: "derivative", name: "source.md", content: "Converted" }],
+    }),
     /another tab/,
   );
   const stored = await persistence.getWorkspace(workspace.id);

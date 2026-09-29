@@ -44,7 +44,7 @@ export async function handleSpreadsheetRequest(
   try {
     switch (request.type) {
       case "open":
-        return { reqId, type: "opened", sheets: engine.open(request.source).sheets };
+        return { reqId, type: "opened", sheets: engine.open(request.source.format === "blob" ? { format: "buffer", buffer: await request.source.blob.arrayBuffer() } : request.source).sheets };
       case "layout":
         return { reqId, type: "layout", layout: engine.layout(request.sheet) };
       case "view":

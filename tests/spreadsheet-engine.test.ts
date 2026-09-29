@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as XLSX from "xlsx";
+import { handleSpreadsheetRequest } from "../src/lib/spreadsheet/protocol.ts";
 import {
   compareCells,
   measureColumns,
@@ -22,6 +23,24 @@ function workbookDataUrl(sheets: Record<string, unknown[][]>): string {
   const base64 = XLSX.write(book, { type: "base64", bookType: "xlsx" }) as string;
   return `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${base64}`;
 }
+
+test("worker protocol reads a structured-cloned Blob workbook with exact cells", async () => {
+  const url = workbookDataUrl({ Notes: [["Note"], ["Blob workbook"]] });
+  const blob = new Blob([Buffer.from(url.split(",")[1], "base64")]);
+  const engine = new SpreadsheetEngine(XLSX);
+  const request = structuredClone({
+    reqId: 1,
+    type: "open" as const,
+    source: { format: "blob" as const, blob },
+  });
+  assert.deepEqual(await handleSpreadsheetRequest(engine, request), {
+    reqId: 1,
+    type: "opened",
+    sheets: ["Notes"],
+  });
+  const view = await engine.view(0, "", null);
+  assert.deepEqual(engine.rows(view.viewId, 0, 1, 0, 1).rows, [["Blob workbook"]]);
+});
 
 /** Real SheetJS, with every read() call's options recorded. */
 function recordingXlsx() {

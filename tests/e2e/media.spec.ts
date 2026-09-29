@@ -314,10 +314,7 @@ test("nested folders and cross-workspace Markdown embeds render and bundle their
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const db = request.result;
-          const tx = db.transaction(
-            ["workspaces", "files", "file-bodies", "workspace-summaries"],
-            "readwrite",
-          );
+          const tx = db.transaction(["workspaces", "files", "workspace-summaries"], "readwrite");
           for (const workspace of [current, library]) {
             const { files, ...metadata } = workspace;
             tx.objectStore("workspaces").put({
@@ -332,11 +329,8 @@ test("nested folders and cross-workspace Markdown embeds render and bundle their
               updatedAt: workspace.updatedAt,
               docCount: files.length,
             });
-            for (const { data, ...file } of files as { id: string; data?: string }[]) {
+            for (const file of files)
               tx.objectStore("files").put({ ...file, workspaceId: workspace.id });
-              if (data)
-                tx.objectStore("file-bodies").put({ workspaceId: workspace.id, id: file.id, data });
-            }
           }
           tx.oncomplete = () => {
             db.close();

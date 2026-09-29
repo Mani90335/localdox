@@ -5,21 +5,38 @@ import JSZip from "jszip";
 async function storedFile(page: Page, name: string) {
   return page.evaluate(
     (name) =>
-      new Promise<import("../../src/lib/persistence").PersistedFile>((resolve, reject) => {
+      new Promise<
+        Omit<import("../../src/lib/persistence").PersistedFile, "data"> & {
+          bytes?: number[];
+          binaryId?: string;
+        }
+      >((resolve, reject) => {
         const request = indexedDB.open("localdox");
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const db = request.result;
-          const transaction = db.transaction(["files", "file-bodies"], "readonly");
+          const transaction = db.transaction("files", "readonly");
           const files = transaction.objectStore("files").getAll();
-          const bodies = transaction.objectStore("file-bodies").getAll();
-          transaction.oncomplete = () => {
+          transaction.oncomplete = async () => {
             const file = files.result.find((file) => file.name === name);
-            const body = bodies.result.find(
-              (body) => body.workspaceId === file?.workspaceId && body.id === file?.id,
-            );
-            resolve(file && body ? { ...file, data: body.data } : file);
             db.close();
+            if (!file) return resolve(file);
+            const { data, ...metadata } = file;
+            try {
+              const bytes =
+                typeof data === "string"
+                  ? Array.from(atob(data.split(",")[1]), (char) => char.charCodeAt(0))
+                  : data
+                    ? Array.from(new Uint8Array(await data.blob.arrayBuffer()))
+                    : undefined;
+              resolve({
+                ...metadata,
+                bytes,
+                binaryId: typeof data === "object" ? data.id : undefined,
+              });
+            } catch (error) {
+              reject(error);
+            }
           };
         };
       }),
@@ -95,7 +112,7 @@ test("CSV editing preserves strings, quotes pasted cells, cancels, and persists 
     .poll(async () => (await storedFile(page, "edit.csv"))?.content)
     .toContain('"Fresh, ""apples"""');
   const saved = await storedFile(page, "edit.csv");
-  expect(saved.data).toBeUndefined();
+  expect(saved.bytes).toBeUndefined();
   expect(saved.content).toContain("001");
   expect(saved.content).toContain("004,Plums");
   expect(saved.size).toBe(Buffer.byteLength(saved.content));
@@ -131,19 +148,20 @@ test("XLSX updates original cells across sheets and retains package parts", asyn
   await page.getByRole("textbox", { name: "Cell A2", exact: true }).fill("Edited note");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect
-    .poll(async () => (await storedFile(page, "edit.xlsx"))?.data)
-    .not.toBe(`data:application/octet-stream;base64,${bytes.toString("base64")}`);
+    .poll(async () => (await storedFile(page, "edit.xlsx"))?.bytes)
+    .not.toEqual(Array.from(bytes));
   await expect(page.getByRole("button", { name: "Edit spreadsheet", exact: true })).toBeVisible();
   await expect
     .poll(async () => {
       const file = await storedFile(page, "edit.xlsx");
-      if (!file?.data) return "";
-      const saved = XLSX.read(Buffer.from(file.data.split(",")[1], "base64"));
+      if (!file?.bytes) return "";
+      const saved = XLSX.read(Buffer.from(file.bytes));
       return saved.Sheets.Notes.A2.v;
     })
     .toBe("Edited note");
   const saved = await storedFile(page, "edit.xlsx");
-  const buffer = Buffer.from(saved.data.split(",")[1], "base64");
+  const buffer = Buffer.from(saved.bytes!);
+  expect(saved.binaryId).toBeTruthy();
   const result = XLSX.read(buffer);
   expect(result.Sheets.Fruit.B4.v).toBe(99);
   expect(result.Sheets.Fruit.C2.f).toBe("B2*2");
@@ -183,13 +201,14 @@ test("DOCX text edits retain runs, tables, and other ZIP entries", async ({ page
   await expect
     .poll(async () => {
       const saved = await storedFile(page, "edit.docx");
-      if (!saved?.data) return "";
-      const result = await JSZip.loadAsync(Buffer.from(saved.data.split(",")[1], "base64"));
+      if (!saved?.bytes) return "";
+      const result = await JSZip.loadAsync(Buffer.from(saved.bytes));
       return result.file("word/document.xml")!.async("string");
     })
     .toContain("Updated table");
   const saved = await storedFile(page, "edit.docx");
-  const result = await JSZip.loadAsync(Buffer.from(saved.data.split(",")[1], "base64"));
+  const result = await JSZip.loadAsync(Buffer.from(saved.bytes!));
+  expect(saved.binaryId).toBeTruthy();
   const body = await result.file("word/document.xml")!.async("string");
   expect(body).toContain("w:b");
   expect(body).toContain("w:tbl");
@@ -246,5 +265,5 @@ test("a shared formula save error keeps the draft and original workbook", async 
   await expect(page.getByRole("alert")).toContainText("shared or array formula");
   await expect(page.getByRole("textbox", { name: "Cell A2", exact: true })).toHaveValue("42");
   const file = await storedFile(page, "formula.xlsx");
-  expect(Buffer.from(file.data!.split(",")[1], "base64")).toEqual(bytes);
+  expect(Buffer.from(file.bytes!)).toEqual(bytes);
 });

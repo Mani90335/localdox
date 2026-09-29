@@ -6,7 +6,6 @@ import { test, expect, type Page } from "@playwright/test";
 // to 48 MiB, as offline files and caches make it in real use.
 
 const CAP = 1024 * 1024;
-const PNG_PREFIX = "data:image/png;base64,";
 
 test.beforeEach(async ({ context }) => {
   await context.addInitScript(() => {
@@ -22,7 +21,7 @@ test.beforeEach(async ({ context }) => {
   });
 });
 
-/** Bytes that are not valid UTF-8 text, so the upload is stored as base64. */
+/** Binary bytes, stored as a Blob without a base64 copy. */
 function binary(length: number) {
   const bytes = Buffer.alloc(length);
   for (let i = 0; i < length; i++) bytes[i] = (i * 131 + 7) & 0xff;
@@ -42,18 +41,16 @@ async function storedFiles(page: Page) {
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const db = request.result;
-          const tx = db.transaction(["files", "file-bodies"]);
-          const all = tx.objectStore("files").getAll();
-          const bodies = tx.objectStore("file-bodies").getAll();
-          tx.oncomplete = () => {
+          const all = db.transaction("files").objectStore("files").getAll();
+          all.onsuccess = () => {
             db.close();
-            const body = (f: { workspaceId: string; id: string }) =>
-              bodies.result.find((b) => b.workspaceId === f.workspaceId && b.id === f.id);
             resolve(
               all.result.map((f) => ({
                 name: f.name,
                 workspaceId: f.workspaceId,
-                bytes: new TextEncoder().encode(f.content).byteLength + (body(f)?.data.length ?? 0),
+                bytes:
+                  new TextEncoder().encode(f.content).byteLength +
+                  (typeof f.data === "string" ? f.data.length : (f.data?.blob.size ?? 0)),
               })),
             );
           };
@@ -96,20 +93,23 @@ async function importBackup(page: Page, name: string, content: string, size = co
   });
 }
 
-test("a binary upload counts as stored (base64), so the next upload is refused", async ({
+test("a binary upload counts Blob bytes, accepts what fits, and refuses overflow", async ({
   page,
 }) => {
   await page.goto("/");
-  // 540,000 bytes on disk, 720,022 as stored.
+  // 540,000 bytes on disk and in the Blob body.
   await upload(page, "photo.png", "image/png", binary(540_000));
   await expect(page.getByRole("button", { name: /photo/ }).first()).toBeVisible();
-  await expect.poll(async () => total(await storedFiles(page))).toBe(PNG_PREFIX.length + 720_000);
+  await expect.poll(async () => total(await storedFiles(page))).toBe(540_000);
 
-  // 540,000 + 400,000 fits by file size; 720,022 + 400,000 doesn't.
+  // The old base64 storage would have refused this fitting upload.
   await upload(page, "notes.txt", "text/plain", Buffer.from("n".repeat(400_000)));
   await settled(page, /notes/);
+  await expect.poll(async () => total(await storedFiles(page))).toBe(940_000);
+  await upload(page, "overflow.txt", "text/plain", Buffer.from("o".repeat(200_000)));
+  await settled(page, /overflow/);
   const files = await storedFiles(page);
-  expect(files.map((f) => f.name)).toEqual(["photo.png"]);
+  expect(files.map((f) => f.name).sort()).toEqual(["notes.txt", "photo.png"]);
   expect(total(files)).toBeLessThanOrEqual(CAP);
   await expect(rejection(page)).toBeVisible();
 });
@@ -125,7 +125,7 @@ test("every workspace counts, not just the open one", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Second" }).first()).toBeVisible();
 
-  await upload(page, "notes.txt", "text/plain", Buffer.from("n".repeat(400_000)));
+  await upload(page, "notes.txt", "text/plain", Buffer.from("n".repeat(600_000)));
   await settled(page, /notes/);
   expect((await storedFiles(page)).map((f) => f.name).sort()).toEqual(["Second.md", "photo.png"]);
   await expect(rejection(page)).toBeVisible();
@@ -136,8 +136,8 @@ test("restoring a backup is held to the same limit, and says why", async ({ page
   await upload(page, "photo.png", "image/png", binary(300_000));
   await expect(page.getByRole("button", { name: /photo/ }).first()).toBeVisible();
 
-  // The backup claims a tiny size; its real text is 700,000 bytes.
-  await importBackup(page, "Big", "b".repeat(700_000), 10);
+  // The backup claims a tiny size; its real text is 800,000 bytes.
+  await importBackup(page, "Big", "b".repeat(800_000), 10);
   const toast = page.locator("[data-sonner-toast]").filter({ hasText: "Nothing was imported" });
   await expect(toast).toContainText("Not enough space");
   await expect(toast).not.toContainText("isn't a valid workspace backup");
@@ -175,9 +175,9 @@ test("Settings measures documents against the limit, not the whole origin", asyn
 
   await page.goto("/settings");
   await page.getByRole("tab", { name: "Storage", exact: true }).click();
-  // 720,022 bytes as stored, against the 1 MiB limit; the browser's 48 MB
+  // 540,000 bytes as stored, against the 1 MiB limit; the browser's 48 MB
   // (offline files, caches) is reported separately as an estimate.
-  await expect(page.getByText("703.15 KB of 1 MB")).toBeVisible();
+  await expect(page.getByText("527.34 KB of 1 MB")).toBeVisible();
   await expect(page.getByText(/48 MB/)).toBeVisible();
 });
 

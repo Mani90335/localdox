@@ -9,6 +9,7 @@ import {
   type WorkspaceRecord,
 } from "../src/lib/workspace/persistence.ts";
 import { MAX_IMPORT_BYTES, ImportValidationError } from "../src/lib/workspace/import-schema.ts";
+import { binaryBody, portableFiles, portableData } from "../src/lib/workspace/binary.ts";
 import {
   buildWorkspaceShare,
   countAnnotations,
@@ -52,7 +53,7 @@ function richWorkspace(): WorkspaceRecord {
       id: "pdf",
       name: "paper.pdf",
       content: "",
-      data: "data:application/pdf;base64,JVBERi0xLjQ=",
+      data: binaryBody(new Blob(["%PDF-1.4"], { type: "application/pdf" })),
       mimeType: "application/pdf",
       size: 8,
       addedAt: 12,
@@ -135,15 +136,15 @@ function richWorkspace(): WorkspaceRecord {
 }
 
 /** The fields a restore must reproduce exactly (the id and timestamps are new). */
-function comparable(w: WorkspaceRecord) {
+async function comparable(w: WorkspaceRecord) {
   const { id: _id, updatedAt: _u, revision: _r, ...rest } = w;
-  return rest;
+  return { ...rest, files: await portableFiles(rest.files) };
 }
 
-test("backup round trip preserves saved items, notes, Bin state, folders, panes and derivations", () => {
+test("backup round trip preserves saved items, notes, Bin state, folders, panes and derivations", async () => {
   const original = richWorkspace();
-  const restored = parseWorkspaceImport(serializeWorkspace(original));
-  assert.deepEqual(comparable(restored), comparable(original));
+  const restored = parseWorkspaceImport(await serializeWorkspace(original));
+  assert.deepEqual(await comparable(restored), await comparable(original));
   // The audit's concrete failure: these two fields were dropped.
   assert.equal(restored.saved?.length, 3);
   assert.equal(restored.saved?.[0].note, "Compare with chapter 3");
@@ -153,7 +154,7 @@ test("backup round trip preserves saved items, notes, Bin state, folders, panes 
 test("export → clear database → import → reload reproduces the workspace", async () => {
   const original = richWorkspace();
   await persistence.putWorkspace(original);
-  const exported = serializeWorkspace((await persistence.getWorkspace(original.id))!);
+  const exported = await serializeWorkspace((await persistence.getWorkspace(original.id))!);
 
   await persistence.destroy();
   assert.deepEqual(await persistence.listWorkspaceSummaries(), []);
@@ -161,7 +162,7 @@ test("export → clear database → import → reload reproduces the workspace",
   const imported = parseWorkspaceImport(exported);
   await persistence.putWorkspace(imported);
   const reloaded = (await persistence.getWorkspace(imported.id))!;
-  assert.deepEqual(comparable(reloaded), comparable(original));
+  assert.deepEqual(await comparable(reloaded), await comparable(original));
   await persistence.destroy();
 });
 
@@ -204,10 +205,11 @@ test("unknown document kinds and fields from a newer build are tolerated", () =>
   assert.equal("extra" in imported.files[0], false);
 });
 
-test("malformed, duplicated, cyclic, too deep and oversized backups are rejected before any write", () => {
+test("malformed, duplicated, cyclic, too deep and oversized backups are rejected before any write", async () => {
   const base = richWorkspace();
+  const portable = { ...base, files: await portableFiles(base.files) };
   const bad = (mutate: (w: any) => void, pattern: RegExp) => {
-    const w = structuredClone(base) as any;
+    const w = structuredClone(portable) as any;
     mutate(w);
     assert.throws(
       () =>
@@ -251,12 +253,12 @@ test("malformed, duplicated, cyclic, too deep and oversized backups are rejected
   );
 });
 
-test("dangling references are dropped instead of pointing at nothing", () => {
+test("dangling references are dropped instead of pointing at nothing", async () => {
   const w = richWorkspace();
   w.saved!.push({ id: "ghost", fileId: "missing", kind: "file", title: "x", createdAt: 1 });
   w.ui.panes![0].tabs.push("missing");
   w.files[0].folderId = "no-such-folder";
-  const imported = parseWorkspaceImport(serializeWorkspace(w));
+  const imported = parseWorkspaceImport(await serializeWorkspace(w));
   assert.equal(
     imported.saved!.some((s) => s.id === "ghost"),
     false,
@@ -265,9 +267,9 @@ test("dangling references are dropped instead of pointing at nothing", () => {
   assert.equal(imported.files[0].folderId, null);
 });
 
-test("shared-file payloads are validated and remap derivations to included files only", () => {
+test("shared-file payloads are validated and remap derivations to included files only", async () => {
   const w = richWorkspace();
-  const payload = parseSharedFiles(serializeSharedFiles([w.files[3]], "Research"));
+  const payload = parseSharedFiles(await serializeSharedFiles([w.files[3]], "Research"));
   assert.equal(payload.files[0].derivedFrom?.sourceFileId, undefined);
   assert.throws(
     () => parseSharedFiles(JSON.stringify({ files: [w.files[0], w.files[0]] })),
@@ -289,10 +291,10 @@ test("compressed share payloads stop decompressing at the import budget", async 
 
 const liveIds = (w: WorkspaceRecord) => w.files.filter((f) => f.deletedAt == null).map((f) => f.id);
 
-test("a default workspace share leaves out the Bin, annotations, history and layout", () => {
+test("a default workspace share leaves out the Bin, annotations, history and layout", async () => {
   const w = richWorkspace();
   const shared = buildWorkspaceShare(w, { fileIds: liveIds(w), includeAnnotations: false });
-  const json = serializeWorkspace(shared);
+  const json = await serializeWorkspace(shared);
 
   assert.deepEqual(
     shared.files.map((f) => f.id),
@@ -352,10 +354,10 @@ test("annotations travel only when opted in, and only for shared files", () => {
   );
 });
 
-test("a shared workspace imports as the previewed selection", () => {
+test("a shared workspace imports as the previewed selection", async () => {
   const w = richWorkspace();
   const shared = buildWorkspaceShare(w, { fileIds: ["note", "pdf"], includeAnnotations: false });
-  const received = parseWorkspaceImport(serializeWorkspace(shared));
+  const received = parseWorkspaceImport(await serializeWorkspace(shared));
   assert.deepEqual(
     received.files.map((f) => [f.id, f.folderId, f.deletedAt]),
     [
@@ -363,12 +365,12 @@ test("a shared workspace imports as the previewed selection", () => {
       ["pdf", "outer", undefined],
     ],
   );
-  assert.equal(received.files[1].data, w.files[2].data);
+  assert.equal(await portableData(received.files[1].data), await portableData(w.files[2].data));
   assert.deepEqual(received.saved ?? [], []);
   assert.deepEqual(received.highlights, []);
 
   // The file-link payload is built from the same selection.
-  const files = parseSharedFiles(serializeSharedFiles(shared.files, w.name));
+  const files = parseSharedFiles(await serializeSharedFiles(shared.files, w.name));
   assert.deepEqual(
     files.files.map((f) => f.id),
     ["note", "pdf"],

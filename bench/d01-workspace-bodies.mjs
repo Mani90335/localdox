@@ -1,13 +1,17 @@
 // D01 A/B: an open workspace with a note + 5 MB image, another holding 4 × 25 MB
-// PDFs (≈133 MB stored as base64). Seeds the v2 layout (what HEAD writes), so
-// the new build's first open includes its v2 → v3 migration.
+// PDFs (≈140 MB as base64 data URLs). Seeds the v2 layout, so every build's
+// first open includes its migration (to Blob bodies, since D02).
+//
+// Reads are split into bytes materialized as strings (data URLs, text) and
+// bytes merely referenced as Blob handles, which IndexedDB hands back without
+// reading them. Writes count both: a row put with a Blob writes that Blob.
 //
 // Serve each build's .output with its own Nitro server (vite preview
 // compresses per request and skews timing), e.g.
 //   (cd <old>/.output && PORT=4751 HOST=127.0.0.1 node server/index.mjs)
 //   (cd <new>/.output && PORT=4752 HOST=127.0.0.1 node server/index.mjs)
 //   ROUNDS=5 node bench/d01-workspace-bodies.mjs
-// See documentation/workspace-storage-layout.md.
+// See documentation/workspace-entries.md.
 import { chromium } from "@playwright/test";
 
 const builds = {
@@ -88,8 +92,13 @@ async function run(label, origin) {
   // Watch IndexedDB reads and writes from here on.
   await page.evaluate(() => {
     const w = window;
-    w.bench = { largestRead: 0, readBytes: 0, putBytes: 0 };
-    const size = (v) => (v == null ? 0 : JSON.stringify(v).length);
+    w.bench = { readStrings: 0, readBlobs: 0, putBytes: 0 };
+    const size = (v, total = { strings: 0, blobs: 0 }) => {
+      if (typeof v === "string") total.strings += v.length;
+      else if (v instanceof Blob) total.blobs += v.size;
+      else if (v && typeof v === "object") for (const key in v) size(v[key], total);
+      return total;
+    };
     for (const proto of [IDBObjectStore.prototype, IDBIndex.prototype])
       for (const method of ["get", "getAll", "openCursor"]) {
         const original = proto[method];
@@ -97,15 +106,16 @@ async function run(label, origin) {
           const req = original.apply(this, args);
           req.addEventListener("success", () => {
             const n = size(req.result instanceof IDBCursorWithValue ? req.result.value : req.result);
-            w.bench.readBytes += n;
-            w.bench.largestRead = Math.max(w.bench.largestRead, n);
+            w.bench.readStrings += n.strings;
+            w.bench.readBlobs += n.blobs;
           });
           return req;
         };
       }
     const put = IDBObjectStore.prototype.put;
     IDBObjectStore.prototype.put = function (value, ...args) {
-      w.bench.putBytes += size(value);
+      const n = size(value);
+      w.bench.putBytes += n.strings + n.blobs;
       return put.call(this, value, ...args);
     };
   });
@@ -131,8 +141,8 @@ async function run(label, origin) {
   await browser.close();
   return {
     label, firstOpenMs, reopenMs, crossSearchMs,
-    searchLargestReadMB: +(search.largestRead / 1e6).toFixed(2),
-    searchReadMB: +(search.readBytes / 1e6).toFixed(2),
+    searchStringsReadMB: +(search.readStrings / 1e6).toFixed(2),
+    searchBlobsReferencedMB: +(search.readBlobs / 1e6).toFixed(2),
     searchHeapDeltaMB: +((heapAfter - heapBefore) / 1e6).toFixed(1),
     nextSavePutMB: +(savePutBytes / 1e6).toFixed(2),
   };

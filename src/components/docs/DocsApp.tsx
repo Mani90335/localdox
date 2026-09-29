@@ -1,3 +1,4 @@
+import { dataBytes } from "@/lib/workspace/binary";
 import { ConversionContext } from "@/services/doc-conversion/ConversionContext";
 import { ensureEmbedMediaFolder } from "@/lib/workspace/embed-media";
 import type { DocumentUpdate } from "@/services/office-editing";
@@ -33,7 +34,7 @@ import {
   useSidebarCollapseAnimation,
   SIDEBAR_WIDTH,
 } from "./docs-app/use-sidebar-collapse-animation";
-import { toMdFile, uniqueFileName, findDuplicate } from "./docs-app/file-helpers";
+import { toMdFile, uniqueFileName, findDuplicate, fileFingerprint } from "./docs-app/file-helpers";
 import { availableWorkspaceName, resolveWorkspaceName } from "./docs-app/workspace-naming";
 import { ConflictBanner } from "./docs-app/ConflictBanner";
 import { SaveErrorBanner } from "./docs-app/SaveErrorBanner";
@@ -129,7 +130,6 @@ import {
 } from "@/lib/markdown/document-utils";
 import { clearArtifactResolutionCache } from "@/lib/workspace/workspace-artifacts";
 import { IMPORT_QUEUE, runBounded } from "@/lib/workspace/import-queue";
-import { warmAppFonts } from "@/lib/fonts/fonts";
 import { toast } from "sonner";
 import { holdReload, registerReloadGuard, reloadConfirmed } from "@/lib/app/safe-reload";
 import { useHistory } from "@/hooks/use-history";
@@ -550,7 +550,7 @@ export function DocsApp() {
 
   const { sidebarWrapRef, sidebarInnerRef } = useSidebarCollapseAnimation(sidebarCollapsed);
 
-  // Warm the UI font and the Markdown reader after first contentful paint. The
+  // Warm the Markdown reader after first contentful paint. The
   // reader is out of the startup download so the shell paints sooner, but
   // nearly every visit opens a document next: fetching it while the reader is
   // still choosing a file keeps that first open as quick as when it was
@@ -561,7 +561,6 @@ export function DocsApp() {
     let idle = 0;
     const start = () => {
       idle = requestIdleCallbackSafe(() => {
-        warmAppFonts();
         preloadMarkdownViewer();
       });
     };
@@ -1066,17 +1065,27 @@ export function DocsApp() {
         // A few files at a time (import-queue.ts), each succeeding or failing
         // on its own.
         let shown = 0;
-        const results = await runBounded(accepted, importDocumentFile, {
-          ...IMPORT_QUEUE,
-          weigh: estimateStoredBytes,
-          signal: cancel.signal,
-          onSettled: (done) => {
-            const percent = Math.round((done / total) * 100);
-            if (percent === shown) return;
-            shown = percent;
-            toast.loading(`${uploading} ${percent}%`, { id: toastId });
+        const results = await runBounded(
+          accepted,
+          async (picked) => {
+            const file = await importDocumentFile(picked);
+            // Hash inside the bounded queue: no base64 copy, and an unreadable
+            // binary fails only its own item. Duplicate checks reuse this hash.
+            await fileFingerprint(file);
+            return file;
           },
-        });
+          {
+            ...IMPORT_QUEUE,
+            weigh: estimateStoredBytes,
+            signal: cancel.signal,
+            onSettled: (done) => {
+              const percent = Math.round((done / total) * 100);
+              if (percent === shown) return;
+              shown = percent;
+              toast.loading(`${uploading} ${percent}%`, { id: toastId });
+            },
+          },
+        );
         const parsed: MdFile[] = [];
         const unreadable: string[] = [];
         results.forEach((result, i) => {
@@ -1113,7 +1122,8 @@ export function DocsApp() {
         const pool = [...snapshotRef.current.files];
 
         for (const file of parsed) {
-          const dup = findDuplicate(file, pool);
+          cancel.signal.throwIfAborted();
+          const dup = await findDuplicate(file, pool);
           if (dup?.kind === "content") {
             skipped.push(file.name);
             if (attachments) {
@@ -1283,7 +1293,7 @@ export function DocsApp() {
   const workspaceRevision = useMemo(
     () =>
       files
-        .map((file) => `${file.id}:${file.name}:${file.content.length}:${file.data?.length ?? 0}`)
+        .map((file) => `${file.id}:${file.name}:${file.content.length}:${dataBytes(file.data)}`)
         .join("|"),
     [files],
   );
@@ -2627,9 +2637,13 @@ flowchart LR
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, []);
 
-  const exportWorkspace = useCallback(() => {
+  const exportWorkspace = useCallback(async () => {
     const rec = buildRecord();
-    downloadJson(serializeWorkspace(rec), rec.name);
+    try {
+      downloadJson(await serializeWorkspace(rec), rec.name);
+    } catch {
+      toast.error("Could not export the workspace backup. Please try again.");
+    }
   }, [buildRecord, downloadJson]);
 
   // Sharing uploads to a third party, so it never happens straight from a menu

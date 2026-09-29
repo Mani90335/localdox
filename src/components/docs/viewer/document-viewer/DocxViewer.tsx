@@ -24,13 +24,11 @@ export function DocxViewer({
     let alive = true;
     setHtml(null);
     setError("");
-    const buffer = dataUrlToArrayBuffer(file.data);
-    if (!buffer) {
-      setError("This Word file is missing its document data.");
-      return;
-    }
     void (async () => {
       try {
+        const buffer = await dataUrlToArrayBuffer(file.data);
+        if (!alive) return;
+        if (!buffer) throw new Error("Missing document data");
         const module = (await import("mammoth/mammoth.browser")) as unknown as {
           default?: MammothBrowser;
         } & MammothBrowser;

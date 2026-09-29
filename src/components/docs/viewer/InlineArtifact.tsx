@@ -6,7 +6,9 @@ import { isLocalReference, isArtifactUrl } from "@/lib/markdown/media-references
 import { MarkdownMedia } from "./MarkdownMedia";
 import { remarkMedia, mediaUrlTransform, parseMediaSpec } from "@/lib/markdown/markdown-media";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
-import { dataUrlToBlob, getDocumentKind } from "@/lib/markdown/document-utils";
+import { getDocumentKind } from "@/lib/markdown/document-utils";
+import { binaryBody } from "@/lib/workspace/binary";
+import { useBinaryUrl } from "@/hooks/use-binary-url";
 const DocumentViewer = lazy(() =>
   import("./DocumentViewer").then((module) => ({ default: module.DocumentViewer })),
 );
@@ -125,11 +127,11 @@ export function InlineArtifact({
 function renderArtifact(file: MdFile, objectUrl: string | null, context: Omit<Props, "reference">) {
   const kind = file.kind ?? getDocumentKind(file.name, file.mimeType);
   if (kind === "image")
-    return <img src={objectUrl ?? file.data} alt={file.name} className="artifact-image" />;
+    return <img src={objectUrl ?? undefined} alt={file.name} className="artifact-image" />;
   if (kind === "video")
-    return <video src={objectUrl ?? file.data} controls className="artifact-media" />;
+    return <video src={objectUrl ?? undefined} controls className="artifact-media" />;
   if (kind === "audio")
-    return <audio src={objectUrl ?? file.data} controls className="w-full px-4 py-6" />;
+    return <audio src={objectUrl ?? undefined} controls className="w-full px-4 py-6" />;
   if (kind === "html")
     return <iframe title={file.name} srcDoc={file.content} sandbox="" className="artifact-html" />;
   if (kind === "mermaid") return <MermaidBlock code={file.content} name={file.name} />;
@@ -232,22 +234,16 @@ function EmbeddedMarkdown({
 }
 
 function useObjectUrl(file?: MdFile) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!file) {
-      setUrl(null);
-      return;
-    }
-    const blob = file.data
-      ? dataUrlToBlob(file.data)
-      : new Blob([file.content], { type: file.mimeType || "text/plain" });
-    if (!blob) {
-      setUrl(null);
-      return;
-    }
-    const next = URL.createObjectURL(blob);
-    setUrl(next);
-    return () => URL.revokeObjectURL(next);
-  }, [file]);
-  return url;
+  const storedData = file?.data;
+  const content = file?.content;
+  const mimeType = file?.mimeType;
+  const data = useMemo(
+    () =>
+      storedData ??
+      (content !== undefined
+        ? binaryBody(new Blob([content], { type: mimeType || "text/plain" }))
+        : undefined),
+    [storedData, content, mimeType],
+  );
+  return useBinaryUrl(data) ?? null;
 }
