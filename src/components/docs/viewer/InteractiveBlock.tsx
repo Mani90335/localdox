@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { htmlFrameDocument, reactFrameDocument } from "@/services/interactive/frame-document";
+import { FRAME_MESSAGE, RUN_MESSAGE, type RunMessage } from "@/services/interactive/frame-protocol";
 
 export type InteractiveKind = "html" | "react";
 export type InteractiveMode = "standard" | "preview" | "split" | "playground";
@@ -17,9 +19,10 @@ interface RuntimeError {
   stack?: string;
 }
 
-const FRAME_MESSAGE = "docucraft:interactive";
 const MIN_FRAME_HEIGHT = 176;
 const MAX_FRAME_HEIGHT = 960;
+/** How long a playground waits after the last keystroke before it compiles. */
+const EDIT_SETTLE_MS = 400;
 
 export function interactiveMode(meta?: string): InteractiveMode {
   const flags = new Set((meta ?? "").toLowerCase().split(/\s+/).filter(Boolean));
@@ -36,13 +39,31 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
   const runId = useRef(0);
   const [source, setSource] = useState(code);
   const [visible, setVisible] = useState(false);
-  const [frameReady, setFrameReady] = useState(false);
+  // Counts "booted" messages. A frame that reloads boots again and must be
+  // sent the current code again; a flag would already be set and stay silent.
+  const [frameBoots, setFrameBoots] = useState(0);
   const [frameHeight, setFrameHeight] = useState(300);
   const [error, setError] = useState<RuntimeError | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [compiled, setCompiled] = useState<string | RuntimeError | null>(null);
+  const [runtime, setRuntime] = useState<string | null>(null);
 
-  useEffect(() => setSource(code), [code]);
+  // What the preview shows. The document's code applies at once; playground
+  // edits apply once typing pauses. Each keystroke used to compile, remount
+  // the example (losing its state) and flash an error for every half-typed
+  // line, and an HTML example reloaded its frame per keystroke.
+  const [settled, setSettled] = useState(code);
+
+  useEffect(() => {
+    setSource(code);
+    setSettled(code);
+  }, [code]);
+
+  useEffect(() => {
+    if (source === settled) return;
+    const timer = setTimeout(() => setSettled(source), EDIT_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [source, settled]);
 
   // Avoid compiling/mounting below-the-fold examples until they approach the
   // reader. The frame stays empty until then, so each document can hold many demos.
@@ -57,58 +78,71 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
   }, []);
 
   useEffect(() => {
-    const syncTheme = () =>
-      setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
+    const syncTheme = () => setTheme(pageTheme());
     syncTheme();
     const observer = new MutationObserver(syncTheme);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     return () => observer.disconnect();
   }, []);
 
-  // Babel is a sizeable browser compiler. Load and run it only for React
-  // examples that have reached the viewport (or entered playground mode).
+  // Compiled by Babel in a worker, once per distinct source, and only for
+  // examples near the viewport (services/interactive/compiler-client.ts).
+  // The preview keeps its last run until the new code arrives.
   useEffect(() => {
     if (kind !== "react" || !visible) return;
     let cancelled = false;
-    setCompiled(null);
-    void import("@babel/standalone").then(({ transform }) => {
-      try {
-        if (/^\s*import\s/m.test(source)) {
-          throw new Error("React and hooks are provided automatically; remove import statements.");
-        }
-        const output = transform(source, {
-          filename: "interactive-component.tsx",
-          presets: ["typescript", ["react", { runtime: "classic" }]],
-          plugins: ["transform-modules-commonjs"],
-        }).code;
-        if (!cancelled) setCompiled(output);
-      } catch (cause) {
-        if (!cancelled) setCompiled(toRuntimeError(cause));
-      }
-    });
+    import("@/services/interactive/compiler")
+      .then(({ compiler }) => compiler.compile(settled))
+      .then(
+        (result) =>
+          !cancelled &&
+          setCompiled(result.ok ? result.code : { message: result.message, stack: result.stack }),
+        (cause) => !cancelled && setCompiled(toRuntimeError(cause)),
+      );
     return () => {
       cancelled = true;
     };
-  }, [kind, source, visible]);
+  }, [kind, settled, visible]);
+
+  // A compile error shows at once; it doesn't wait for the frame.
+  useEffect(() => {
+    if (compiled !== null && typeof compiled !== "string") setError(compiled);
+  }, [compiled]);
+
+  // React and the preview runtime, inlined into the frame (see frame-document.ts).
+  useEffect(() => {
+    if (kind !== "react" || !visible) return;
+    let cancelled = false;
+    import("virtual:interactive-frame-runtime").then(
+      (module) => !cancelled && setRuntime(module.default),
+      (cause) => !cancelled && setError(toRuntimeError(cause)),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [kind, visible]);
+  // Built once per runtime: the theme travels with each run, so switching it
+  // doesn't reload the frame.
+  const reactDocument = useMemo(
+    () => (runtime ? reactFrameDocument(runtime, pageTheme()) : undefined),
+    [runtime],
+  );
 
   const sendToFrame = useCallback(() => {
     const frame = iframeRef.current?.contentWindow;
-    if (!frame || !visible || !frameReady) return;
-    if (compiled === null) return;
-    if (typeof compiled !== "string") {
-      setError(compiled);
-      return;
-    }
+    if (!frame || !visible || frameBoots === 0) return;
+    if (typeof compiled !== "string") return;
     setError(null);
-    const id = `${++runId.current}`;
-    if (kind === "react") {
-      frame.postMessage({ type: "docucraft:interactive-run", id, code: compiled, theme }, "*");
-    }
-  }, [compiled, frameReady, kind, theme, visible]);
+    const message: RunMessage = {
+      type: RUN_MESSAGE,
+      id: `${++runId.current}`,
+      code: compiled,
+      theme,
+    };
+    frame.postMessage(message, "*");
+  }, [compiled, frameBoots, theme, visible]);
 
-  useEffect(() => {
-    if (kind === "react") sendToFrame();
-  }, [sendToFrame]);
+  useEffect(() => sendToFrame(), [sendToFrame]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -120,7 +154,7 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
         message?: string;
         stack?: string;
       };
-      if (data.event === "booted") setFrameReady(true);
+      if (data.event === "booted") setFrameBoots((boots) => boots + 1);
       if (data.event === "height" && typeof data.height === "number") {
         setFrameHeight(Math.min(MAX_FRAME_HEIGHT, Math.max(MIN_FRAME_HEIGHT, data.height + 2)));
       }
@@ -153,11 +187,7 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
         title={`Interactive ${kind} preview`}
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
-        src={kind === "react" ? "/interactive-runtime" : undefined}
-        srcDoc={kind === "html" ? htmlDocument(source, theme) : undefined}
-        onLoad={() => {
-          if (kind === "html") setFrameReady(true);
-        }}
+        srcDoc={kind === "html" ? htmlFrameDocument(settled, theme) : reactDocument}
         style={{ height: frameHeight }}
       />
       {error && <ErrorPanel error={error} onDismiss={() => setError(null)} />}
@@ -220,30 +250,6 @@ function toRuntimeError(value: unknown): RuntimeError {
   return { message: error.message, stack: error.stack };
 }
 
-function htmlDocument(source: string, theme: "light" | "dark") {
-  const colors =
-    theme === "dark"
-      ? "color-scheme:dark;background:#151b2b;color:#edf2ff"
-      : "color-scheme:light;background:#fff;color:#172033";
-  return `<!doctype html><html><head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; font-src data:; media-src data: blob:" />
-    <style>html,body{min-height:100%;margin:0}body{padding:18px;font:15px/1.5 ui-sans-serif,system-ui,sans-serif;${colors}}*{box-sizing:border-box}</style>
-    <script>
-      (() => {
-        const deny=()=>{throw new Error('This API is disabled inside interactive documentation blocks.')};
-        const UnsafeFunction=Function;
-        window.open=deny; window.fetch=deny; window.eval=deny; window.Function=deny;
-        ['localStorage','sessionStorage','indexedDB','caches','Notification','Clipboard','showOpenFilePicker','showSaveFilePicker'].forEach((name)=>{try{Object.defineProperty(window,name,{configurable:true,get:deny,set:deny})}catch{}});
-        try{Object.defineProperty(document,'cookie',{configurable:true,get:deny,set:deny})}catch{}
-        if(navigator.mediaDevices) navigator.mediaDevices.getUserMedia=deny;
-        if(navigator.geolocation) navigator.geolocation.getCurrentPosition=deny;
-        new ResizeObserver(()=>parent.postMessage({type:'${FRAME_MESSAGE}',event:'height',height:document.documentElement.scrollHeight},'*')).observe(document.documentElement);
-        addEventListener('error',(event)=>parent.postMessage({type:'${FRAME_MESSAGE}',event:'error',message:event.message,stack:event.error&&event.error.stack},'*'));
-        parent.postMessage({type:'${FRAME_MESSAGE}',event:'booted'},'*');
-        void UnsafeFunction;
-      })();
-    </script>
-  </head><body>${source}</body></html>`;
+function pageTheme(): "light" | "dark" {
+  return document.documentElement.classList.contains("dark") ? "dark" : "light";
 }

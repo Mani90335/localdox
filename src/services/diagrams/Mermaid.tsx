@@ -3,14 +3,20 @@ import { Download, Expand, LoaderCircle, Minimize2, Star } from "lucide-react";
 import { toast } from "sonner";
 import { useSaveAction } from "@/components/docs/editor/save-action";
 import { largeDiagramMermaidConfig } from "./mermaid-config";
-import { shouldUseDiagramPerformanceMode } from "./mermaid-performance";
-import { diagramKind, shouldUseGpuEngine } from "./engine/gate";
+import { withMermaid } from "./mermaid-runtime";
+import {
+  allowHeavyRender,
+  decideDiagramRender,
+  heldBack,
+  rememberOversized,
+} from "./render-decision";
 import { ModeTabs, type MermaidMode } from "./mermaid-mode-tabs";
 import { baseName, download, widthCap } from "./mermaid-diagram-helpers";
 import { useCameraPreference, useStepPreferences } from "./mermaid-reader-preferences";
 import { StageSpinner, MermaidError } from "./StageStatus";
 import { AnimatorStage } from "./AnimatorStage";
 import { StaticStage } from "./StaticStage";
+import { HeldStage } from "./HeldStage";
 import { PerformanceDiagramImage } from "./PerformanceDiagramImage";
 import { Tray, TrayButton } from "./Tray";
 import { ZoomControls } from "./ZoomControls";
@@ -72,27 +78,40 @@ export function Mermaid({
   // Trimming a multi-megabyte source on every state update is measurable. The
   // prop changes only when the document changes, so retain the normalized view.
   const source = useMemo(() => code.trim(), [code]);
-  const sourceTooLarge = useMemo(() => shouldUseDiagramPerformanceMode(source), [source]);
   /**
-   * Set when the rendered SVG turned out to be too large even though the
-   * source scan cleared it. Held separately from the source verdict so the two
-   * stages of the gate stay legible, and combined below.
+   * The source whose Mermaid render measured too large for live SVG, as
+   * reported by whichever stage rendered it. Keyed by source, so a verdict for
+   * the previous version of an edited diagram never applies to the next.
    */
-  const [renderTooLarge, setRenderTooLarge] = useState(false);
-  const handleOversized = useCallback(() => setRenderTooLarge(true), []);
-  // A new diagram deserves a fresh verdict; the old one's may not apply.
-  useEffect(() => setRenderTooLarge(false), [source]);
+  const [oversizedSource, setOversizedSource] = useState<string | null>(null);
+  const handleOversized = useCallback((rendered: string) => {
+    rememberOversized(rendered);
+    setOversizedSource(rendered);
+  }, []);
   /**
-   * A large flowchart goes to the GPU engine (Rust/WASM layout, WebGL drawing)
-   * instead of being flattened to an image. It stays live in Raw and Stepped;
-   * only Flow, the packet animator, remains off at this size.
+   * The reader pressed "Draw anyway" on this block. It carries over to later
+   * versions of the source, so editing a large mindmap doesn't ask again at
+   * every change.
    */
-  const gpuKind = useMemo(() => diagramKind(source), [source]);
-  // Also when Mermaid's own render turned out too big for live SVG: a large
-  // ER or class diagram goes to the engine instead of to a still image.
-  const gpu =
-    useMemo(() => shouldUseGpuEngine(source), [source]) || (renderTooLarge && gpuKind !== null);
-  const performanceMode = !gpu && (sourceTooLarge || renderTooLarge);
+  const [drawHeld, setDrawHeld] = useState(false);
+  /**
+   * One renderer for every mode; see render-decision.ts.
+   *
+   * A large flowchart, ER, class or state diagram goes to the GPU engine
+   * (Rust/WASM layout, WebGL drawing) instead of being flattened to an image.
+   * It stays live in Raw and Stepped; only Flow, the packet animator, remains
+   * off at this size. Other kinds become a still image in Raw, and one that
+   * would take Mermaid seconds to lay out is held as source until the reader
+   * asks for it (preflight.ts).
+   */
+  const decision = useMemo(() => {
+    // Registering the choice is idempotent, and the render cache reads it too.
+    if (drawHeld && heldBack(source)) allowHeavyRender(source);
+    return decideDiagramRender(source, oversizedSource === source);
+  }, [source, oversizedSource, drawHeld]);
+  const held = decision.renderer === "held" ? decision.preflight : undefined;
+  const gpu = decision.renderer === "gpu";
+  const performanceMode = decision.renderer === "image";
   const [performanceImageUrl, setPerformanceImageUrl] = useState<string | null>(null);
   const handlePerformanceImage = useCallback((url: string | null) => {
     setPerformanceImageUrl(url);
@@ -178,12 +197,19 @@ export function Mermaid({
     setExporting(true);
     try {
       const exporter = await import("mermaid-animator/export");
-      const blob = await exporter.exportVideo(source, {
-        theme: dark ? "dark" : "light",
-        width: 1200,
-        height: 800,
-        mermaid: largeDiagramMermaidConfig(),
-      });
+      // The exporter initializes the shared Mermaid too, so it waits its turn
+      // (mermaid-runtime.ts). It holds the queue while it records, a few
+      // seconds, because there is no way to learn when its render is done.
+      const blob = await withMermaid(
+        () =>
+          exporter.exportVideo(source, {
+            theme: dark ? "dark" : "light",
+            width: 1200,
+            height: 800,
+            mermaid: largeDiagramMermaidConfig(),
+          }),
+        { label: "export" },
+      );
       download(blob, `${baseName(name)}.webm`);
       toast.success("Downloaded animated Mermaid as WebM");
     } catch (error) {
@@ -226,24 +252,32 @@ export function Mermaid({
     </TrayButton>
   ) : null;
 
-  const unavailable: Partial<Record<MermaidMode, string>> | undefined = performanceMode
+  const unavailable: Partial<Record<MermaidMode, string>> | undefined = held
     ? {
-        stepped: "Disabled for very large diagrams to keep rendering responsive",
-        flow: "Disabled for very large diagrams to protect device performance",
+        stepped: "Draw the diagram first to step through it",
+        flow: "Draw the diagram first to animate it",
       }
-    : gpu
-      ? { flow: "Disabled for very large diagrams to protect device performance" }
-      : steppedUnavailable
-        ? { stepped: "This diagram has no sequence to step through" }
-        : undefined;
+    : performanceMode
+      ? {
+          stepped: "Disabled for very large diagrams to keep rendering responsive",
+          flow: "Disabled for very large diagrams to protect device performance",
+        }
+      : gpu
+        ? { flow: "Disabled for very large diagrams to protect device performance" }
+        : steppedUnavailable
+          ? { stepped: "This diagram has no sequence to step through" }
+          : undefined;
 
-  const visibleMode = performanceMode || (gpu && mode === "flow") ? "raw" : mode;
+  const visibleMode = held || performanceMode || (gpu && mode === "flow") ? "raw" : mode;
   const modeControl = <ModeTabs mode={visibleMode} onChange={setMode} unavailable={unavailable} />;
 
   // An unsupported diagram still has to show something: render it raw while
   // leaving the reader's chosen tab alone.
   const effectiveMode: MermaidMode =
-    performanceMode || (mode === "stepped" && steppedUnavailable) || (gpu && mode === "flow")
+    held ||
+    performanceMode ||
+    (mode === "stepped" && steppedUnavailable) ||
+    (gpu && mode === "flow")
       ? "raw"
       : mode;
 
@@ -291,11 +325,22 @@ export function Mermaid({
     // Nothing is passed down any more: the surrounding controls live in the
     // header, and each stage renders only its own playback.
     const controls = undefined;
+    if (held) {
+      return (
+        <HeldStage
+          source={source}
+          preflight={held}
+          fill={stageFill}
+          onDraw={() => setDrawHeld(true)}
+        />
+      );
+    }
     if (effectiveMode === "stepped") {
       return (
         <Suspense fallback={<StageSpinner label="Loading explainer…" />}>
           <MermaidExplainer
             code={source}
+            engine={gpu ? "gpu" : "svg"}
             dark={dark}
             colored={colored}
             camera={camera}
@@ -305,6 +350,7 @@ export function Mermaid({
             controls={controls}
             onError={setRenderError}
             onRatio={reportRatio}
+            onOversized={handleOversized}
             onUnsupported={handleUnsupported}
           />
         </Suspense>

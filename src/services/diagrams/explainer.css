@@ -27,18 +27,6 @@
 }
 
 /*
- * A tall diagram is shown at its natural size and scrolled by the page, so the
- * SVG must NOT be stretched to the stage. Filling a full-column box whose height
- * came from a 20:1 ratio is what blew every node up to 349px; here the diagram
- * keeps the size Mermaid gave it and simply sits in the middle of the column.
- */
-.explainer-stage[data-tall] svg {
-  width: auto;
-  height: 100%;
-  margin-inline: auto;
-}
-
-/*
  * The pre-roll state. Applied only once the player has taken control, so a
  * diagram that fails to plan is never left invisible: without the attribute,
  * every element keeps Mermaid's own visibility.

@@ -3,16 +3,53 @@ import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { dataUrlToArrayBuffer } from "@/lib/markdown/document-utils";
 import type { PdfBookProps } from "./PdfReaderLazy";
 import { configurePdfWorker, PDFJS_CMAP_URL, PDFJS_STANDARD_FONT_URL } from "./pdf-worker";
+import { BoundedPromiseCache } from "@/lib/bounded-promise-cache";
 import { PdfPageArea } from "./PdfPageArea";
 import { PdfSidebar } from "./PdfSidebar";
 import { PdfSearchOverlay } from "./PdfSearchOverlay";
 import { usePdfSearch } from "./use-pdf-search";
-import type { PdfOutlineNode, PdfSearchMatch } from "./types";
+import { buildOutline, PdfOutlineResolver } from "./pdf-outline";
+import type { PdfSearchMatch } from "./types";
 import "./pdf-viewer.css";
 
 type PdfjsModule = typeof import("pdfjs-dist");
 type PdfTextContent = Awaited<ReturnType<PDFPageProxy["getTextContent"]>>;
-type RawOutline = NonNullable<Awaited<ReturnType<PDFDocumentProxy["getOutline"]>>>;
+
+/**
+ * Page proxies kept warm. pdf.js keeps every proxy itself; what grows is each
+ * rendered page's operator list and decoded resources, which `cleanup()`
+ * frees (it declines while a render is still running).
+ */
+const PAGE_CACHE_ENTRIES = 12;
+/**
+ * Text content is only cached here (pdf.js doesn't), for the text layer and
+ * repeated searches. Bounded by text items, not pages: one page can hold a
+ * few items or tens of thousands. A search over a longer document re-extracts
+ * the pages that didn't fit.
+ */
+const TEXT_CACHE_ENTRIES = 2000;
+const TEXT_CACHE_MAX_ITEMS = 200_000;
+
+function createPageCache() {
+  return new BoundedPromiseCache<number, PDFPageProxy>({
+    maxEntries: PAGE_CACHE_ENTRIES,
+    onEvict: (page) => {
+      try {
+        page.cleanup();
+      } catch {
+        // Already destroyed with its document.
+      }
+    },
+  });
+}
+
+function createTextCache() {
+  return new BoundedPromiseCache<number, PdfTextContent>({
+    maxEntries: TEXT_CACHE_ENTRIES,
+    maxWeight: TEXT_CACHE_MAX_ITEMS,
+    weigh: (content) => content.items.length,
+  });
+}
 
 /** pdf.js itself, loaded once in the browser and configured to point its worker/cmaps/fonts at their published URLs. */
 function usePdfjsModule() {
@@ -37,42 +74,19 @@ function usePdfjsModule() {
   return pdfjs;
 }
 
-async function resolveOutline(doc: PDFDocumentProxy, items: RawOutline): Promise<PdfOutlineNode[]> {
-  return Promise.all(
-    items.map(async (item) => ({
-      title: item.title,
-      pageNumber: await resolveDestPage(doc, item.dest),
-      items: item.items?.length ? await resolveOutline(doc, item.items) : [],
-    })),
-  );
-}
-
-async function resolveDestPage(
-  doc: PDFDocumentProxy,
-  dest: RawOutline[number]["dest"],
-): Promise<number | null> {
-  if (!dest) return null;
-  try {
-    const explicit = typeof dest === "string" ? await doc.getDestination(dest) : dest;
-    const ref = explicit?.[0];
-    if (!ref) return null;
-    return (await doc.getPageIndex(ref)) + 1;
-  } catch {
-    // A destination that doesn't resolve (a malformed PDF, a ref to a page
-    // that isn't there) just becomes an inert outline entry, not an error.
-    return null;
-  }
-}
-
-/** Loads the document, resolves its outline, and caches per-page proxies + text content for the rest of the reader. */
+/**
+ * Loads the document and its outline (unresolved; see `pdf-outline.ts`),
+ * and keeps bounded caches of page proxies + text content for the rest of
+ * the reader.
+ */
 function usePdfDocument(
   file: PdfBookProps["file"],
   pdfjs: PdfjsModule | null,
   reader: PdfBookProps["reader"],
 ) {
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
-  const pageCache = useRef(new Map<number, Promise<PDFPageProxy>>());
-  const textCache = useRef(new Map<number, Promise<PdfTextContent>>());
+  const [pageCache] = useState(createPageCache);
+  const [textCache] = useState(createTextCache);
 
   const setNumPagesRef = useRef(reader.setNumPages);
   const setOutlineRef = useRef(reader.setOutline);
@@ -85,8 +99,8 @@ function usePdfDocument(
     if (!pdfjs) return;
     let alive = true;
     setPdfDocument(null);
-    pageCache.current.clear();
-    textCache.current.clear();
+    pageCache.clear();
+    textCache.clear();
     setLoadErrorRef.current(null);
 
     const arrayBuffer = dataUrlToArrayBuffer(file.data);
@@ -105,14 +119,12 @@ function usePdfDocument(
     });
 
     void (async () => {
+      let doc: PDFDocumentProxy;
       try {
-        const doc = await loadingTask.promise;
+        doc = await loadingTask.promise;
         if (!alive) return;
         setPdfDocument(doc);
         setNumPagesRef.current(doc.numPages);
-        const rawOutline = await doc.getOutline();
-        if (!alive) return;
-        setOutlineRef.current(rawOutline ? await resolveOutline(doc, rawOutline) : []);
       } catch (err) {
         if (!alive) return;
         if (err instanceof pdfjs.PasswordException) {
@@ -122,6 +134,14 @@ function usePdfDocument(
         } else {
           setLoadErrorRef.current("This PDF could not be read in the browser.");
         }
+        return;
+      }
+      try {
+        const rawOutline = await doc.getOutline();
+        if (alive) setOutlineRef.current(rawOutline ? buildOutline(rawOutline) : []);
+      } catch {
+        // A broken outline only costs the Contents tab; the pages still read.
+        if (alive) setOutlineRef.current([]);
       }
     })();
 
@@ -129,34 +149,31 @@ function usePdfDocument(
       alive = false;
       void loadingTask.destroy();
     };
-  }, [pdfjs, file.data]);
+  }, [pdfjs, file.data, pageCache, textCache]);
 
   const getPage = useCallback(
     (pageNumber: number): Promise<PDFPageProxy> => {
       if (!pdfDocument) return Promise.reject(new Error("No PDF document loaded"));
-      let cached = pageCache.current.get(pageNumber);
-      if (!cached) {
-        cached = pdfDocument.getPage(pageNumber);
-        pageCache.current.set(pageNumber, cached);
-      }
-      return cached;
+      return pageCache.get(pageNumber, (n) => pdfDocument.getPage(n));
     },
-    [pdfDocument],
+    [pdfDocument, pageCache],
   );
 
   const getTextContent = useCallback(
     (pageNumber: number): Promise<PdfTextContent> => {
-      let cached = textCache.current.get(pageNumber);
-      if (!cached) {
-        cached = getPage(pageNumber).then((page) => page.getTextContent());
-        textCache.current.set(pageNumber, cached);
-      }
-      return cached;
+      return textCache.get(pageNumber, (n) => getPage(n).then((page) => page.getTextContent()));
     },
-    [getPage],
+    [getPage, textCache],
   );
 
-  return { pdfDocument, getPage, getTextContent };
+  // One per document, so its cache never answers for another file.
+  const outlineResolver = useMemo(
+    () => (pdfDocument ? new PdfOutlineResolver(pdfDocument) : null),
+    [pdfDocument],
+  );
+  useEffect(() => () => outlineResolver?.dispose(), [outlineResolver]);
+
+  return { pdfDocument, getPage, getTextContent, outlineResolver };
 }
 
 function PdfMessage({ children }: { children: React.ReactNode }) {
@@ -169,7 +186,11 @@ function PdfMessage({ children }: { children: React.ReactNode }) {
 
 export function PdfReader({ file, reader }: PdfBookProps) {
   const pdfjs = usePdfjsModule();
-  const { pdfDocument, getPage, getTextContent } = usePdfDocument(file, pdfjs, reader);
+  const { pdfDocument, getPage, getTextContent, outlineResolver } = usePdfDocument(
+    file,
+    pdfjs,
+    reader,
+  );
   const search = usePdfSearch({
     active: reader.searchOpen,
     numPages: reader.numPages,
@@ -199,7 +220,9 @@ export function PdfReader({ file, reader }: PdfBookProps) {
 
   return (
     <div className="flex h-[calc(100dvh-7.5rem)] w-full overflow-hidden">
-      {reader.sidebarOpen && <PdfSidebar reader={reader} getPage={getPage} />}
+      {reader.sidebarOpen && outlineResolver && (
+        <PdfSidebar reader={reader} getPage={getPage} outlineResolver={outlineResolver} />
+      )}
       <div className="relative flex min-w-0 flex-1 flex-col">
         <PdfPageArea
           reader={reader}

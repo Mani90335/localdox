@@ -68,9 +68,13 @@ test("spreadsheet controls, sheet navigation, filtering and keyboard sorting", a
   const download = page.waitForEvent("download");
   await page.getByRole("menuitem", { name: /^Original file/ }).click();
   expect((await download).suggestedFilename()).toBe("Quarterly sales.xlsx");
+  // The sidebar's file menu is a popover of buttons (not an ARIA menu), and
+  // the viewer header has its own Export button, so scope to the panel.
   await page.getByRole("button", { name: "Options", exact: true }).first().click();
+  const fileMenu = page.locator("[data-sidebar-menu-panel]");
+  await expect(fileMenu.getByRole("button", { name: "Rename", exact: true })).toBeVisible();
   await expect(page.getByText("Convert to Markdown", { exact: true })).toHaveCount(0);
-  await page.getByRole("menuitem", { name: "Export", exact: true }).click();
+  await fileMenu.getByRole("button", { name: "Export", exact: true }).click();
   await expect(page.getByText("Convert to Markdown", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await page.setViewportSize({ width: 390, height: 844 });

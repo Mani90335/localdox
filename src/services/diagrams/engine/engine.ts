@@ -10,7 +10,9 @@
  * scene holds no colours, so the theme can change without a relayout.
  */
 import wasmUrl from "./diagram_layout.wasm?url";
+import { BoundedPromiseCache } from "@/lib/bounded-promise-cache";
 import { largeDiagramMermaidConfig } from "../mermaid-config";
+import { withMermaid } from "../mermaid-runtime";
 import { instantiateEngine, type DiagramWasm, type LayoutEngine } from "./layout";
 import type { FlowModel } from "./flowchart";
 import { fastModel } from "./fast-parse";
@@ -23,14 +25,22 @@ import {
   type DiagramLimits,
 } from "./limits";
 import type { WorkerReply, WorkerRequest } from "./layout-worker";
-import { buildScene, FONT_SIZE, type Scene } from "./scene";
+import { buildScene, FONT_SIZE, sceneBytes, type Scene } from "./scene";
 import type { DiagramTheme } from "./renderer";
 
 const FONT = `${FONT_SIZE}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
-const MAX_SCENES = 3;
+/**
+ * The scenes kept for reuse. The one used last always stays, even past the
+ * budget, so switching modes on the diagram being read never lays it out again.
+ */
+export const SCENE_CACHE_BYTES = 48 * 1024 * 1024;
 
 let engine: Promise<DiagramWasm> | null = null;
-const scenes = new Map<string, Promise<Scene>>();
+const scenes = new BoundedPromiseCache<string, Scene>({
+  maxEntries: 16,
+  maxWeight: SCENE_CACHE_BYTES,
+  weigh: sceneBytes,
+});
 
 export function loadEngine(): Promise<DiagramWasm> {
   engine ??= fetch(wasmUrl)
@@ -160,9 +170,7 @@ async function sceneOnMainThread(code: string, limits: DiagramLimits): Promise<S
  * device's size limits and time budget (limits.ts); otherwise inline.
  */
 export function loadScene(code: string): Promise<Scene> {
-  const hit = scenes.get(code);
-  if (hit) return hit;
-  const pending = (async () => {
+  return scenes.get(code, async () => {
     const limits = diagramLimits();
     checkSource(code, limits);
     if (!workerAvailable()) return sceneOnMainThread(code, limits);
@@ -174,15 +182,12 @@ export function loadScene(code: string): Promise<Scene> {
       if (error instanceof DiagramTooLargeError || waiting.size > 0 || worker) throw error;
       return sceneOnMainThread(code, limits);
     }
-  })();
-  pending.catch(() => scenes.delete(code));
-  scenes.set(code, pending);
-  while (scenes.size > MAX_SCENES) {
-    const oldest = scenes.keys().next();
-    if (oldest.done) break;
-    scenes.delete(oldest.value);
-  }
-  return pending;
+  });
+}
+
+/** What the scene cache holds, for tests and for debugging from the console. */
+export function sceneCacheStats() {
+  return { entries: scenes.size, bytes: scenes.weight };
 }
 
 /**
@@ -190,16 +195,14 @@ export function loadScene(code: string): Promise<Scene> {
  * small one in the same document. The accent is the app's, as in explainer.css.
  */
 export async function diagramTheme(dark: boolean): Promise<DiagramTheme> {
-  const { default: mermaid } = await import("mermaid");
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: dark ? "dark" : "default",
-    ...largeDiagramMermaidConfig(true),
-  });
-  const vars = (mermaid.mermaidAPI.getConfig().themeVariables ?? {}) as Record<
-    string,
-    string | undefined
-  >;
+  const vars = await withMermaid(
+    (mermaid) =>
+      (mermaid.mermaidAPI.getConfig().themeVariables ?? {}) as Record<string, string | undefined>,
+    {
+      label: "theme",
+      config: { theme: dark ? "dark" : "default", ...largeDiagramMermaidConfig(true) },
+    },
+  );
   const root = typeof document !== "undefined" ? getComputedStyle(document.documentElement) : null;
   const accent = root?.getPropertyValue("--primary").trim();
   const accentText = root?.getPropertyValue("--primary-foreground").trim();

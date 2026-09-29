@@ -1,26 +1,19 @@
 import { toast } from "sonner";
-import { MarkdownMedia } from "./MarkdownMedia";
-import {
-  remarkMedia,
-  mediaKind,
-  mediaUrlTransform,
-  parseMediaSpec,
-} from "@/lib/markdown/markdown-media";
-import { isLocalReference } from "@/lib/markdown/media-references";
+import { remarkMedia, mediaUrlTransform } from "@/lib/markdown/markdown-media";
 import type { FolderRecord } from "@/lib/workspace/persistence";
 import {
   remarkConvertedHtml,
   convertedAnchorMap,
   convertedFootnotes,
-  ConvertedRemoteImage,
 } from "@/services/doc-conversion";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import ReactMarkdown from "react-markdown";
-
-// Keep parsing outside updates to menus, selection labels and reader chrome.
-// Context consumers (saved blocks and heading controls) still update normally.
-const MarkdownContent = memo(ReactMarkdown);
+import { ProgressiveMarkdown } from "./markdown-viewer/ProgressiveMarkdown";
+import { markdownComponents } from "./markdown-viewer/markdown-components";
+import { useSectionFolds } from "./markdown-viewer/section-folds";
+import { MathProvider } from "@/services/math/MathContext";
+import { DEFAULT_MATH_PREFERENCES } from "@/services/math/types";
+import { slugLabel } from "@/services/math/equation-registry";
 import { useMarkdownPlugins } from "@/lib/markdown/markdown-plugins";
 import {
   Copy,
@@ -48,10 +41,9 @@ import {
 } from "lucide-react";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { ReadingMode } from "@/lib/workspace/persistence";
-import { slugify } from "@/lib/markdown/markdown-utils";
 import { ReadingProgress } from "../navigation/ReadingProgress";
-import { MarkdownEditor, type MarkdownEditorHandle } from "../editor/MarkdownEditor";
-import { detectEmbed, EmbedFrame, isVideoUrl, VideoPlayer } from "@/lib/markdown/media-embeds";
+import { MarkdownEditor, type MarkdownEditorHandle } from "../editor/MarkdownEditorLazy";
+import { isVideoUrl, VideoPlayer } from "@/lib/markdown/media-embeds";
 import { Lightbox } from "./Lightbox";
 import { HL_COLORS, hlGroup, type Highlight } from "@/lib/markdown/dom-highlighter";
 import {
@@ -65,7 +57,12 @@ import {
   sameQuote,
   textBetween,
   queryRanges,
+  nthQueryRange,
+  firstQueryRangeInLine,
+  rangeOffsets,
 } from "@/lib/markdown/text-offsets";
+import { occurrenceOrdinal, parseRows } from "@/lib/search/rows";
+import type { PendingSearch } from "@/lib/search/schema";
 import { createHighlightPainter } from "@/lib/markdown/highlight-registry";
 import {
   findSaved,
@@ -82,23 +79,16 @@ import {
   wordCount,
 } from "@/lib/markdown/markdown-utils";
 import { InlineArtifact } from "./InlineArtifact";
-import {
-  artifactReference,
-  isArtifactUrl,
-  prepareWorkspaceEmbeds,
-} from "@/lib/workspace/workspace-artifacts";
+import { artifactReference, prepareWorkspaceEmbeds } from "@/lib/workspace/workspace-artifacts";
 import {
   CollapseContext,
+  MarkdownRenderContext,
   SavedContext,
   type CollapseContextValue,
+  type MarkdownRenderContextValue,
   type SavedContextValue,
 } from "./markdown-viewer/contexts";
-import { elementOf, flashPassage } from "./markdown-viewer/flash-passage";
-import { HeadingLink } from "./markdown-viewer/HeadingLink";
-import { SavableBlock } from "./markdown-viewer/SavableBlock";
-import { CodeBlock } from "./markdown-viewer/CodeBlock";
-import { Callout } from "./markdown-viewer/Callout";
-import { extractText } from "./markdown-viewer/extract-text";
+import { elementOf, flashPassage, scrollToPassage } from "./markdown-viewer/flash-passage";
 import { remarkInteractiveBlockMeta } from "./markdown-viewer/remark-interactive-block-meta";
 import {
   Select,
@@ -174,7 +164,7 @@ interface Props {
    * own) not even that far, leaving the reader at the top of the page with the
    * match somewhere below the fold.
    */
-  pendingSearch?: { text: string; query: string } | null;
+  pendingSearch?: PendingSearch | null;
   onSearchShown?: () => void;
   onHome?: () => void;
   workspaceId?: string | null;
@@ -204,6 +194,7 @@ interface Props {
 }
 
 const stripExt = (name: string) => name.replace(/\.(md|markdown|mdx|txt)$/i, "");
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
  * Viewer-specific remark passes, held at module scope so the array identity is
@@ -244,6 +235,7 @@ function MarkdownViewerImpl({
   workspaceFiles,
   workspaceName,
   workspaceFolders,
+  mathPreferences = DEFAULT_MATH_PREFERENCES,
   onImportAttachments,
   onOpenArtifact,
   onOpenPalette,
@@ -270,6 +262,10 @@ function MarkdownViewerImpl({
     (fileId: string, content: string) => onContentChange(fileId, content),
     [onContentChange],
   );
+  // A heading to bring into view once the document on screen has finished
+  // rendering. A long document mounts in steps (see ProgressiveMarkdown), so
+  // the heading may not exist yet when it is asked for.
+  const [pendingHeading, setPendingHeading] = useState<string | null>(null);
   const leaveEditMode = useCallback(
     (cursorIndex?: number, content?: string) => {
       setEditMode(false);
@@ -290,14 +286,8 @@ function MarkdownViewerImpl({
             }
             currentLength += chunk.content.length + 1;
           }
-          if (singleMode) {
-            setTimeout(() => {
-              const el = document.getElementById(targetChunk.id);
-              if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-            }, 100);
-          } else {
-            onNav(file.id, targetChunk.id);
-          }
+          if (singleMode) setPendingHeading(targetChunk.id);
+          else onNav(file.id, targetChunk.id);
         }
       }
     },
@@ -322,14 +312,8 @@ function MarkdownViewerImpl({
             }
             currentLength += chunk.content.length + 1;
           }
-          if (singleMode) {
-            setTimeout(() => {
-              const el = document.getElementById(targetChunk.id);
-              if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-            }, 100);
-          } else {
-            onNav(file.id, targetChunk.id);
-          }
+          if (singleMode) setPendingHeading(targetChunk.id);
+          else onNav(file.id, targetChunk.id);
         }
       }
     },
@@ -468,6 +452,17 @@ function MarkdownViewerImpl({
   // existing highlight. A single popover serves both. Detached from the live
   // Selection so typing a label doesn't dismiss it.
   const contentRef = useRef<HTMLDivElement>(null);
+  // The element `contentRef` holds: one per document and page (or whole-document
+  // render), so nothing rendered for one document is reconciled into another's.
+  const contentKey = `${file.id}:${singleMode ? "full" : activeChunk.id}`;
+  // The source whose render is complete in `contentRef`. A long document
+  // mounts in steps; everything that reads the rendered document as a whole —
+  // painting highlights, finding a saved passage or search hit, scrolling to a
+  // heading — waits until the whole of it is there.
+  const [renderedSource, setRenderedSource] = useState<string | null>(null);
+  const settled = !editMode && renderedSource === markdownSource;
+  const settledRef = useRef(settled);
+  settledRef.current = settled;
   type HlMenu =
     | {
         mode: "create";
@@ -537,6 +532,7 @@ function MarkdownViewerImpl({
     }),
     [collapsedSections],
   );
+  useSectionFolds(contentRef, collapsedSections, `${contentKey}:${editMode}`);
 
   const savedCtx = useMemo<SavedContextValue>(
     () => ({
@@ -555,7 +551,7 @@ function MarkdownViewerImpl({
   // scroll to the passage and flash it. Anchored by quote first (the document
   // may have been edited since it was saved), by stored offsets only as a hint.
   useEffect(() => {
-    if (!pendingSaved || editMode) return;
+    if (!pendingSaved || !settled) return;
     const container = contentRef.current;
     if (!container) return;
 
@@ -595,12 +591,14 @@ function MarkdownViewerImpl({
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [pendingSaved, editMode, renderContent, fullRender, onSavedShown]);
+  }, [pendingSaved, settled, renderContent, fullRender, onSavedShown]);
 
   // "Inspect" — the reader's answer to DevTools' inspect element. Take the
   // rendered text under the pointer, find where it lives in the markdown
   // source, and drop the editor's caret on it, selected and scrolled into view.
-  const editorRef = useRef<MarkdownEditorHandle>(null);
+  // State rather than a ref: the editor downloads on first use, so the jump
+  // below has to wait for it to exist rather than find it missing and drop.
+  const [editor, setEditor] = useState<MarkdownEditorHandle | null>(null);
   // Whether the open editor holds changes that leaving would throw away.
   const [editorDirty, setEditorDirty] = useState(false);
 
@@ -667,11 +665,14 @@ function MarkdownViewerImpl({
 
   // Applied once the editor has mounted with the document's source.
   useEffect(() => {
-    if (!pendingSelect || !editMode) return;
+    if (!pendingSelect) return;
+    // Left the editor before it arrived: the jump belongs to that visit only.
+    if (!editMode) return setPendingSelect(null);
+    if (!editor) return;
     const { start, end } = pendingSelect;
     setPendingSelect(null);
-    editorRef.current?.select(start, end);
-  }, [pendingSelect, editMode]);
+    editor.select(start, end);
+  }, [pendingSelect, editMode, editor]);
 
   // The "couldn't find it" notice is per-jump, not sticky.
   useEffect(() => {
@@ -711,7 +712,10 @@ function MarkdownViewerImpl({
     if (!container || !painter.supported || !highlights.length) return;
     // Mid-edit the rendered document is a moving target (the draft autosaves
     // every 400ms). Re-anchoring waits for the reader to leave the editor.
-    if (editMode) return;
+    // It also waits for a long document to finish mounting: anchoring against
+    // part of it could settle on an earlier repeat of the quote, and write that
+    // wrong position back as a repair.
+    if (!settled) return;
 
     // Deferred to the next frame so adding a highlight doesn't repaint every
     // other one synchronously inside the same commit the reader is watching.
@@ -824,7 +828,7 @@ function MarkdownViewerImpl({
     activeChunk.id,
     renderContent,
     fullRender,
-    editMode,
+    settled,
     singleMode,
     knownChunkIds,
     file.content,
@@ -833,7 +837,7 @@ function MarkdownViewerImpl({
 
   useEffect(() => {
     const container = contentRef.current;
-    if (!container || editMode || !highlightQuery?.trim()) return;
+    if (!container || !settled || !highlightQuery?.trim()) return;
     const painter = createHighlightPainter();
     if (!painter.supported) return;
     const paint = () => painter.paint({ "dc-query": queryRanges(container, highlightQuery ?? "") });
@@ -848,7 +852,7 @@ function MarkdownViewerImpl({
       cancelAnimationFrame(frame);
       painter.clear();
     };
-  }, [highlightQuery, activeChunk.id, singleMode, editMode, file.id]);
+  }, [highlightQuery, activeChunk.id, singleMode, settled, file.id]);
 
   useEffect(() => {
     const container = contentRef.current;
@@ -975,25 +979,73 @@ function MarkdownViewerImpl({
 
   // Paginated: when a nested ##/### heading inside the page is selected, scroll
   // to its anchor; otherwise (page's own # or a page change) reset to top.
-  // (Skipped in single mode, which scrolls within the whole-doc render below.)
+  // Single-page: switching document scrolls to top; selecting a section from
+  // the sidebar scrolls to that heading's anchor within the full document.
+  //
+  // A heading that isn't in the DOM yet — a long document still mounting — is
+  // scrolled to once the render is complete, by the effect below.
   useEffect(() => {
-    if (singleMode) return;
-    const el =
-      activeSubtopicId && activeSubtopicId !== activeChunk.id
-        ? document.getElementById(activeSubtopicId)
+    const target = singleMode
+      ? activeSubtopicId
+      : activeSubtopicId && activeSubtopicId !== activeChunk.id
+        ? activeSubtopicId
         : null;
+    if (!target) {
+      setPendingHeading(null);
+      scrollToTop();
+      return;
+    }
+    const el = settledRef.current ? document.getElementById(target) : null;
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-    else scrollToTop();
+    else setPendingHeading(target);
+    // `settled` is read through a ref: finishing a render must not repeat the
+    // scroll for a heading the reader has already been taken to.
   }, [activeChunk.id, activeSubtopicId, file.id, singleMode]);
 
-  // Single-page: switching document scrolls to top; selecting a section from the
-  // sidebar scrolls to that heading's anchor within the full document.
   useEffect(() => {
-    if (!singleMode) return;
-    const el = activeSubtopicId ? document.getElementById(activeSubtopicId) : null;
+    if (!pendingHeading || !settled) return;
+    setPendingHeading(null);
+    const el = document.getElementById(pendingHeading);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
     else scrollToTop();
-  }, [singleMode, activeSubtopicId, file.id]);
+  }, [pendingHeading, settled]);
+
+  // A clicked `\eqref`. The equation may be on another page (paginated mode)
+  // or not mounted yet (a long document), so the jump waits for the render to
+  // settle. Kept apart from `pendingHeading`, which a page change clears.
+  const [pendingEquation, setPendingEquation] = useState<string | null>(null);
+  const navigateToEquation = useCallback(
+    (label: string) => {
+      const domId = `eq-${slugLabel(label)}`;
+      const labelled = new RegExp(`\\\\label\\s*\\{\\s*${escapeRegExp(label)}\\s*\\}`);
+      const owner = singleMode ? null : allChunks.find((chunk) => labelled.test(chunk.content));
+      if (owner && owner.id !== activeChunk.id) onNav(file.id, owner.id);
+      setPendingEquation(domId);
+    },
+    [singleMode, allChunks, activeChunk.id, onNav, file.id],
+  );
+  useEffect(() => {
+    if (!pendingEquation || !settled) return;
+    setPendingEquation(null);
+    // Instant, like a fragment link. A smooth scroll picks its destination
+    // once, and the display equations it passes (content-visibility) take
+    // their real size as they render, so it stopped short in long documents.
+    document.getElementById(pendingEquation)?.scrollIntoView({ block: "center" });
+  }, [pendingEquation, settled]);
+
+  /** Search rows for the source lines this view renders: the whole file in
+   *  single-page mode, else the active page without the heading that
+   *  `renderContent` strips from its top. */
+  const searchRowsOnScreen = useCallback(() => {
+    const rows = parseRows(file.content);
+    if (singleMode) return rows;
+    const chunkStart = file.content.indexOf(activeChunk.content);
+    if (chunkStart < 0) return [];
+    const first = file.content.slice(0, chunkStart).split("\n").length - 1;
+    const end = first + activeChunk.content.split("\n").length;
+    const page = rows.filter((row) => row.lineIndex >= first && row.lineIndex < end);
+    return /^\s*#{1,6}\s+\S/.test(activeChunk.content) && page[0]?.isHeading ? page.slice(1) : page;
+  }, [file.content, singleMode, activeChunk.content]);
 
   /**
    * Land on the search hit itself.
@@ -1003,30 +1055,51 @@ function MarkdownViewerImpl({
    * the heading (or given up and gone to the top) by the time this runs, and a
    * second smooth scroll simply retargets the first.
    *
-   * Anchored by the matched line, falling back to the query itself — a line may
-   * render differently from its source (markdown syntax is stripped, a match
-   * inside a link or emphasis is split across elements), and the query is the
-   * shortest thing guaranteed to be somewhere in the text.
+   * The hit is one particular occurrence of the query, and the word itself
+   * usually recurs all over the page, so the hit is located by counting: it
+   * is the Nth occurrence among the source lines on screen, and — when the page
+   * holds exactly as many occurrences as those lines do — the Nth on the page.
+   * When the counts disagree (a diagram or embed renders differently from its
+   * source), it falls back to the hit's line, then to the query anywhere.
    */
   useEffect(() => {
-    if (!pendingSearch || editMode) return;
+    if (!pendingSearch || !settled) return;
     if (!contentRef.current) return;
     const frame = requestAnimationFrame(() => {
       const container = contentRef.current;
       if (!container) return;
-      const range =
-        firstTextRange(container, pendingSearch.text) ??
-        (pendingSearch.query ? firstTextRange(container, pendingSearch.query) : null);
+      const { query, text, occurrence, lineIndex } = pendingSearch;
+      let range: Range | null = null;
+      if (query && lineIndex >= 0) {
+        const at = occurrenceOrdinal(searchRowsOnScreen(), query, lineIndex, occurrence);
+        if (at) {
+          const nth = nthQueryRange(container, query, at.ordinal);
+          if (nth.count === at.total) range = nth.range;
+        }
+      }
+      range ??= text
+        ? firstQueryRangeInLine(container, text, query, occurrence)
+        : query
+          ? firstTextRange(container, query)
+          : null;
       const target = elementOf(range);
-      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const landed = range && rangeOffsets(container, range);
+      const landedText = range?.toString();
+      // The passage in the container's current DOM, should a re-render have
+      // replaced the nodes `range` points into.
+      const reanchor = () =>
+        landed && textBetween(container, landed.start, landed.end) === landedText
+          ? buildRange(container, landed.start, landed.end)
+          : null;
+      if (range) scrollToPassage(range, () => (range.collapsed ? reanchor() : range));
       // The same one-shot flash a saved item gets, for the same reason: on a
       // dense page, arriving is not the same as seeing where you arrived.
-      flashPassage(range, target);
+      flashPassage(range, target, landed ? { container, reanchor } : undefined);
 
       onSearchShown?.();
     });
     return () => cancelAnimationFrame(frame);
-  }, [pendingSearch, editMode, renderContent, fullRender, onSearchShown]);
+  }, [pendingSearch, settled, renderContent, fullRender, onSearchShown, searchRowsOnScreen]);
 
   // Reading progress now lives in <ReadingProgress>, which writes the
   // percentage straight to its own DOM node. It used to be state up here, and
@@ -1040,260 +1113,33 @@ function MarkdownViewerImpl({
     return { words: wordCount(src), readingMin: readingMinutes(src) };
   }, [singleMode, file.content, activeChunk.content]);
 
-  /**
-   * Whether the element currently being rendered sits under a collapsed
-   * heading.
-   *
-   * react-markdown hands each block to its own component with no notion of
-   * where it sits relative to the headings around it — the document arrives as
-   * a flat list of siblings. So the walk is tracked here: every heading records
-   * its own rank and id, and every block in between asks whether any heading
-   * still "open" above it is collapsed. A heading of equal or higher rank ends
-   * the previous section, which is what makes an H3 fold without swallowing the
-   * H2 that follows it.
-   *
-   * Reset per render pass, because that is exactly the order the blocks are
-   * rendered in.
-   */
-  const sectionWalk = useRef<{ rank: number; id: string }[]>([]);
-  sectionWalk.current = [];
-
-  const enterHeading = (rank: number, id: string) => {
-    const stack = sectionWalk.current;
-    while (stack.length && stack[stack.length - 1].rank >= rank) stack.pop();
-    stack.push({ rank, id });
-  };
-  /**
-   * True when any heading above this block is folded.
-   *
-   * `maxRank` excludes the caller's own level and everything below it, which is
-   * what keeps a folded heading on screen: a heading asks only about its
-   * *ancestors*, so it never hides itself and the chevron that unfolds it
-   * survives. Ordinary blocks pass no rank and are hidden by any folded heading
-   * above them.
-   */
-  const underCollapsed = (maxRank = Infinity) =>
-    sectionWalk.current.some((entry) => entry.rank < maxRank && collapsedSections.has(entry.id));
-
-  /** Wrap a block component so it disappears while its section is folded. */
-  const foldable = (render: (p: any) => React.ReactNode) => (p: any) =>
-    underCollapsed() ? null : render(p);
-
-  const heading = (rank: number, as: string) => (p: any) => {
-    const text = Array.isArray(p.children)
-      ? p.children.map((c: any) => (typeof c === "string" ? c : "")).join("")
-      : String(p.children ?? "");
-    const id = p.id || slugify(text);
-    // Asked before this heading joins the walk, and only about levels above it:
-    // a heading folded by the reader must keep rendering, or the control that
-    // unfolds it disappears along with its section.
-    const hidden = underCollapsed(rank);
-    enterHeading(rank, id);
-    if (hidden) return null;
-    return <HeadingLink as={as} {...p} />;
-  };
-
-  const components = useMemo(
+  // What the markdown renderers read about this document (see
+  // `markdown-components.tsx`). The renderers themselves never change, so a
+  // change here re-renders only the few elements that read it.
+  const renderCtx = useMemo<MarkdownRenderContextValue>(
     () => ({
-      h1: heading(1, "h1"),
-      h2: heading(2, "h2"),
-      h3: heading(3, "h3"),
-      h4: heading(4, "h4"),
-      h5: heading(5, "h5"),
-      h6: heading(6, "h6"),
-      p: foldable((p: any) => {
-        // Rich embed detection: a paragraph that is a single bare autolink.
-        // Match on props.href rather than element type — the custom `a`
-        // override makes the child's type the component, not the string "a".
-        const kids = Array.isArray(p.children) ? p.children : [p.children];
-        const solo = kids.filter((c: any) => !(typeof c === "string" && !c.trim()));
-        const only = solo.length === 1 ? solo[0] : null;
-        const href = only?.props?.href;
-        const src = only?.props?.src;
-        if (href) {
-          const inner = only.props?.children;
-          const text =
-            typeof inner === "string" ? inner : Array.isArray(inner) ? inner.join("") : "";
-          if (text === href || text === "") {
-            const embed = detectEmbed(href);
-            if (embed) return <EmbedFrame embed={embed} />;
-            if (mediaKind(href))
-              return (
-                <MarkdownMedia
-                  src={href}
-                  context={{
-                    workspaceId,
-                    workspaceRevision,
-                    workspaceFiles,
-                    workspaceFolders,
-                    workspaceName,
-                    sourceFile: file,
-                  }}
-                />
-              );
-          }
-        }
-        return <p {...p}>{p.children}</p>;
-      }),
-      blockquote: foldable((p: any) => (
-        <SavableBlock blockType="quote">
-          <Callout {...p} />
-        </SavableBlock>
-      )),
-      pre: foldable((p: any) => {
-        const codeEl = Array.isArray(p.children) ? p.children[0] : p.children;
-        const cls = codeEl?.props?.className ?? "";
-        const isMermaid = typeof cls === "string" && /language-mermaid/.test(cls);
-        return (
-          <SavableBlock
-            blockType="code"
-            className={isMermaid ? "docs-savable-mermaid" : "docs-savable-code"}
-            // A diagram puts the save action in its own control tray, so the
-            // star is not drawn floating beside it. Its rendered text is the
-            // stylesheet Mermaid injects rather than anything the reader sees,
-            // so the source is what identifies it.
-            renderOwnSaveAction={isMermaid}
-            identity={isMermaid ? extractText(codeEl?.props?.children).trim() : undefined}
-          >
-            <CodeBlock {...p} />
-          </SavableBlock>
-        );
-      }),
-      div: foldable((p: any) => <div {...p}>{p.children}</div>),
-      img: foldable((p: any) => {
-        if (file.derivedFrom) return <ConvertedRemoteImage src={p.src ?? ""} alt={p.alt} />;
-        if (
-          isArtifactUrl(p.src) ||
-          isLocalReference(p.src ?? "") ||
-          mediaKind(p.src ?? "") !== "image"
-        ) {
-          return (
-            <MarkdownMedia
-              src={p.src ?? ""}
-              alt={p.alt}
-              spec={parseMediaSpec(p["data-media"])}
-              context={{
-                workspaceId,
-                workspaceRevision,
-                workspaceFiles,
-                workspaceFolders,
-                workspaceName,
-                sourceFile: file,
-              }}
-            />
-          );
-        }
-        return (
-          <SavableBlock blockType="image" as="span" identity={p.src} className="inline-block">
-            <img
-              {...p}
-              loading="lazy"
-              onClick={() => setLightbox({ src: p.src, alt: p.alt })}
-              className="cursor-zoom-in"
-            />
-          </SavableBlock>
-        );
-      }),
-      a: (p: any) => {
-        const href = typeof p.href === "string" ? p.href : "";
-        if (isArtifactUrl(href) || isLocalReference(href))
-          return (
-            <MarkdownMedia
-              src={href}
-              linkOnly
-              context={{
-                workspaceId,
-                workspaceRevision,
-                workspaceFiles,
-                workspaceFolders,
-                workspaceName,
-                sourceFile: file,
-              }}
-            >
-              {p.children}
-            </MarkdownMedia>
-          );
-        // An in-page reference (`[see](#recommended-controls)`) used to be left
-        // to the browser, which looks for the element and finds nothing: in
-        // paginated mode the target heading usually lives in a *different*
-        // chunk that isn't mounted, so the click did nothing at all. Resolve it
-        // through the app's own navigation instead — switch to the chunk that
-        // owns the heading, then scroll to it.
-        if (href.startsWith("#")) {
-          let rawTarget = href.slice(1);
-          try {
-            rawTarget = decodeURIComponent(rawTarget);
-          } catch {
-            /* malformed fragment stays literal */
-          }
-          const targetId = convertedAnchors.targets[rawTarget] ?? rawTarget;
-          return (
-            <a
-              {...p}
-              onClick={(event: React.MouseEvent) => {
-                if (event.metaKey || event.ctrlKey || event.shiftKey) return;
-                event.preventDefault();
-                // Footnotes are appended to each converted page. Follow their
-                // local targets without changing the currently selected page.
-                if (file.derivedFrom && rawTarget.startsWith("user-content-fn")) {
-                  const note = contentRef.current?.querySelector(`#${CSS.escape(rawTarget)}`);
-                  if (note) {
-                    note.scrollIntoView({ behavior: "smooth", block: "start" });
-                    return;
-                  }
-                }
-                // Selecting the chunk mounts it; the effect that watches
-                // `activeSubtopicId` scrolls to the heading once it exists.
-                onNav(file.id, targetId);
-                requestAnimationFrame(() => {
-                  document
-                    .getElementById(targetId)
-                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                });
-              }}
-            >
-              {p.children}
-            </a>
-          );
-        }
-        return (
-          <a {...p} target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer">
-            {p.children}
-          </a>
-        );
+      file,
+      media: {
+        workspaceId,
+        workspaceRevision,
+        workspaceFiles,
+        workspaceFolders,
+        workspaceName,
+        sourceFile: file,
       },
-      li: (p: any) => <li {...p}>{p.children}</li>,
-      table: foldable((p: any) => (
-        <SavableBlock blockType="table" className="docs-savable-table">
-          <div className="docs-table-wrap">
-            <table {...p} />
-          </div>
-        </SavableBlock>
-      )),
-      td: (p: any) => <td {...p}>{p.children}</td>,
-      th: (p: any) => <th {...p}>{p.children}</th>,
+      anchorTargets: convertedAnchors.targets,
+      onNav,
+      contentRef,
+      openLightbox: setLightbox,
     }),
-    // `highlights` is deliberately absent: nothing here reads it, and including
-    // it rebuilt every renderer on each highlight change, re-rendering the whole
-    // markdown tree (the entire document, in single-page mode).
-
-    // `collapsedSections` is read by every foldable block through the walk, so
-    // folding a heading has to rebuild this map — otherwise the chevron turns
-    // and nothing moves.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
+      file,
       workspaceId,
       workspaceRevision,
       workspaceFiles,
-      workspaceName,
       workspaceFolders,
-      file,
-      onOpenArtifact,
-      collapsedSections,
-      file.id,
-      chunkForHeading,
+      workspaceName,
       convertedAnchors,
-      file.derivedFrom,
       onNav,
     ],
   );
@@ -1697,7 +1543,7 @@ function MarkdownViewerImpl({
                 // builds a new one, rather than handing the previous document's
                 // draft to the next document's instance.
                 key={file.id}
-                ref={editorRef}
+                ref={setEditor}
                 fileId={file.id}
                 initialContent={file.content}
                 onSave={saveDraft}
@@ -1719,22 +1565,34 @@ function MarkdownViewerImpl({
               />
             ) : (
               <div
-                key={singleMode ? "full" : activeChunk.id}
+                key={contentKey}
                 ref={contentRef}
                 onClick={onContentClick}
+                aria-busy={settled ? undefined : true}
               >
-                <SavedContext.Provider value={savedCtx}>
-                  <CollapseContext.Provider value={collapseCtx}>
-                    <MarkdownContent
-                      urlTransform={mediaUrlTransform}
-                      remarkPlugins={remarkPlugins}
-                      rehypePlugins={rehypePlugins}
-                      components={components}
-                    >
-                      {markdownSource}
-                    </MarkdownContent>
-                  </CollapseContext.Provider>
-                </SavedContext.Provider>
+                <MarkdownRenderContext.Provider value={renderCtx}>
+                  <SavedContext.Provider value={savedCtx}>
+                    <CollapseContext.Provider value={collapseCtx}>
+                      {/* Numbered from the whole document, not the page on
+                          screen, so equation numbers and references stay put
+                          as the reader pages through. */}
+                      <MathProvider
+                        source={file.content}
+                        preferences={mathPreferences}
+                        navigateToEquation={navigateToEquation}
+                      >
+                        <ProgressiveMarkdown
+                          source={markdownSource}
+                          urlTransform={mediaUrlTransform}
+                          remarkPlugins={remarkPlugins}
+                          rehypePlugins={rehypePlugins}
+                          components={markdownComponents}
+                          onRendered={setRenderedSource}
+                        />
+                      </MathProvider>
+                    </CollapseContext.Provider>
+                  </SavedContext.Provider>
+                </MarkdownRenderContext.Provider>
               </div>
             )}
 

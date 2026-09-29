@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import { persistence } from "@/lib/workspace/persistence";
-import { DocumentIndex } from "@/lib/search/document-index";
 import type { SearchHit } from "@/lib/search/schema";
-import type { WorkerRequest, WorkerResponse } from "@/lib/search/document-index.worker";
+import {
+  createWorkerSearchClient,
+  SearchClosedError,
+  type SearchClient,
+} from "@/lib/search/search-client";
 
 function toSearchFiles(
   files: { id: string; name: string; content: string; deletedAt?: number | null }[],
@@ -22,10 +25,25 @@ interface Options {
   crossWorkspace: boolean;
 }
 
-/** Owns the search Worker (with a synchronous main-thread fallback), keeps
- *  the current workspace's index in sync with `files`, and — only while
- *  `crossWorkspace` is on — lazily fetches and indexes every other
- *  workspace, dropping them again the moment the toggle turns back off. */
+/** One index backend and what has been sent to it. Replacing the backend
+ *  (panel reopened, worker failed) starts a fresh session, so nothing
+ *  believes a workspace is indexed in an index that never saw it. */
+interface Session {
+  client: SearchClient;
+  /** Workspaces this session has been asked to index and not to drop. */
+  indexed: Set<string>;
+}
+
+export type SearchError = "search" | "index" | null;
+
+/** Owns the search Worker (with a main-thread fallback), keeps the current
+ *  workspace's index in sync with `files`, and — only while `crossWorkspace`
+ *  is on — lazily fetches and indexes every other workspace, dropping them
+ *  again the moment the toggle turns back off.
+ *
+ *  Requests settle on every path (result, error reply, worker failure or
+ *  close); the query reruns whenever an acknowledged mutation advances the
+ *  index generation. */
 export function useSearchIndex({
   active,
   currentWorkspaceId,
@@ -35,70 +53,75 @@ export function useSearchIndex({
   crossWorkspace,
 }: Options) {
   const [hits, setHits] = useState<SearchHit[]>([]);
+  const [total, setTotal] = useState(0);
   const [pending, setPending] = useState(false);
-  const [loadingWorkspaces, setLoadingWorkspaces] = useState<string[]>([]);
+  const [loadingIds, setLoadingIds] = useState<string[]>([]);
   const [fallback, setFallback] = useState(false);
-  const [indexVersion, setIndexVersion] = useState(0);
+  /** The fallback index is downloading; no session exists yet. */
+  const [starting, setStarting] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
+  const [generation, setGeneration] = useState(0);
+  const [readyWorkspaceId, setReadyWorkspaceId] = useState<string | null>(null);
+  const [error, setError] = useState<SearchError>(null);
+  const [retry, setRetry] = useState(0);
 
-  const worker = useRef<Worker | null>(null);
-  const fallbackIndex = useRef<DocumentIndex | null>(null);
-  const reqId = useRef(0);
   const searchReqId = useRef(0);
-  const syncedIds = useRef(new Set<string>());
+  const loadCounts = useRef(new Map<string, number>());
+  const currentIdRef = useRef(currentWorkspaceId);
+  currentIdRef.current = currentWorkspaceId;
 
-  const post = (request: WorkerRequest): Promise<WorkerResponse> => {
-    if (worker.current) {
-      const instance = worker.current;
-      return new Promise((resolve) => {
-        const onMessage = (event: MessageEvent<WorkerResponse>) => {
-          if (event.data.reqId !== request.reqId) return;
-          instance.removeEventListener("message", onMessage);
-          resolve(event.data);
-        };
-        instance.addEventListener("message", onMessage);
-        instance.postMessage(request);
-      });
-    }
-    fallbackIndex.current ??= new DocumentIndex();
-    const index = fallbackIndex.current;
-    switch (request.type) {
-      case "sync":
-        return index
-          .syncWorkspace(request.workspaceId, request.files)
-          .then(() => ({ reqId: request.reqId, type: "ack" as const }));
-      case "drop":
-        return index
-          .dropWorkspace(request.workspaceId)
-          .then(() => ({ reqId: request.reqId, type: "ack" as const }));
-      case "search":
-        return index
-          .search(request.query, request.workspaceIds)
-          .then((hits) => ({ reqId: request.reqId, type: "hits" as const, hits }));
-    }
-  };
-
+  // Retry re-attempts a main-thread fallback that failed to download; with a
+  // working worker it only re-syncs (the effects below), not a new session.
+  const fallbackAttempt = fallback ? retry : 0;
   useEffect(() => {
-    if (!active || fallback) return;
-    try {
-      const instance = new Worker(
-        new URL("../lib/search/document-index.worker.ts", import.meta.url),
-        { type: "module" },
+    if (!active) return;
+    let next: Session | null = null;
+    let cancelled = false;
+    const start = (client: SearchClient) => {
+      next = { client, indexed: new Set() };
+      setSession(next);
+      setGeneration(0);
+      setReadyWorkspaceId(null);
+      setError(null);
+    };
+    if (fallback) {
+      // Only reached when the worker can't run, so the main-thread index is
+      // downloaded then rather than with every startup.
+      setStarting(true);
+      import("@/lib/search/local-search-client").then(
+        ({ createLocalSearchClient }) => {
+          if (cancelled) return;
+          setStarting(false);
+          start(createLocalSearchClient());
+        },
+        (reason: unknown) => {
+          if (cancelled) return;
+          console.warn("Search fallback failed to load", reason);
+          setStarting(false);
+          setError("index");
+        },
       );
-      instance.onerror = () => {
-        instance.terminate();
-        worker.current = null;
-        syncedIds.current.clear();
+    } else {
+      try {
+        const worker = new Worker(
+          new URL("../lib/search/document-index.worker.ts", import.meta.url),
+          { type: "module" },
+        );
+        start(createWorkerSearchClient(worker, () => setFallback(true)));
+      } catch {
         setFallback(true);
-      };
-      worker.current = instance;
-      return () => {
-        instance.terminate();
-        worker.current = null;
-      };
-    } catch {
-      setFallback(true);
+        return;
+      }
     }
-  }, [active, fallback]);
+    return () => {
+      cancelled = true;
+      setStarting(false);
+      if (!next) return;
+      const closing = next;
+      closing.client.close();
+      setSession((current) => (current === closing ? null : current));
+    };
+  }, [active, fallback, fallbackAttempt]);
 
   const otherWorkspaces = useMemo(
     () => (crossWorkspace ? workspaces.filter((w) => w.id !== currentWorkspaceId) : []),
@@ -108,78 +131,124 @@ export function useSearchIndex({
   // Keep the indexed set of workspaces equal to "current, plus every other
   // workspace only while cross-workspace search is on" — this one
   // reconciliation loop handles toggling on/off and switching the current
-  // workspace without any special-cased branches.
+  // workspace without any special-cased branches. The index applies
+  // requests in the order they are sent, so a drop sent after a sync always
+  // wins and a search sent after a sync sees it.
   useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    (async () => {
-      if (currentWorkspaceId) {
-        syncedIds.current.add(currentWorkspaceId);
-        const response = await post({
-          reqId: ++reqId.current,
-          type: "sync",
-          workspaceId: currentWorkspaceId,
-          files: toSearchFiles(files),
-        });
-        // The query may have already run against the previous index (or an
-        // empty one during startup). Refresh it only after the rows are ready.
-        if (!cancelled && response.type === "ack") setIndexVersion((version) => version + 1);
-      }
-      if (cancelled) return;
-
-      const desiredOtherIds = new Set(otherWorkspaces.map((w) => w.id));
-      const toDrop = [...syncedIds.current].filter(
-        (id) => id !== currentWorkspaceId && !desiredOtherIds.has(id),
-      );
-      for (const id of toDrop) {
-        syncedIds.current.delete(id);
-        void post({ reqId: ++reqId.current, type: "drop", workspaceId: id });
-      }
-
-      const toLoad = otherWorkspaces.filter((w) => !syncedIds.current.has(w.id));
-      if (!toLoad.length) return;
-      setLoadingWorkspaces((prev) => [...new Set([...prev, ...toLoad.map((w) => w.id)])]);
-      await Promise.all(
-        toLoad.map(async (summary) => {
-          const record = await persistence.getWorkspace(summary.id);
-          if (cancelled || !record) return;
-          syncedIds.current.add(summary.id);
-          const response = await post({
-            reqId: ++reqId.current,
-            type: "sync",
-            workspaceId: summary.id,
-            files: toSearchFiles(record.files),
-          });
-          if (!cancelled && response.type === "ack") setIndexVersion((version) => version + 1);
-          if (!cancelled) setLoadingWorkspaces((prev) => prev.filter((id) => id !== summary.id));
-        }),
-      );
-    })();
-    return () => {
-      cancelled = true;
+    if (!session) return;
+    const { client, indexed } = session;
+    const acknowledge = (next: number) => {
+      if (!client.closed) setGeneration((current) => Math.max(current, next));
     };
-  }, [active, currentWorkspaceId, files, otherWorkspaces, fallback]);
+    const failed = (reason: unknown) => {
+      if (reason instanceof SearchClosedError || client.closed) return;
+      console.warn("Search indexing failed", reason);
+      setError("index");
+    };
+
+    if (currentWorkspaceId) {
+      const workspaceId = currentWorkspaceId;
+      indexed.add(workspaceId);
+      client.sync(workspaceId, toSearchFiles(files)).then((next) => {
+        acknowledge(next);
+        if (!client.closed) setReadyWorkspaceId(workspaceId);
+      }, failed);
+    }
+
+    const desired = new Set(otherWorkspaces.map((w) => w.id));
+    for (const id of [...indexed]) {
+      if (id === currentWorkspaceId || desired.has(id)) continue;
+      indexed.delete(id);
+      client.drop(id).then(acknowledge, failed);
+    }
+
+    const changeLoading = (id: string, delta: number) => {
+      const count = (loadCounts.current.get(id) ?? 0) + delta;
+      if (count > 0) loadCounts.current.set(id, count);
+      else loadCounts.current.delete(id);
+      setLoadingIds([...loadCounts.current.keys()]);
+    };
+    // A load is not abandoned when this effect re-runs (every edit re-runs
+    // it): it checks, once the workspace has been read, whether this session
+    // still wants it, so a claim is never left without a sync behind it.
+    const load = async (id: string) => {
+      changeLoading(id, 1);
+      try {
+        const record = await persistence.getWorkspace(id);
+        // Dropped meanwhile, or now the current workspace, whose live files
+        // are newer than this stored copy.
+        if (client.closed || !indexed.has(id) || id === currentIdRef.current) return;
+        if (!record) return;
+        acknowledge(await client.sync(id, toSearchFiles(record.files)));
+      } catch (reason) {
+        if (reason instanceof SearchClosedError || client.closed) return;
+        // Let a later pass retry this workspace.
+        indexed.delete(id);
+        failed(reason);
+      } finally {
+        changeLoading(id, -1);
+      }
+    };
+    for (const summary of otherWorkspaces) {
+      if (indexed.has(summary.id)) continue;
+      indexed.add(summary.id);
+      void load(summary.id);
+    }
+  }, [session, currentWorkspaceId, files, otherWorkspaces, retry]);
 
   useEffect(() => {
     const id = ++searchReqId.current;
-    if (!active || !query.trim() || !currentWorkspaceId) {
+    if (!session || !query.trim() || !currentWorkspaceId) {
       setHits([]);
+      setTotal(0);
       setPending(false);
+      setError((current) => (current === "search" ? null : current));
       return;
     }
     setPending(true);
     const timer = setTimeout(() => {
       const workspaceIds = [currentWorkspaceId, ...otherWorkspaces.map((w) => w.id)];
-      void post({ reqId: ++reqId.current, type: "search", query, workspaceIds }).then(
-        (response) => {
-          if (id !== searchReqId.current || response.type !== "hits") return;
-          setHits(response.hits);
+      session.client.search(query, workspaceIds).then(
+        (next) => {
+          if (id !== searchReqId.current) return;
+          setHits(next.hits);
+          setTotal(next.total);
           setPending(false);
+          setError((current) => (current === "search" ? null : current));
+        },
+        (reason) => {
+          // A closed client is always followed by a new session (or by
+          // search closing), which re-runs this effect.
+          if (id !== searchReqId.current || reason instanceof SearchClosedError) return;
+          console.warn("Search failed", reason);
+          setHits([]);
+          setTotal(0);
+          setPending(false);
+          setError("search");
         },
       );
     }, 120);
     return () => clearTimeout(timer);
-  }, [query, active, currentWorkspaceId, otherWorkspaces, fallback, indexVersion]);
+  }, [query, session, currentWorkspaceId, otherWorkspaces, generation, retry]);
 
-  return { hits, pending, loadingWorkspaces };
+  const loadingWorkspaces = useMemo(
+    () => loadingIds.filter((id) => otherWorkspaces.some((w) => w.id === id)),
+    [loadingIds, otherWorkspaces],
+  );
+
+  return {
+    hits,
+    /** Every match, including those past the returned hits. */
+    total,
+    pending,
+    loadingWorkspaces,
+    /** The current workspace's rows aren't in the index yet. */
+    indexing:
+      !!currentWorkspaceId && (starting || (!!session && readyWorkspaceId !== currentWorkspaceId)),
+    error,
+    retry: () => {
+      setError(null);
+      setRetry((count) => count + 1);
+    },
+  };
 }

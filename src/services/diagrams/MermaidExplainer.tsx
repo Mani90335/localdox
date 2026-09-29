@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { ChevronLeft, ChevronRight, LoaderCircle, Pause, Play, RotateCcw } from "lucide-react";
 import { readGraph } from "./explainer/graph";
 import { canExplain, planExplainer } from "./explainer/plan";
@@ -6,20 +7,22 @@ import { applySemantics } from "./explainer/semantics";
 import { renderMermaid } from "./mermaid-render-cache";
 import { describeRenderError } from "./render-error";
 import { ExplainerPlayer, type PlayerState } from "./explainer/player";
-import { homeFrame } from "./explainer/camera";
-import { diagramKind, shouldUseGpuEngine } from "./engine/gate";
+import { homeFrame, type CameraView } from "./explainer/camera";
+import { diagramKind } from "./engine/gate";
+import { isRenderedDiagramTooLarge } from "./mermaid-performance";
 import type { DiagramRenderer } from "./engine/renderer";
 import type { GpuPlayer } from "./engine/gpu-player";
 import { zoomCeiling } from "./engine/zoom";
 import { Tray, TrayButton, ZoomControls } from "./Mermaid";
 import { useSvgViewport } from "./use-svg-viewport";
+import { prefersReducedMotion, useStageVisibility } from "./use-stage-visibility";
+import { PUBLISH_MS } from "./explainer/clock";
 import {
   TALL_STAGE_RATIO,
   clampStageRatio,
   isTallStage,
-  stageBoxStyle,
+  playbackBoxStyle,
   stageWidthCap,
-  type DiagramSize,
 } from "./stage-ratio";
 import "./explainer.css";
 
@@ -48,6 +51,7 @@ function widthCap(ratio: number): string | undefined {
  */
 export function MermaidExplainer({
   code,
+  engine,
   dark,
   colored,
   camera = true,
@@ -57,9 +61,16 @@ export function MermaidExplainer({
   controls,
   onError,
   onRatio,
+  onOversized,
   onUnsupported,
 }: {
   code: string;
+  /**
+   * The renderer `Mermaid` decided on (see render-decision.ts). This stage
+   * never re-derives it from the source: Raw may already have measured the
+   * render and raised it.
+   */
+  engine: "svg" | "gpu";
   dark: boolean;
   /** Colour nodes and edges by meaning; see lib/explainer/semantics.ts. */
   colored?: boolean;
@@ -73,6 +84,12 @@ export function MermaidExplainer({
   controls?: React.ReactNode;
   onError: (message: string | null) => void;
   onRatio?: (ratio: number) => void;
+  /**
+   * Fired, instead of mounting the SVG, when Mermaid's render of `code` is too
+   * large for live SVG. The caller raises its decision, which re-renders this
+   * stage on the GPU engine or switches the diagram to a still image.
+   */
+  onOversized: (code: string) => void;
   /**
    * Fired when the diagram has no sequence to explain (a sequence diagram, a
    * timeline, an xychart). Reports the fact rather than acting on it, so the
@@ -91,9 +108,6 @@ export function MermaidExplainer({
   const [large, setLarge] = useState(false);
   const [loading, setLoading] = useState(true);
   const [ratio, setRatio] = useState<number | null>(null);
-  // The diagram's own dimensions, needed to size a tall stage at natural scale
-  // rather than stretching it to an aspect ratio.
-  const [size, setSize] = useState<DiagramSize | null>(null);
   const [speed, setSpeed] = useState<number>(1);
   const [following, setFollowing] = useState(false);
   const {
@@ -114,11 +128,30 @@ export function MermaidExplainer({
     beat: 0,
     beatCount: 0,
   });
+  // Off screen or in a background tab, the player keeps its play state but
+  // draws nothing; it carries on from the same moment when it is seen again.
+  const visibleRef = useStageVisibility(hostRef, (visible) =>
+    playerRef.current?.setVisible(visible),
+  );
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     let disposed = false;
+    /**
+     * Start a player that is ready. It plays from the top, unless the system
+     * asks for reduced motion: then it opens on the whole picture, paused,
+     * and Play (or stepping back) walks through it on request.
+     */
+    const start = (player: ExplainerPlayer | GpuPlayer) => {
+      playerRef.current = player;
+      setFollowing(player.following);
+      player.setSpeed(speed);
+      player.setVisible(visibleRef.current);
+      setLoading(false);
+      if (prefersReducedMotion()) player.seek(player.duration);
+      else player.play();
+    };
     setLoading(true);
     onError(null);
 
@@ -144,7 +177,6 @@ export function MermaidExplainer({
       // hundreds of thousands of pixels. The camera and the viewport frame it.
       const measured = clampStageRatio(Math.min(scene.height / scene.width, TALL_STAGE_RATIO));
       setRatio(measured);
-      setSize(null);
       onRatio?.(measured);
       const viewport = attach(host, renderer.target, {
         maxZoom: zoomCeiling(scene.width, scene.height),
@@ -162,16 +194,12 @@ export function MermaidExplainer({
       });
       minimapRef.current = attachMinimap(renderer, scene, theme, viewport, readableSpan);
       setLarge(true);
-      playerRef.current = player;
-      setFollowing(player.following);
-      player.setSpeed(speed);
-      setLoading(false);
-      player.play();
+      start(player);
     };
 
     const run = async () => {
       try {
-        if (shouldUseGpuEngine(code)) {
+        if (engine === "gpu") {
           await runGpu();
           return;
         }
@@ -180,6 +208,13 @@ export function MermaidExplainer({
         // instead of laying the diagram out again.
         const { svg } = await renderMermaid(code, dark, false);
         if (disposed) return;
+        // The same measured gate as Raw's. Mounting it anyway is what built a
+        // 52,000 px page from a 500-edge chain; the caller moves it to the GPU
+        // engine (or a still image), and the spinner stays until it does.
+        if (isRenderedDiagramTooLarge(svg)) {
+          onOversized(code);
+          return;
+        }
 
         host.innerHTML = svg;
         const svgEl = host.querySelector("svg");
@@ -191,24 +226,31 @@ export function MermaidExplainer({
         svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
         if (colored) applySemantics(svgEl as SVGSVGElement);
 
-        const view = svgEl.viewBox.baseVal;
-        if (view?.width && view.height) {
+        const box = svgEl.viewBox.baseVal;
+        let tall = false;
+        if (box?.width && box.height) {
           // Clamped, not raw: a tall diagram measured straight would build a
           // stage taller than the screen, which maxHeight then crushes into an
           // unreadable sliver.
-          const measured = clampStageRatio(view.height / view.width);
-          setRatio(measured);
-          setSize({ width: view.width, height: view.height });
+          const measured = clampStageRatio(box.height / box.width);
+          tall = isTallStage(measured);
+          // Synchronously, so the stage has its final size before the camera
+          // below measures it.
+          flushSync(() => setRatio(measured));
           onRatio?.(measured);
         }
 
+        // A tall diagram plays in a stage a screenful high, so the camera
+        // frames it in the stage's proportions rather than its own.
+        const view = tall ? cameraView(host) : undefined;
         // Pan and zoom work whether or not the diagram can be explained: a
         // diagram that falls back to a still picture is still one to explore.
-        const tall =
-          !fill && view?.width && view.height
-            ? isTallStage(clampStageRatio(view.height / view.width))
-            : false;
-        const viewport = attach(host, svgEl as SVGSVGElement, { wheelPan: !tall });
+        const viewport = attach(host, svgEl as SVGSVGElement, {
+          // Enough to reach natural size (and twice it) from the whole.
+          maxZoom: view
+            ? Math.max(8, (2 * Math.max(box.width, box.height * view.aspect)) / view.minWidth)
+            : undefined,
+        });
 
         const graph = readGraph(svgEl as SVGSVGElement);
         if (graph && !canExplain(graph) && diagramKind(code)) {
@@ -231,18 +273,15 @@ export function MermaidExplainer({
         const plan = planExplainer(graph, { followNumbers });
         // "Fit" is the camera's wide shot, margin included, so resetting the
         // view and the camera's closing pull-back land on the same framing.
-        viewport.setBase(homeFrame(graph));
+        viewport.setBase(homeFrame(graph, view));
         const player = new ExplainerPlayer(graph, plan, setState, {
           camera,
           numbers: showNumbers,
+          view,
           // Through the viewport, so a reader who has taken the view keeps it.
           onFrame: (frame) => viewport.follow(frame),
         });
-        playerRef.current = player;
-        setFollowing(player.following);
-        player.setSpeed(speed);
-        setLoading(false);
-        player.play();
+        start(player);
       } catch (error) {
         if (disposed) return;
         setLoading(false);
@@ -265,10 +304,22 @@ export function MermaidExplainer({
       host.innerHTML = "";
     };
     // `speed` is applied imperatively below; re-rendering the diagram when it
-    // changes would restart the animation mid-watch. `fill` only decides the
-    // wheel rule for a tall stage and must not re-render on full screen.
+    // changes would restart the animation mid-watch. `fill` must not re-render
+    // on full screen: the camera keeps the view measured when it started.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code, dark, colored, camera, followNumbers, showNumbers, onError, onRatio, onUnsupported]);
+  }, [
+    code,
+    engine,
+    dark,
+    colored,
+    camera,
+    followNumbers,
+    showNumbers,
+    onError,
+    onRatio,
+    onOversized,
+    onUnsupported,
+  ]);
 
   useEffect(() => {
     playerRef.current?.setSpeed(speed);
@@ -331,6 +382,7 @@ export function MermaidExplainer({
             <Scrubber
               time={state.time}
               duration={state.duration}
+              playing={state.playing}
               onSeek={(time) => playerRef.current?.seek(time)}
             />
             {/* The caption names the step under the playhead. On a diagram of
@@ -410,18 +462,27 @@ export function MermaidExplainer({
         ref={hostRef}
         tabIndex={0}
         aria-label="Stepped Mermaid diagram. Space plays or pauses, arrow keys step. Drag to pan; pinch or Ctrl/⌘ + scroll to zoom."
-        // `data-tall` switches the SVG from filling the stage to keeping its
-        // natural size; see explainer.css.
-        data-tall={!fill && ratio && isTallStage(ratio) ? "" : undefined}
         className={`${
           fill ? "explainer-stage h-full min-h-0 w-full" : "explainer-stage w-full box-content"
         } overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring${
           colored ? " diagram-colored" : ""
         }`}
-        style={fill ? undefined : stageBoxStyle(ratio ?? 0.42, 56, size ?? undefined)}
+        style={fill ? undefined : playbackBoxStyle(ratio ?? 0.42, 56)}
       />
     </div>
   );
+}
+
+/**
+ * The stage's content box as a camera view: its proportions, and a close-up
+ * floor of natural size (one diagram unit per CSS pixel).
+ */
+function cameraView(host: HTMLElement): CameraView | undefined {
+  const style = getComputedStyle(host);
+  const width = host.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  const height = host.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  if (!(width > 0 && height > 0)) return undefined;
+  return { aspect: width / height, minWidth: width };
 }
 
 function clock(ms: number): string {
@@ -440,10 +501,12 @@ function clock(ms: number): string {
 function Scrubber({
   time,
   duration,
+  playing,
   onSeek,
 }: {
   time: number;
   duration: number;
+  playing: boolean;
   onSeek: (time: number) => void;
 }) {
   const barRef = useRef<HTMLDivElement>(null);
@@ -483,7 +546,17 @@ function Scrubber({
         onPointerCancel={() => (dragging.current = false)}
       >
         <div className="h-1 w-full overflow-hidden rounded-full bg-foreground/15">
-          <div className="h-full rounded-full bg-primary" style={{ width: `${share * 100}%` }} />
+          {/* The player publishes about ten times a second while playing, so
+              the bar glides across each interval instead of stepping; a seek
+              or a pause lands at once. Sliding a full-width bar (clipped by
+              the track) keeps its rounded end, which scaling would squash. */}
+          <div
+            className="h-full w-full rounded-full bg-primary transition-transform ease-linear motion-reduce:transition-none"
+            style={{
+              transform: `translateX(${(share - 1) * 100}%)`,
+              transitionDuration: playing ? `${PUBLISH_MS}ms` : "0ms",
+            }}
+          />
         </div>
       </div>
       <span className="shrink-0 text-3xs tabular-nums text-muted-foreground">

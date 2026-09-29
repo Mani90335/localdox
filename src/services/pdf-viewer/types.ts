@@ -4,9 +4,21 @@
 // the boundary, so nothing statically imported by `DocumentViewer.tsx` (and
 // therefore reachable during SSR/prerender) ever names the package.
 
+/**
+ * An outline entry's destination as pdf.js reports it: a named destination,
+ * an explicit destination array (its first element is the target page's
+ * reference or index), or nothing. Resolved to a page only when needed; see
+ * `pdf-outline.ts`.
+ */
+export type PdfOutlineDest = string | readonly unknown[] | null;
+
 export interface PdfOutlineNode {
+  /** Index path from the root, e.g. `"2.0.5"`. */
+  id: string;
   title: string;
-  pageNumber: number | null;
+  dest: PdfOutlineDest;
+  /** The PDF marks this entry collapsed by default. */
+  closed: boolean;
   items: PdfOutlineNode[];
 }
 

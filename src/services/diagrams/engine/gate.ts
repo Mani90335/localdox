@@ -12,10 +12,7 @@
  * This runs on every source change, so it only scans text and never imports
  * Mermaid or the engine.
  */
-import {
-  scanDiagramSource,
-  shouldUseDiagramPerformanceMode,
-} from "../mermaid-performance.ts";
+import { scanDiagramSource, shouldUseDiagramPerformanceMode } from "../mermaid-performance.ts";
 import type { DiagramKind } from "./flowchart.ts";
 
 /** Edge lines at which a flowchart moves to the GPU engine. */
@@ -31,7 +28,7 @@ export const GPU_ATTRIBUTE_THRESHOLD = 700;
 export const GPU_RELATION_THRESHOLD = 300;
 
 /** The first meaningful line: skips front matter, blank lines and comments. */
-function headerLine(source: string): string | null {
+export function headerLine(source: string): string | null {
   let inFrontMatter = false;
   let start = 0;
   for (let lines = 0; lines < 200 && start <= source.length; lines++) {

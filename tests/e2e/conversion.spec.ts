@@ -98,8 +98,10 @@ test("scanned PDFs report OCR locally and create no derivative", async ({ page }
   expect((await storedFiles(page)).length).toBe(1);
 });
 
-test("cancel and worker-load failure preserve the source", async ({ page }) => {
-  await page.route(/\.wasm(?:\?|$)/, async (route) => {
+test("cancel and worker-load failure preserve the source", async ({ context, page }) => {
+  // Context-level, so the WASM fetch is held whether or not the offline
+  // service worker handles it.
+  await context.route(/\.wasm(?:\?|$)/, async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await route.abort().catch(() => {});
   });

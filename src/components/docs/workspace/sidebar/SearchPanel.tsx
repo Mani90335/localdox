@@ -8,8 +8,15 @@ export interface SearchPanelState {
   crossWorkspace: boolean;
   onCrossWorkspaceChange: (value: boolean) => void;
   hits: SearchHit[];
+  /** Every match, which can exceed `hits` when results were capped. */
+  total: number;
   pending: boolean;
   loadingWorkspaces: string[];
+  /** The current workspace hasn't been indexed yet, so "no results" would
+   *  be premature. */
+  indexing: boolean;
+  error: "search" | "index" | null;
+  onRetry: () => void;
   onSelectHit: (hit: SearchHit) => void;
   workspaceName: (id: string) => string;
   onClose: () => void;
@@ -19,16 +26,16 @@ interface FileGroup {
   fileId: string;
   fileName: string;
   workspaceId: string;
-  bestScore: number;
   hits: SearchHit[];
 }
 
 interface WorkspaceGroup {
   workspaceId: string;
-  bestScore: number;
   files: FileGroup[];
 }
 
+/** Hits arrive already ordered — workspaces as searched, best files first,
+ *  each file's hits in document order — so grouping keeps that order. */
 function groupHits(hits: SearchHit[], crossWorkspace: boolean): WorkspaceGroup[] {
   const byWorkspace = new Map<string, Map<string, FileGroup>>();
   for (const hit of hits) {
@@ -44,52 +51,38 @@ function groupHits(hits: SearchHit[], crossWorkspace: boolean): WorkspaceGroup[]
         fileId: hit.fileId,
         fileName: hit.fileName,
         workspaceId: hit.workspaceId,
-        bestScore: 0,
         hits: [],
       };
       files.set(hit.fileId, group);
     }
     group.hits.push(hit);
-    group.bestScore = Math.max(group.bestScore, hit.score);
   }
-  const workspaces: WorkspaceGroup[] = [];
-  for (const [workspaceId, files] of byWorkspace) {
-    const fileGroups = [...files.values()];
-    for (const group of fileGroups) group.hits.sort((a, b) => a.lineIndex - b.lineIndex);
-    fileGroups.sort((a, b) => b.bestScore - a.bestScore);
-    workspaces.push({
-      workspaceId,
-      bestScore: Math.max(...fileGroups.map((g) => g.bestScore)),
-      files: fileGroups,
-    });
-  }
-  workspaces.sort((a, b) => b.bestScore - a.bestScore);
-  return workspaces;
+  return [...byWorkspace].map(([workspaceId, files]) => ({
+    workspaceId,
+    files: [...files.values()],
+  }));
 }
 
-function highlight(text: string, query: string) {
-  const q = query.trim();
-  if (!q) return text;
-  const at = text.toLowerCase().indexOf(q.toLowerCase());
-  if (at < 0) return text;
+/** Marks this hit's own occurrence — not merely the first one in the
+ *  snippet, which for a line with the word twice is a different hit. */
+function highlight(hit: SearchHit) {
+  const { snippet, matchStart: at, matchLength: length } = hit;
   return (
     <>
-      {text.slice(0, at)}
+      {snippet.slice(0, at)}
       <mark className="rounded bg-primary/20 px-0.5 text-foreground">
-        {text.slice(at, at + q.length)}
+        {snippet.slice(at, at + length)}
       </mark>
-      {text.slice(at + q.length)}
+      {snippet.slice(at + length)}
     </>
   );
 }
 
 function FileResultGroup({
   group,
-  query,
   onSelectHit,
 }: {
   group: FileGroup;
-  query: string;
   onSelectHit: (hit: SearchHit) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -116,7 +109,7 @@ function FileResultGroup({
               className="block w-full truncate rounded-md px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
               title={hit.line || hit.fileName}
             >
-              {highlight(hit.snippet, query)}
+              {highlight(hit)}
             </button>
           ))}
         </div>
@@ -131,14 +124,22 @@ export function SearchPanel({
   crossWorkspace,
   onCrossWorkspaceChange,
   hits,
+  total,
   pending,
   loadingWorkspaces,
+  indexing,
+  error,
+  onRetry,
   onSelectHit,
   workspaceName,
   onClose,
 }: SearchPanelState) {
   const groups = useMemo(() => groupHits(hits, crossWorkspace), [hits, crossWorkspace]);
   const totalMatches = hits.length;
+  const fileCount = useMemo(
+    () => new Set(hits.map((hit) => `${hit.workspaceId}\u0000${hit.fileId}`)).size,
+    [hits],
+  );
 
   // Every dismissable surface in this app owns its own Escape handler (see
   // SettingsPage, the old CommandPalette, the sidebar's own menus) rather than
@@ -208,7 +209,30 @@ export function SearchPanel({
             Searching…
           </div>
         )}
-        {!pending && query.trim() && totalMatches === 0 && (
+        {!pending && error && (
+          <div
+            role="alert"
+            className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm"
+          >
+            <p className="text-foreground">
+              {error === "search"
+                ? "Search couldn’t run."
+                : "Some documents couldn’t be indexed, so results may be incomplete."}
+            </p>
+            <button
+              onClick={onRetry}
+              className="coarse:min-h-11 mt-1 rounded-md text-sm font-medium text-primary hover:underline"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+        {!pending && error !== "search" && query.trim() && totalMatches === 0 && indexing && (
+          <div role="status" className="py-12 text-center text-sm text-muted-foreground">
+            Indexing documents…
+          </div>
+        )}
+        {!pending && error !== "search" && query.trim() && totalMatches === 0 && !indexing && (
           <div className="py-12 text-center text-sm text-muted-foreground">
             No results for "{query}"
           </div>
@@ -222,12 +246,7 @@ export function SearchPanel({
                 </div>
               )}
               {workspaceGroup.files.map((group) => (
-                <FileResultGroup
-                  key={group.fileId}
-                  group={group}
-                  query={query}
-                  onSelectHit={onSelectHit}
-                />
+                <FileResultGroup key={group.fileId} group={group} onSelectHit={onSelectHit} />
               ))}
             </div>
           ))}
@@ -235,7 +254,9 @@ export function SearchPanel({
 
       {totalMatches > 0 && (
         <div className="border-t border-sidebar-border px-3 py-2 text-xs text-muted-foreground">
-          {totalMatches} result{totalMatches > 1 ? "s" : ""}
+          {total > totalMatches
+            ? `Showing the first ${totalMatches.toLocaleString()} of ${total.toLocaleString()} results — refine the search to see the rest`
+            : `${total.toLocaleString()} result${total > 1 ? "s" : ""} in ${fileCount} file${fileCount > 1 ? "s" : ""}`}
         </div>
       )}
     </div>

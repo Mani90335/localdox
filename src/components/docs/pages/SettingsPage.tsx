@@ -340,6 +340,8 @@ export function SettingsPage({
             {activeTab === "storage" && (
               <StorageSettings
                 onClearStorage={onClearStorage}
+                workspaceId={currentWorkspaceId}
+                files={files}
                 binCount={files.filter((f) => typeof f.deletedAt === "number").length}
                 onEmptyBin={onEmptyBin}
               />

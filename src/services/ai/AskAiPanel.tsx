@@ -83,7 +83,8 @@ export function AskAiPanel({
     // Auto-run a prefilled quick action.
     if (prefill?.actionId && !getAction(prefill.actionId)?.requiresInput) {
       // Defer so state above is committed before the request builds context.
-      setTimeout(() => run(prefill.actionId!, sel), 0);
+      const timer = setTimeout(() => run(prefill.actionId!, sel), 0);
+      return () => clearTimeout(timer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, prefill, initialSelection]);
@@ -253,7 +254,7 @@ export function AskAiPanel({
               </div>
 
               {/* Output */}
-              {(ai.text || ai.isStreaming || ai.error) && (
+              {(ai.text || ai.isStreaming || ai.error || ai.status === "stopped") && (
                 <div className="border-t border-border p-4">
                   {ai.scopeLabel && (
                     <div className="mb-2 text-xs font-medium text-muted-foreground">
@@ -271,6 +272,16 @@ export function AskAiPanel({
                     >
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{ai.text || "…"}</ReactMarkdown>
                     </div>
+                  )}
+
+                  {(ai.status === "stopped" || ai.notice) && (
+                    <p role="status" className="mt-2 text-xs text-muted-foreground">
+                      {ai.status === "stopped"
+                        ? ai.text
+                          ? "Stopped. The answer above is incomplete."
+                          : "Stopped before any answer arrived."
+                        : ai.notice}
+                    </p>
                   )}
 
                   {ai.text && !ai.isStreaming && !ai.error && (

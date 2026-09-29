@@ -1,7 +1,7 @@
 import { ConversionContext } from "@/services/doc-conversion/ConversionContext";
 import { ensureEmbedMediaFolder } from "@/lib/workspace/embed-media";
 import type { DocumentUpdate } from "@/services/office-editing";
-import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { Menu, X, Search, Undo2, Settings } from "lucide-react";
 
@@ -12,13 +12,18 @@ import {
   type NavEntry,
 } from "@/hooks/use-nav-history";
 import { Sidebar, AddMenu, DEFAULT_VIEW, type SidebarView } from "./workspace/Sidebar";
-import { MarkdownViewer } from "./viewer/MarkdownViewer";
+import { MarkdownViewer, preloadMarkdownViewer } from "./viewer/MarkdownViewerLazy";
+import { preloadMarkdownEditor } from "./editor/MarkdownEditorLazy";
 import { PaneDocument } from "./viewer/PaneDocument";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable-lazy";
 import { Sheet, SheetClose, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useSearchIndex } from "@/hooks/use-search-index";
-import type { SearchHit } from "@/lib/search/schema";
+import type { PendingSearch, SearchHit } from "@/lib/search/schema";
 import type { SearchPanelState } from "./workspace/sidebar/SearchPanel";
 import { Header } from "./docs-app/Header";
 import { EmptyWorkspace } from "./docs-app/EmptyWorkspace";
@@ -32,6 +37,7 @@ import { toMdFile, uniqueFileName, findDuplicate } from "./docs-app/file-helpers
 import { availableWorkspaceName, resolveWorkspaceName } from "./docs-app/workspace-naming";
 import { ConflictBanner } from "./docs-app/ConflictBanner";
 import { SaveErrorBanner } from "./docs-app/SaveErrorBanner";
+import { ChunkFailedNotice, LazyBoundary } from "./docs-app/LazyBoundary";
 import { SaveIndicator, type SaveState } from "./docs-app/SaveIndicator";
 import { DraftRecoveryBanner, type RecoveredDraft } from "./docs-app/DraftRecoveryBanner";
 import { DraftJournalContext } from "./editor/draft-journal-context";
@@ -118,11 +124,14 @@ import {
   DISCARD_PROMPT,
   getDocumentKind,
   importDocumentFile,
+  estimateStoredBytes,
   SUPPORTED_ACCEPT,
 } from "@/lib/markdown/document-utils";
 import { clearArtifactResolutionCache } from "@/lib/workspace/workspace-artifacts";
+import { IMPORT_QUEUE, runBounded } from "@/lib/workspace/import-queue";
 import { warmAppFonts } from "@/lib/fonts/fonts";
 import { toast } from "sonner";
+import { holdReload, registerReloadGuard, reloadConfirmed } from "@/lib/app/safe-reload";
 import { useHistory } from "@/hooks/use-history";
 import {
   isEditableTarget,
@@ -167,7 +176,15 @@ import {
   type SharedFilesPayload,
 } from "@/lib/workspace/share";
 import type { ShareRequest } from "./workspace/SharePreviewDialog";
-import { MAX_UPLOAD_BYTES, getMaxStorageBytes, formatBytes } from "@/lib/workspace/storage-limits";
+import {
+  MAX_UPLOAD_BYTES,
+  StorageLimitError,
+  formatBytes,
+  isQuotaExceeded,
+  storedBytes,
+  utf8Length,
+} from "@/lib/workspace/storage-limits";
+import { reserveStorage, type StorageReservation } from "@/lib/workspace/storage-budget";
 import {
   useDocumentConversion,
   ConversionActions,
@@ -211,7 +228,12 @@ function importSharedWorkspaceOnce(key: string): Promise<WorkspaceRecord> {
       // meet before the app has even drawn.
       const already = await persistence.listWorkspaceSummaries();
       ws.name = availableWorkspaceName(`${ws.name} (Shared)`, already);
-      await persistence.serial(() => persistence.putWorkspace(ws));
+      const room = await reserveStorage(storedBytes(ws.files));
+      try {
+        await persistence.serial(() => persistence.putWorkspace(ws));
+      } finally {
+        room.release();
+      }
       toast.success("Shared workspace imported successfully!", { id: "share-import" });
       return ws;
     })();
@@ -399,13 +421,9 @@ export function DocsApp() {
    * A search hit the reader just opened, held until the viewer has scrolled to
    * it. Cleared through `onSearchShown` so it is not replayed on re-render.
    */
-  const [pendingSearch, setPendingSearch] = useState<{
-    fileId: string;
-    text: string;
-    query: string;
-    /** Which occurrence of `query` within `text` to land on, when it repeats. */
-    occurrence: number;
-  } | null>(null);
+  const [pendingSearch, setPendingSearch] = useState<({ fileId: string } & PendingSearch) | null>(
+    null,
+  );
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   // File ids in most-recently-opened order — drives the "Recent" chip.
   const [recentFileIds, setRecentFileIds] = useState<string[]>([]);
@@ -532,14 +550,19 @@ export function DocsApp() {
 
   const { sidebarWrapRef, sidebarInnerRef } = useSidebarCollapseAnimation(sidebarCollapsed);
 
-  // Warm the UI font after first contentful paint. Markdown plugins stay
-  // demand-loaded; idle importing them still adds download and execution work
-  // to every session, even when the reader never opens code or equations.
+  // Warm the UI font and the Markdown reader after first contentful paint. The
+  // reader is out of the startup download so the shell paints sooner, but
+  // nearly every visit opens a document next: fetching it while the reader is
+  // still choosing a file keeps that first open as quick as when it was
+  // bundled (on a slow connection it is a ~120 KB download). Markdown plugins
+  // stay demand-loaded; idle importing them still adds download and execution
+  // work to every session, even when the reader never opens code or equations.
   useEffect(() => {
     let idle = 0;
     const start = () => {
       idle = requestIdleCallbackSafe(() => {
         warmAppFonts();
+        preloadMarkdownViewer();
       });
     };
 
@@ -718,6 +741,8 @@ export function DocsApp() {
         baseRecordRef.current = merging ? mine : record;
         savedMutationRef.current = Math.max(savedMutationRef.current, pending);
         if (pending === mutationRef.current) setSaveStatus("saved");
+        // The ref too, now: a reload may be decided before the next render.
+        saveErrorRef.current = null;
         setSaveError(null);
         // Show the other tab's changes here too, unless the reader has changed
         // something since this snapshot was taken; the next save merges again.
@@ -768,6 +793,7 @@ export function DocsApp() {
       baseRecordRef.current = ws;
       workspaceConflictRef.current = false;
       setConflict(null);
+      saveErrorRef.current = null;
       setSaveError(null);
       if (saveTimer.current) clearTimeout(saveTimer.current);
       const wsFolders = ws.folders ?? [];
@@ -870,7 +896,14 @@ export function DocsApp() {
             );
           } catch (e) {
             console.error("Failed to import shared workspace", e);
-            toast.error("Invalid or corrupted shared workspace link.", { id: "share-import" });
+            toast.error(
+              e instanceof StorageLimitError
+                ? `The shared workspace wasn't imported. ${e.message}`
+                : isQuotaExceeded(e)
+                  ? "The shared workspace wasn't imported. This browser is out of storage space for Localdox."
+                  : "Invalid or corrupted shared workspace link.",
+              { id: "share-import" },
+            );
           }
         }
 
@@ -947,7 +980,8 @@ export function DocsApp() {
       if (!hydratedRef.current) return;
       const id = workspaceIdRef.current;
       if (id) saveScrollTop(id, scrollRef.current);
-      void persistNow(true);
+      // Held so a reload that starts meanwhile waits for it (safe-reload.ts).
+      holdReload(persistNow(true));
     };
     const onVisibility = () => {
       if (document.visibilityState === "hidden") flush();
@@ -957,7 +991,9 @@ export function DocsApp() {
       // Only when storage is known not to hold the latest state. Ordinary
       // pending edits are journalled or about to be written, and prompting on
       // every close would teach readers to ignore the prompt.
-      if (saveErrorRef.current || workspaceConflictRef.current) event.preventDefault();
+      // A reload the reader already confirmed (safe-reload.ts) isn't asked twice.
+      if ((saveErrorRef.current || workspaceConflictRef.current) && !reloadConfirmed())
+        event.preventDefault();
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     document.addEventListener("visibilitychange", onVisibility);
@@ -979,6 +1015,12 @@ export function DocsApp() {
 
   // ---- file + navigation actions (each marks the workspace dirty) ----
 
+  /** This tab's open workspace, unsaved edits included, for storage-budget. */
+  const openWorkspace = useCallback(
+    () => ({ id: workspaceIdRef.current, files: snapshotRef.current.files }),
+    [],
+  );
+
   const addFiles = useCallback(
     async (fileList: File[], attachments = false): Promise<MdFile[]> => {
       if (fileList.length === 0) return [];
@@ -993,36 +1035,71 @@ export function DocsApp() {
       }
       const accepted = fileList.filter((f) => f.size <= MAX_UPLOAD_BYTES);
       if (accepted.length === 0) return [];
-
-      // Enforce the hard total-storage ceiling (5% of the browser quota).
-      const maxStorage = await getMaxStorageBytes();
-      if (maxStorage != null) {
-        const usedBytes = snapshotRef.current.files.reduce((sum, f) => sum + (f.size ?? 0), 0);
-        const incomingBytes = accepted.reduce((sum, f) => sum + f.size, 0);
-        if (usedBytes + incomingBytes > maxStorage) {
-          toast.error(
-            `Storage full — this application is strictly capped at ${formatBytes(maxStorage)}. Remove some files before uploading more.`,
-          );
-          return [];
-        }
-      }
+      // Download the reader while the files are being read, not after.
+      if (
+        !attachments &&
+        accepted.some((f) => {
+          const kind = getDocumentKind(f.name, f.type);
+          return kind === "markdown" || kind === "text";
+        })
+      )
+        preloadMarkdownViewer();
 
       const total = accepted.length;
-      const toastId = toast.loading(`Uploading ${total} file${total > 1 ? "s" : ""}...`);
+      let room: StorageReservation | undefined;
+      let toastId: string | number | undefined;
+      // Cancel stops the batch any time before it is added to the workspace.
+      const cancel = new AbortController();
 
       try {
-        let loaded = 0;
-        const parsed: MdFile[] = await Promise.all(
-          accepted.map(async (f) => {
-            const imported = await importDocumentFile(f);
-            loaded++;
-            toast.loading(
-              `Uploading ${total} file${total > 1 ? "s" : ""}... ${Math.round((loaded / total) * 100)}%`,
-              { id: toastId },
-            );
-            return imported;
-          }),
+        // Room is held from here until the files are in the workspace, so a
+        // second batch picked while this one is being read can't be promised
+        // the same free space.
+        room = await reserveStorage(
+          accepted.reduce((sum, f) => sum + estimateStoredBytes(f), 0),
+          openWorkspace,
         );
+        const uploading = `Uploading ${total} file${total > 1 ? "s" : ""}...`;
+        toastId = toast.loading(uploading, {
+          action: { label: "Cancel", onClick: () => cancel.abort() },
+        });
+        // A few files at a time (import-queue.ts), each succeeding or failing
+        // on its own.
+        let shown = 0;
+        const results = await runBounded(accepted, importDocumentFile, {
+          ...IMPORT_QUEUE,
+          weigh: estimateStoredBytes,
+          signal: cancel.signal,
+          onSettled: (done) => {
+            const percent = Math.round((done / total) * 100);
+            if (percent === shown) return;
+            shown = percent;
+            toast.loading(`${uploading} ${percent}%`, { id: toastId });
+          },
+        });
+        const parsed: MdFile[] = [];
+        const unreadable: string[] = [];
+        results.forEach((result, i) => {
+          if (result.ok) {
+            parsed.push(result.value);
+          } else {
+            unreadable.push(accepted[i].name);
+            console.warn(`Could not read ${accepted[i].name}`, result.error);
+          }
+        });
+        // Every file is read. From here the batch goes in whole or not at all,
+        // so Cancel is no longer offered.
+        toast.loading(`${uploading} 100%`, { id: toastId, action: undefined });
+        if (unreadable.length) {
+          const one = unreadable.length === 1;
+          const names = one
+            ? `“${unreadable[0]}”`
+            : `${unreadable.length} files (${unreadable.slice(0, 3).join(", ")}${unreadable.length > 3 ? ", …" : ""})`;
+          toast.error(
+            `Couldn't read ${names}. If ${one ? "it was" : "they were"} moved or changed after you picked ${one ? "it" : "them"}, pick ${one ? "it" : "them"} again.`,
+            { duration: 10000 },
+          );
+        }
 
         // Duplicate check runs after parsing, because "the same file" means the
         // same bytes, not the same filename. A re-upload of something already
@@ -1073,6 +1150,9 @@ export function DocsApp() {
           toast.dismiss(toastId);
           return existing;
         }
+        await room.resize(storedBytes(kept));
+        // A Cancel clicked before the toast lost its button still counts.
+        cancel.signal.throwIfAborted();
 
         let nextFolders = snapshotRef.current.folders;
         if (attachments) {
@@ -1104,6 +1184,8 @@ export function DocsApp() {
           folders: nextFolders,
           activeFileId: nextActiveFileId,
         };
+        // Counted as part of the open workspace from now on.
+        room.release();
         setFiles(nextFiles);
         setFolders(nextFolders);
         setActiveFileId(nextActiveFileId);
@@ -1122,13 +1204,25 @@ export function DocsApp() {
         });
         if (!attachments) navigate({ to: "/" }); // Attachments keep the editor open.
         return [...kept, ...existing];
-      } catch {
+      } catch (error) {
+        if (cancel.signal.aborted && error === cancel.signal.reason) {
+          toast.dismiss(toastId);
+          toast.info("Upload cancelled. Nothing was added.");
+          return [];
+        }
         setSaveStatus((status) => (status === "saving" ? "idle" : status));
-        toast.error("Could not upload the selected file(s). Please try again.", { id: toastId });
+        toast.error(
+          error instanceof StorageLimitError
+            ? error.message
+            : "Could not upload the selected file(s). Please try again.",
+          { id: toastId },
+        );
         return [];
+      } finally {
+        room?.release();
       }
     },
-    [navigate, persistNow],
+    [navigate, persistNow, openWorkspace],
   );
 
   const importAttachments = useCallback((files: File[]) => addFiles(files, true), [addFiles]);
@@ -1239,6 +1333,7 @@ export function DocsApp() {
       query?: string,
       matchedLine?: string,
       occurrence?: number,
+      lineIndex?: number,
     ) => {
       if (!confirmDiscardDraft(fileId)) return;
       setActiveFileId(fileId);
@@ -1248,7 +1343,13 @@ export function DocsApp() {
       // running the same search twice still moves the reader the second time.
       setPendingSearch(
         matchedLine
-          ? { fileId, text: matchedLine, query: query?.trim() || "", occurrence: occurrence ?? 0 }
+          ? {
+              fileId,
+              text: matchedLine,
+              query: query?.trim() || "",
+              occurrence: occurrence ?? 0,
+              lineIndex: lineIndex ?? -1,
+            }
           : null,
       );
 
@@ -1281,84 +1382,80 @@ export function DocsApp() {
 
   const commitConversion = useCallback(
     async (source: ConversionSource, result: ConversionResult, targetWorkspaceId: string) => {
-      const limit = await getMaxStorageBytes();
-      const current = snapshotRef.current;
-      if (
-        workspaceIdRef.current !== targetWorkspaceId ||
-        !sameSource(
-          current.files.find((f) => f.id === source.id),
-          source,
+      const size = utf8Length(result.markdown);
+      // Held before the snapshot is read, so the copy is checked against the
+      // workspace it is actually added to.
+      const room = await reserveStorage(size, openWorkspace);
+      try {
+        const current = snapshotRef.current;
+        if (
+          workspaceIdRef.current !== targetWorkspaceId ||
+          !sameSource(
+            current.files.find((f) => f.id === source.id),
+            source,
+          )
         )
-      )
-        return;
-      const size = new TextEncoder().encode(result.markdown).byteLength;
-      // Account for decoded text and stored base64, rather than trusting stale
-      // import sizes after a document has been edited.
-      const used = current.files.reduce(
-        (sum, file) =>
-          sum + new TextEncoder().encode(file.content).byteLength + (file.data?.length ?? 0),
-        0,
-      );
-      if (limit !== null && used + size > limit)
-        throw new Error(
-          "Not enough local storage for the Markdown copy. Free some space and try again.",
-        );
-      const liveSource = current.files.find((f) => f.id === source.id)!;
-      const derivative: MdFile = {
-        id: crypto.randomUUID(),
-        name: markdownCopyName(
-          source.name,
-          current.files.map((f) => f.name),
-        ),
-        content: result.markdown,
-        mimeType: "text/markdown",
-        kind: "markdown",
-        size,
-        addedAt: Date.now(),
-        folderId: liveSource.folderId,
-        derivedFrom: {
-          sourceFileId: source.id,
-          sourceName: source.name,
-          inputHash: result.inputHash,
-          converter: "anydoc",
-          converterVersion: CONVERTER_VERSION,
-          convertedAt: Date.now(),
-        },
-      };
-      const nextFiles = [...current.files];
-      nextFiles.splice(nextFiles.findIndex((f) => f.id === source.id) + 1, 0, derivative);
-      snapshotRef.current = { ...current, files: nextFiles };
-      filesRef.current = nextFiles;
-      setFiles(nextFiles);
-      markDirty();
-      if (!(await persistNow(false, true))) {
-        if (workspaceIdRef.current === targetWorkspaceId) {
-          const remaining = snapshotRef.current.files.filter((f) => f.id !== derivative.id);
-          snapshotRef.current = { ...snapshotRef.current, files: remaining };
-          filesRef.current = remaining;
-          setFiles(remaining);
-          markDirty();
-        }
-        throw new Error("The Markdown copy could not be saved. The original is unchanged.");
-      }
-      if (workspaceIdRef.current !== targetWorkspaceId) return;
-      if (
-        activeFileIdRef.current === source.id &&
-        pathnameRef.current === "/" &&
-        !editorDirtyRef.current
-      )
-        handleSelect(derivative.id);
-      toast.success(`Created ${derivative.name}`, {
-        description: "Embedded images remain in the original.",
-        action: {
-          label: "Open Markdown",
-          onClick: () => {
-            if (workspaceIdRef.current === targetWorkspaceId) handleSelect(derivative.id);
+          return;
+        const liveSource = current.files.find((f) => f.id === source.id)!;
+        const derivative: MdFile = {
+          id: crypto.randomUUID(),
+          name: markdownCopyName(
+            source.name,
+            current.files.map((f) => f.name),
+          ),
+          content: result.markdown,
+          mimeType: "text/markdown",
+          kind: "markdown",
+          size,
+          addedAt: Date.now(),
+          folderId: liveSource.folderId,
+          derivedFrom: {
+            sourceFileId: source.id,
+            sourceName: source.name,
+            inputHash: result.inputHash,
+            converter: "anydoc",
+            converterVersion: CONVERTER_VERSION,
+            convertedAt: Date.now(),
           },
-        },
-      });
+        };
+        const nextFiles = [...current.files];
+        nextFiles.splice(nextFiles.findIndex((f) => f.id === source.id) + 1, 0, derivative);
+        snapshotRef.current = { ...current, files: nextFiles };
+        filesRef.current = nextFiles;
+        room.release();
+        setFiles(nextFiles);
+        markDirty();
+        if (!(await persistNow(false, true))) {
+          if (workspaceIdRef.current === targetWorkspaceId) {
+            const remaining = snapshotRef.current.files.filter((f) => f.id !== derivative.id);
+            snapshotRef.current = { ...snapshotRef.current, files: remaining };
+            filesRef.current = remaining;
+            setFiles(remaining);
+            markDirty();
+          }
+          throw new Error("The Markdown copy could not be saved. The original is unchanged.");
+        }
+        if (workspaceIdRef.current !== targetWorkspaceId) return;
+        if (
+          activeFileIdRef.current === source.id &&
+          pathnameRef.current === "/" &&
+          !editorDirtyRef.current
+        )
+          handleSelect(derivative.id);
+        toast.success(`Created ${derivative.name}`, {
+          description: "Embedded images remain in the original.",
+          action: {
+            label: "Open Markdown",
+            onClick: () => {
+              if (workspaceIdRef.current === targetWorkspaceId) handleSelect(derivative.id);
+            },
+          },
+        });
+      } finally {
+        room.release();
+      }
     },
-    [handleSelect, markDirty, persistNow],
+    [handleSelect, markDirty, persistNow, openWorkspace],
   );
 
   const conversion = useDocumentConversion({ workspaceId, files, commit: commitConversion });
@@ -1664,7 +1761,13 @@ flowchart LR
       setActiveHeadingId(null);
       // A board opens straight onto its canvas — the canvas *is* its editor, so
       // there is no separate edit mode to request.
-      if (!isBoard) setAutoEditFileId(id);
+      if (!isBoard) {
+        // Both are needed at once; fetch them side by side rather than the
+        // editor only after the reader has arrived and asked for it.
+        preloadMarkdownViewer();
+        preloadMarkdownEditor();
+        setAutoEditFileId(id);
+      }
       setDrawerOpen(false);
       if (location.pathname !== "/") navigate({ to: "/" });
       markDirty();
@@ -2135,6 +2238,29 @@ flowchart LR
     [],
   );
 
+  // Anything that reloads the page (stale-chunk recovery) saves through here
+  // first, and learns what a reload would still cost. See safe-reload.ts.
+  useEffect(() => {
+    let journalled = true;
+    return registerReloadGuard({
+      flush: () => {
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        if (journalTimer.current) clearTimeout(journalTimer.current);
+        journalled = journal.flush();
+        return persistNow(false);
+      },
+      idle: () => !hasUnsavedWork() && !saveErrorRef.current && !workspaceConflictRef.current,
+      // Editor text is in the draft journal, which offers it back after the
+      // reload; everything else unsaved exists only in this tab.
+      atRisk: () =>
+        mutationRef.current !== savedMutationRef.current ||
+        officeDirtyPanes.current.size > 0 ||
+        !!saveErrorRef.current ||
+        workspaceConflictRef.current ||
+        (editorDirtyRef.current && !journalled),
+    });
+  }, [hasUnsavedWork, journal, persistNow]);
+
   useEffect(
     () =>
       persistence.subscribe((change) => {
@@ -2414,8 +2540,21 @@ flowchart LR
 
   const importWorkspace = useCallback(
     async (file: File) => {
+      let ws: WorkspaceRecord;
       try {
-        const ws = parseWorkspaceImport(await file.text());
+        ws = parseWorkspaceImport(await file.text());
+      } catch (error) {
+        // Validation runs before anything is written, so nothing was imported.
+        toast.error(
+          error instanceof ImportValidationError
+            ? `Nothing was imported. ${error.message}`
+            : "Nothing was imported. That file isn't a valid workspace backup.",
+          { id: "workspace-import-error" },
+        );
+        return;
+      }
+      let room: StorageReservation | undefined;
+      try {
         const existing = await storedWorkspaces();
 
         // The same export imported twice would otherwise overwrite the copy
@@ -2442,23 +2581,39 @@ flowchart LR
         if (!finalName) return; // reader cancelled the rename — import nothing
         ws.name = finalName;
 
+        room = await reserveStorage(storedBytes(ws.files), openWorkspace);
         if (!(await persistNow(true))) return;
         await persistence.serial(() => persistence.putWorkspace(ws));
+        room.release();
         await refreshWorkspaceList();
         hydrateWorkspace(ws);
         savePrefs({ lastWorkspaceId: ws.id });
       } catch (error) {
         setSaveStatus("idle");
-        // Validation runs before anything is written, so nothing was imported.
+        if (!(error instanceof StorageLimitError))
+          console.error("Could not import workspace backup", error);
         toast.error(
-          error instanceof ImportValidationError
-            ? `Nothing was imported. ${error.message}`
-            : "Nothing was imported. That file isn't a valid workspace backup.",
+          `Nothing was imported. ${
+            error instanceof StorageLimitError
+              ? error.message
+              : isQuotaExceeded(error)
+                ? "This browser is out of storage space for Localdox."
+                : "The backup is valid, but it couldn't be saved on this device. Try again."
+          }`,
           { id: "workspace-import-error" },
         );
+      } finally {
+        room?.release();
       }
     },
-    [persistNow, refreshWorkspaceList, hydrateWorkspace, storedWorkspaces, switchWorkspace],
+    [
+      persistNow,
+      refreshWorkspaceList,
+      hydrateWorkspace,
+      storedWorkspaces,
+      switchWorkspace,
+      openWorkspace,
+    ],
   );
 
   /** Save a workspace backup (full, or a share selection) as a .json download. */
@@ -2553,6 +2708,7 @@ flowchart LR
       if (picked.length === 0) return;
 
       setImportingShare(true);
+      let room: StorageReservation | undefined;
       try {
         // The same file can arrive twice (re-shared, or shared back); fresh ids
         // keep both copies addressable.
@@ -2567,17 +2723,9 @@ flowchart LR
           folderId: null,
         }));
 
-        const incomingBytes = stamped.reduce((sum, f) => sum + (f.size ?? f.content.length), 0);
-        const maxStorage = await getMaxStorageBytes();
-        if (maxStorage != null) {
-          const usedBytes = snapshotRef.current.files.reduce((sum, f) => sum + (f.size ?? 0), 0);
-          if (usedBytes + incomingBytes > maxStorage) {
-            toast.error(
-              `Storage full — this application is strictly capped at ${formatBytes(maxStorage)}. Remove some files before importing shared ones.`,
-            );
-            return;
-          }
-        }
+        // Measured, not read from the link: a payload's `size` is the sender's
+        // claim.
+        room = await reserveStorage(storedBytes(stamped), openWorkspace);
 
         if (target === "new") {
           if (!(await persistNow(true))) return;
@@ -2586,6 +2734,7 @@ flowchart LR
           ws.ui.activeFileId = stamped[0].id;
           ws.ui.fileOrder = stamped.map((f) => f.id);
           await persistence.serial(() => persistence.putWorkspace(ws));
+          room.release();
           await refreshWorkspaceList();
           hydrateWorkspace(ws);
           savePrefs({ lastWorkspaceId: ws.id });
@@ -2616,6 +2765,7 @@ flowchart LR
             files: nextFiles,
             activeFileId: nextActiveFileId,
           };
+          room.release();
           setFiles(nextFiles);
           setActiveFileId(nextActiveFileId);
           setSaveStatus("saving");
@@ -2631,10 +2781,19 @@ flowchart LR
         );
         if (location.pathname !== "/") navigate({ to: "/" });
       } catch (e) {
-        console.error("Failed to import shared files", e);
         setSaveStatus((status) => (status === "saving" ? "idle" : status));
-        toast.error("Could not import the shared files. Please try again.");
+        if (e instanceof StorageLimitError) {
+          toast.error(e.message);
+          return;
+        }
+        console.error("Failed to import shared files", e);
+        toast.error(
+          isQuotaExceeded(e)
+            ? "This browser is out of storage space for Localdox. Nothing was added."
+            : "Could not import the shared files. Please try again.",
+        );
       } finally {
+        room?.release();
         setImportingShare(false);
       }
     },
@@ -2646,6 +2805,7 @@ flowchart LR
       buildRecord,
       location.pathname,
       navigate,
+      openWorkspace,
     ],
   );
 
@@ -2847,6 +3007,7 @@ flowchart LR
   const editFile = useCallback(
     (fileId: string) => {
       if (fileId !== activeFileIdRef.current) handleSelect(fileId);
+      preloadMarkdownEditor();
       setAutoEditFileId(fileId);
     },
     // handleSelect is redefined every render; calling the latest one is correct.
@@ -3107,7 +3268,7 @@ flowchart LR
   const shareDialog = (
     <>
       {incomingShare && (
-        <Suspense fallback={null}>
+        <LazyBoundary>
           <SharedFilesDialog
             open
             files={incomingShare.files}
@@ -3119,10 +3280,10 @@ flowchart LR
               void acceptSharedFiles(target, ids, name)
             }
           />
-        </Suspense>
+        </LazyBoundary>
       )}
       {shareRequest && (
-        <Suspense fallback={null}>
+        <LazyBoundary>
           <SharePreviewDialog
             request={shareRequest}
             onDismiss={() => setShareRequest(null)}
@@ -3130,15 +3291,19 @@ flowchart LR
             onCopy={copyLink}
             onDownload={downloadJson}
           />
-        </Suspense>
+        </LazyBoundary>
       )}
     </>
   );
 
   const {
     hits: searchHits,
+    total: searchTotal,
     pending: searchPending,
     loadingWorkspaces,
+    indexing: searchIndexing,
+    error: searchError,
+    retry: retrySearch,
   } = useSearchIndex({
     active: searchOpen,
     currentWorkspaceId: workspaceId,
@@ -3151,7 +3316,15 @@ flowchart LR
     async (hit: SearchHit) => {
       await switchWorkspace(hit.workspaceId);
       if (showSettings) await openFromHome(hit.fileId, hit.headingId);
-      else handleSelect(hit.fileId, hit.headingId, searchQuery, hit.line, hit.occurrence);
+      else
+        handleSelect(
+          hit.fileId,
+          hit.headingId,
+          searchQuery,
+          hit.line,
+          hit.occurrence,
+          hit.lineIndex,
+        );
       // Clicking a result jumps the reader to it; the panel stays open so more
       // results can be tried without reopening it, the way VS Code's does.
     },
@@ -3164,8 +3337,12 @@ flowchart LR
         crossWorkspace: searchCrossWorkspace,
         onCrossWorkspaceChange: setSearchCrossWorkspace,
         hits: searchHits,
+        total: searchTotal,
         pending: searchPending,
         loadingWorkspaces,
+        indexing: searchIndexing,
+        error: searchError,
+        onRetry: retrySearch,
         onSelectHit: (hit: SearchHit) => void handleSearchHitSelect(hit),
         workspaceName: (id: string) => workspaces.find((w) => w.id === id)?.name ?? "Workspace",
         onClose: () => setSearchOpen(false),
@@ -3173,7 +3350,7 @@ flowchart LR
     : null;
 
   const savedPage = showSaved ? (
-    <Suspense fallback={null}>
+    <LazyBoundary>
       <SavedPage
         saved={savedEntries}
         highlights={highlights}
@@ -3183,7 +3360,7 @@ flowchart LR
         onOpenHighlight={(hl) => handleSelect(hl.fileId, hl.subtopicId || undefined)}
         onRemoveHighlight={removeHighlight}
       />
-    </Suspense>
+    </LazyBoundary>
   ) : null;
 
   // Settings is a dialog over the reader rather than a page of its own, so the
@@ -3211,7 +3388,7 @@ flowchart LR
   // works — it just opens the dialog on top. Rendered from both the empty state
   // and the reader, so that link resolves even before any document is open.
   const settingsDialog = showSettings ? (
-    <Suspense fallback={null}>
+    <LazyBoundary>
       <SettingsPage
         workspaces={workspaces}
         currentWorkspaceId={workspaceId}
@@ -3272,7 +3449,7 @@ flowchart LR
         initialTab={pendingSettingsTab}
         onClose={closeSettings}
       />
-    </Suspense>
+    </LazyBoundary>
   ) : null;
 
   // ---- durability surface ----
@@ -3627,9 +3804,10 @@ flowchart LR
               </SheetContent>
             </Sheet>
 
-            {/* One boundary for the whole content column. The settings page and the
-            binary-document viewers are code-split; the markdown viewer is not,
-            so the common case never suspends here. */}
+            {/* One boundary for the whole content column: the settings page and the
+            binary-document viewers suspend here. The Markdown reader has its own
+            placeholder (MarkdownViewerLazy), so a first open keeps the column's
+            layout; a failed download of any of them lands here. */}
             <ConversionContext.Provider
               value={{
                 files,
@@ -3639,7 +3817,11 @@ flowchart LR
                 onOpen: handleSelect,
               }}
             >
-              <Suspense fallback={<main className="min-w-0 flex-1" aria-busy />}>
+              <LazyBoundary
+                loading={<main className="min-w-0 flex-1" aria-busy />}
+                failed={<ChunkFailedNotice />}
+                resetKey={`${activeFileId}:${showSaved}`}
+              >
                 {/* In split view the column is pinned to the viewport and each pane
                 scrolls itself. Without a real height here the group resolves
                 `h-full` against an auto-height parent, every pane grows to its
@@ -3863,7 +4045,7 @@ flowchart LR
                     />
                   ) : null}
                 </main>
-              </Suspense>
+              </LazyBoundary>
             </ConversionContext.Provider>
           </div>
 
@@ -3883,7 +4065,7 @@ flowchart LR
           are derived from every document in the workspace; keeping it out of
           the tree until it is asked for saves that work on every render. */}
           {aiOpen && aiEnabled && (
-            <Suspense fallback={null}>
+            <LazyBoundary>
               <AskAiPanel
                 open
                 onClose={closeAskAi}
@@ -3895,7 +4077,7 @@ flowchart LR
                 onInsert={insertAiOutput}
                 onCreateDoc={createAiDoc}
               />
-            </Suspense>
+            </LazyBoundary>
           )}
 
           {settingsDialog}

@@ -25,7 +25,8 @@ export const MIN_STAGE_RATIO = 0.26;
  * unreadable (a twenty-node chain came out at 19px per node). Such a diagram
  * is treated like a long code block instead: it takes the full column width,
  * grows to whatever height its own proportions require, and the reader scrolls
- * the page past it.
+ * the page past it. That applies to the still picture only: a stage that plays
+ * the diagram stays a screenful tall (see `playbackBoxStyle`).
  */
 export const TALL_STAGE_RATIO = 1.9;
 
@@ -75,6 +76,9 @@ export function stageWidthCap(ratio: number): string | undefined {
   return `max(${MIN_STAGE_WIDTH}, min(32rem, 70vh) / ${ratio})`;
 }
 
+/** A screenful: the most height any fitted or playback stage takes inline. */
+export const STAGE_MAX_HEIGHT = "min(32rem, 70vh)";
+
 /** The diagram's own size, in viewBox units, as Mermaid laid it out. */
 export interface DiagramSize {
   width: number;
@@ -111,7 +115,27 @@ export function stageBoxStyle(
   return {
     aspectRatio: `1 / ${ratio}`,
     paddingBottom: trayGutter,
-    maxHeight: "min(32rem, 70vh)",
+    maxHeight: STAGE_MAX_HEIGHT,
+    minHeight: "9rem",
+  };
+}
+
+/**
+ * Inline sizing for a stage that plays the diagram (Stepped).
+ *
+ * The same as `stageBoxStyle`, except that a tall diagram never gets its
+ * natural height. Natural height suits a still picture that the page scrolls
+ * past. Playback is different: the camera moves inside the stage, and the
+ * transport sits on the stage's bottom edge. A 500-node chain at natural
+ * height made a 52,000 px stage, with the transport and the node being
+ * explained many screens apart. A tall diagram therefore takes the full column
+ * width and a screenful of height, and the camera frames it.
+ */
+export function playbackBoxStyle(ratio: number, trayGutter: number): CSSProperties {
+  if (!isTallStage(ratio)) return stageBoxStyle(ratio, trayGutter);
+  return {
+    height: STAGE_MAX_HEIGHT,
+    paddingBottom: trayGutter,
     minHeight: "9rem",
   };
 }

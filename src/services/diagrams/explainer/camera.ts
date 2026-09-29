@@ -20,11 +20,29 @@
  */
 
 import type { GraphShape } from "./graph";
-import { TALL_STAGE_RATIO } from "../stage-ratio";
-import { clampInside, type Frame } from "./camera-path";
+import { TALL_STAGE_RATIO } from "../stage-ratio.ts";
+import { clampInside, type Frame } from "./camera-path.ts";
 
-export type { Frame } from "./camera-path";
-export { framesClose as framesEqual, lerpFrame } from "./camera-path";
+export type { Frame } from "./camera-path.ts";
+export { framesClose as framesEqual, lerpFrame } from "./camera-path.ts";
+
+/**
+ * The stage a tall diagram plays in, when it is not the diagram's own shape.
+ *
+ * A tall diagram (a long `flowchart TD`) plays in a stage one screenful high,
+ * far wider for its height than the diagram. Framed in the diagram's own
+ * proportions, every close-up would be a thin strip, letterboxed down to
+ * unreadable. With a view, framings take the stage's proportions instead.
+ */
+export interface CameraView {
+  /** Stage width over height. */
+  aspect: number;
+  /**
+   * The narrowest framing, in diagram units: the stage's width in pixels, so a
+   * close-up shows the diagram at its natural size and no larger.
+   */
+  minWidth: number;
+}
 
 /** Below this there is nothing to move between. */
 const FOLLOW_MIN_NODES = 4;
@@ -39,13 +57,12 @@ const FOCUS_FILL = 0.55;
 const NOT_WORTH_IT = 0.9;
 
 /** Whether the camera should move at all for this diagram. */
-export function canFollow(graph: GraphShape): boolean {
+export function canFollow(graph: GraphShape, view?: CameraView): boolean {
   const { baseView, nodes } = graph;
   if (nodes.size < FOLLOW_MIN_NODES) return false;
-  // A very tall diagram is rendered at full height and scrolled by the page, so
-  // every node is already on screen at natural size as the reader arrives at
-  // it. Panning a viewBox underneath that would fight the page's own scroll.
-  return baseView.height / baseView.width <= TALL_STAGE_RATIO;
+  // A tall diagram can only be followed in a stage whose shape is known.
+  // Framed in its own 20:1 proportions, a close-up is a sliver.
+  return view !== undefined || baseView.height / baseView.width <= TALL_STAGE_RATIO;
 }
 
 /**
@@ -58,15 +75,29 @@ export function maxZoomFor(graph: GraphShape): number {
   return Math.min(3.2, Math.max(1.6, Math.sqrt(graph.nodes.size) / 1.8));
 }
 
-/** The whole diagram, with a small margin so nothing touches the edge. */
-export function homeFrame(graph: GraphShape): Frame {
+/**
+ * The whole diagram, with a small margin so nothing touches the edge.
+ *
+ * With a view, widened (or heightened) about its centre to the stage's
+ * proportions, so that it and every framing inside it share one shape.
+ */
+export function homeFrame(graph: GraphShape, view?: CameraView): Frame {
   const { baseView } = graph;
   const pad = Math.max(baseView.width, baseView.height) * 0.02;
-  return {
+  const home = {
     x: baseView.x - pad,
     y: baseView.y - pad,
     width: baseView.width + pad * 2,
     height: baseView.height + pad * 2,
+  };
+  if (!view || !(view.aspect > 0)) return home;
+  const width = Math.max(home.width, home.height * view.aspect);
+  const height = width / view.aspect;
+  return {
+    x: home.x - (width - home.width) / 2,
+    y: home.y - (height - home.height) / 2,
+    width,
+    height,
   };
 }
 
@@ -77,8 +108,8 @@ export function homeFrame(graph: GraphShape): Frame {
  * barely tighter than the whole diagram collapses to the whole diagram, so the
  * camera doesn't twitch for nothing.
  */
-export function frameFor(graph: GraphShape, nodeIds: string[]): Frame {
-  const home = homeFrame(graph);
+export function frameFor(graph: GraphShape, nodeIds: string[], view?: CameraView): Frame {
+  const home = homeFrame(graph, view);
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -104,9 +135,11 @@ export function frameFor(graph: GraphShape, nodeIds: string[]): Frame {
   if (width / height > aspect) height = width / aspect;
   else width = height * aspect;
 
-  const maxZoom = maxZoomFor(graph);
-  if (width < home.width / maxZoom) {
-    width = home.width / maxZoom;
+  // A tall diagram is far larger than its stage, so a close-up relative to
+  // the whole would still be tiny: its floor is natural size instead.
+  const narrowest = view ? Math.min(view.minWidth, home.width) : home.width / maxZoomFor(graph);
+  if (width < narrowest) {
+    width = narrowest;
     height = width / aspect;
   }
   if (width >= home.width * NOT_WORTH_IT || height >= home.height * NOT_WORTH_IT) return home;

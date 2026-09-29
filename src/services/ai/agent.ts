@@ -9,13 +9,13 @@
 // whatever other keyed provider is available.
 
 import type { RawContext, ContextPreference } from "./context";
-import { resolveContext } from "./context";
-import { buildMessages } from "./prompts";
-import { getAction, type AIAction } from "./actions";
-import { getProvider, providerForModel, PROVIDER_LIST } from "./registry";
-import { getKey, listConfigured } from "./keys";
-import { loadAIConfig, type AIConfig } from "./config";
-import { AIError, type AIProvider } from "./types";
+import { resolveContext } from "./context.ts";
+import { buildMessages } from "./prompts.ts";
+import { getAction, type AIAction } from "./actions.ts";
+import { getProvider, providerForModel, PROVIDER_LIST } from "./registry.ts";
+import { getKey, listConfigured } from "./keys.ts";
+import { loadAIConfig, type AIConfig } from "./config.ts";
+import { AIError, type AIProvider, type StreamFinish } from "./types.ts";
 
 export interface AgentInput {
   /** Fixed action id, or omit for a freeform request. */
@@ -42,6 +42,8 @@ export interface AgentResult {
   approxTokens: number;
   model: string;
   provider: string;
+  /** How the provider's stream ended; "stop" unless the answer is incomplete. */
+  finish: StreamFinish["reason"];
 }
 
 export async function runAgent(input: AgentInput): Promise<AgentResult> {
@@ -50,6 +52,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
   // The ordered list of providers to try — keyed providers only, preferred one
   // first. Any single key is enough; extra keys become automatic fallbacks.
   const chain = await providerChain(cfg);
+  input.signal?.throwIfAborted();
   if (chain.length === 0) {
     throw new AIError(
       "auth",
@@ -73,37 +76,56 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     const { provider, key } = chain[i];
     const model = modelFor(provider, cfg.defaultModel);
     try {
+      input.signal?.throwIfAborted();
       let text = "";
-      for await (const chunk of provider.streamChat(
-        { messages, model, signal: input.signal },
-        key,
-      )) {
-        text += chunk;
-        input.onToken?.(chunk);
+      // Iterated by hand: for-await drops the generator's return value.
+      const stream = provider.streamChat({ messages, model, signal: input.signal }, key);
+      let step = await stream.next();
+      while (!step.done) {
+        text += step.value;
+        input.onToken?.(step.value);
+        step = await stream.next();
       }
+      // A provider that ends quietly after an abort must not read as a
+      // complete answer.
+      input.signal?.throwIfAborted();
       return {
         text,
         scopeLabel: context.scopeLabel,
         approxTokens: context.approxTokens,
         model,
         provider: provider.id,
+        finish: step.value.reason,
       };
     } catch (err) {
-      // Abort is user intent — never swallow or fall back.
+      // Abort is user intent — never swallow or fall back. Once the signal
+      // has aborted, whatever surfaced (a fetch TypeError, a stream error) is
+      // the cancellation, not a provider failure.
+      if (input.signal?.aborted) throw abortReason(input.signal);
       if ((err as Error)?.name === "AbortError") throw err;
       const aiErr = asAIError(err);
       lastError = aiErr;
-      // Only quota/auth failures are worth trying the next key. A genuine
-      // content/network error would just repeat.
-      const recoverable = aiErr.kind === "quota" || aiErr.kind === "auth";
+      // Only quota/auth/model failures are worth trying the next key: they
+      // belong to this provider. A genuine content/network error would just
+      // repeat.
+      const recoverable = aiErr.kind === "quota" || aiErr.kind === "auth" || aiErr.kind === "model";
       const hasNext = i < chain.length - 1;
       if (recoverable && hasNext) continue;
+      // An unavailable model is not a bad key; its message says what to change.
+      if (aiErr.kind === "model") throw aiErr;
       if (recoverable) throw exhaustionError(chain, aiErr);
       throw aiErr;
     }
   }
 
   throw lastError ?? new AIError("other", "The AI request could not be completed.");
+}
+
+function abortReason(signal: AbortSignal): Error {
+  const reason: unknown = signal.reason;
+  return reason instanceof Error && reason.name === "AbortError"
+    ? reason
+    : new DOMException("The request was cancelled.", "AbortError");
 }
 
 // Providers that have a key, preferred-first. The preferred provider comes from

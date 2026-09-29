@@ -32,6 +32,28 @@ const PREFIX = "/vendor/";
 const ENTRY = "tex-mml-chtml.js";
 
 /**
+ * What that bundle fetches at runtime, which the build must publish too. Only
+ * the entry used to be, so in a production build MathJax's startup waited
+ * forever on these and every equation needing the fallback stayed unrendered.
+ *
+ * - The TeX packages the adapter loads (`loader.load` in adapters/mathjax.ts),
+ *   and `enclose`, which `cancel` requires. MathJax 4 doesn't bundle them.
+ * - The accessibility modules: assistive MathML, and the explorer's.
+ * - The speech-rule engine those use, with its locale maps.
+ *
+ * An allow-list on purpose: `html` and `texhtml` stay unpublished. MathJax
+ * autoloads `html` for `\style`, `\class`, `\cssId` and `\href`, which would
+ * let a document style its equations (a page-wide `position: fixed`
+ * overlay, say); KaTeX runs with `trust: false` for the same reason.
+ */
+const RUNTIME = [
+  /^input\/tex\/extensions\/(ams|boldsymbol|braket|cancel|empheq|enclose|mathtools|physics)\.js$/,
+  /^a11y\/[\w-]+\.js$/,
+  /^sre\/speech-worker\.js$/,
+  /^sre\/mathmaps\/[\w-]+\.json$/,
+];
+
+/**
  * Package name → published directory under the prefix. The font package's name
  * is preserved so MathJax's own `@mathjax/…` loader path resolves against it.
  */
@@ -52,14 +74,15 @@ function packageRoot(name: string): string | null {
  * Which files of a package are published.
  *
  * MathJax's own package is huge (every input/output combination, the full
- * source-map set) and the app loads exactly one bundle from it. The font
+ * source-map set) and the app loads one bundle and what it fetches. The font
  * package, by contrast, is fetched piecemeal by MathJax at runtime, so its
  * runtime directories go over whole — but not its type declarations or maps.
  */
 function publishedPaths(pkg: string, relative: string): string[] {
   const posix = relative.split(path.sep).join("/");
   if (posix.endsWith(".map") || posix.endsWith(".d.ts")) return [];
-  if (pkg === "mathjax") return posix === ENTRY ? [posix] : [];
+  if (pkg === "mathjax")
+    return posix === ENTRY || RUNTIME.some((pattern) => pattern.test(posix)) ? [posix] : [];
 
   // Font package. The woff2 files are fetched at their own path; the glyph
   // modules are imported as `…/js/chtml/…`, which the package's own exports map
@@ -105,6 +128,9 @@ export function mathjaxAsset(): Plugin {
           res.end("Forbidden");
           return;
         }
+        // Serve what the build publishes and nothing more, so a file missing
+        // from the build fails in dev too.
+        if (dir === "mathjax" && !publishedPaths("mathjax", relative).length) return next();
 
         // `js/chtml/…` is the name MathJax imports fonts by; the package's own
         // exports map it to `mjs/`, which the browser cannot do for itself.

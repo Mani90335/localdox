@@ -2,14 +2,17 @@ import type { PDFPageProxy } from "pdfjs-dist";
 import type { PdfReaderState } from "./use-pdf-reader-state";
 import { PdfThumbnailList } from "./PdfThumbnailList";
 import { PdfOutlineTree } from "./PdfOutlineTree";
+import type { PdfOutlineResolver } from "./pdf-outline";
 
 /** Thumbnails + outline/table-of-contents, docked left of the page area. */
 export function PdfSidebar({
   reader,
   getPage,
+  outlineResolver,
 }: {
   reader: PdfReaderState;
   getPage: (pageNumber: number) => Promise<PDFPageProxy>;
+  outlineResolver: PdfOutlineResolver;
 }) {
   const hasOutline = reader.outline.length > 0;
   const tab = reader.sidebarTab === "outline" && hasOutline ? "outline" : "thumbnails";
@@ -32,22 +35,23 @@ export function PdfSidebar({
           </SidebarTabButton>
         )}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {tab === "outline" ? (
-          <PdfOutlineTree
-            outline={reader.outline}
-            currentPage={reader.currentPage}
-            onSelect={reader.goToPage}
-          />
-        ) : (
-          <PdfThumbnailList
-            numPages={reader.numPages ?? 0}
-            currentPages={reader.visiblePages}
-            getPage={getPage}
-            onSelect={reader.goToPage}
-          />
-        )}
-      </div>
+      {tab === "outline" ? (
+        // Its own scroll container: it windows long lists by scroll position.
+        <PdfOutlineTree
+          outline={reader.outline}
+          currentPage={reader.currentPage}
+          onSelect={reader.goToPage}
+          resolver={outlineResolver}
+        />
+      ) : (
+        // Also its own scroll container, windowed by scroll position.
+        <PdfThumbnailList
+          numPages={reader.numPages ?? 0}
+          currentPages={reader.visiblePages}
+          getPage={getPage}
+          onSelect={reader.goToPage}
+        />
+      )}
     </aside>
   );
 }

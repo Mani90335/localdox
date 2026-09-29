@@ -158,6 +158,16 @@ export function getSelectionOffsets(
   return { start: Math.min(start, end), end: Math.max(start, end), text: sel.toString() };
 }
 
+/** A range's start/end as character offsets within container, or null. */
+export function rangeOffsets(
+  container: HTMLElement,
+  range: Range,
+): { start: number; end: number } | null {
+  const start = pointToOffset(container, range.startContainer, range.startOffset);
+  const end = pointToOffset(container, range.endContainer, range.endOffset);
+  return start == null || end == null || start >= end ? null : { start, end };
+}
+
 /**
  * Character offsets of an element's own text within container — the block-level
  * counterpart to `getSelectionOffsets`, used when the reader stars a table, a
@@ -347,6 +357,31 @@ export function queryRanges(container: HTMLElement, query: string): Range[] {
     if (range) ranges.push(range);
   }
   return ranges;
+}
+
+/**
+ * The `n`th (0-based) match of `query` in the container's text, counted the
+ * way `queryRanges` counts, and how many matches there are in all — so a
+ * caller can check the page holds the matches it expects before trusting the
+ * position.
+ */
+export function nthQueryRange(
+  container: HTMLElement,
+  query: string,
+  n: number,
+): { count: number; range: Range | null } {
+  const needle = query.trim();
+  if (!needle) return { count: 0, range: null };
+  const pattern = literalPattern(needle);
+  const text = fullText(getIndex(container));
+  let count = 0;
+  let range: Range | null = null;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    if (count === n) range = buildRange(container, match.index, match.index + match[0].length);
+    count++;
+  }
+  return { count, range };
 }
 
 /**

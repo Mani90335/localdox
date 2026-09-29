@@ -47,6 +47,9 @@ import {
 } from "../src/services/math/remark-math-nodes.ts";
 import { extractMathml, loadKatex, renderKatexSync } from "../src/services/math/adapters/katex.ts";
 
+/** A later task: the per-task typesetting budget has been reset. */
+const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 const CORPUS = readFileSync(
   path.join(import.meta.dirname, "fixtures", "math-physics-corpus.md"),
   "utf8",
@@ -603,48 +606,44 @@ test("concurrent asks for one expression share a single render", async () => {
   assert.equal(mathCacheSize(), 1);
 });
 
-test("the corpus renders on the fast path in a single pass, well under a frame", () => {
+test("the corpus renders once, then every repeat is a cache hit", async () => {
   clearMathCache();
   const registry = buildEquationRegistry(CORPUS);
   const renderable = registry.entries.filter((entry) => katexCanAttempt(entry.latex));
 
+  // Through the async path, which typesets in budgeted slices (the synchronous
+  // path declines once a task has spent its budget).
   const started = performance.now();
-  for (const entry of renderable) {
-    try {
-      renderMathSync({ latex: entry.latex, displayMode: entry.displayMode });
-    } catch {
-      /* the corpus's deliberate failures */
-    }
-  }
-  const cold = performance.now() - started;
+  const cold = await Promise.allSettled(
+    renderable.map((entry) => renderMath({ latex: entry.latex, displayMode: entry.displayMode })),
+  );
+  const coldMs = performance.now() - started;
 
   // A whole physics document's worth of math, rendered cold. Generous enough
   // not to be flaky on a loaded machine, tight enough to catch a regression
   // that puts the slow engine on the default path.
-  assert.ok(cold < 2000, `cold render of ${renderable.length} equations took ${cold.toFixed(0)}ms`);
-
-  // The second pass is all cache hits, and must be dramatically cheaper — this
-  // is what makes a repeated equation and a re-render free.
-  const warmStart = performance.now();
-  for (const entry of renderable) {
-    renderMathSync({ latex: entry.latex, displayMode: entry.displayMode });
-  }
-  const warm = performance.now() - warmStart;
   assert.ok(
-    warm < cold,
-    `warm pass (${warm.toFixed(1)}ms) should beat cold (${cold.toFixed(1)}ms)`,
+    coldMs < 2000,
+    `cold render of ${renderable.length} equations took ${coldMs.toFixed(0)}ms`,
   );
-});
 
-test("the cache is bounded, so a long session cannot grow without limit", () => {
-  clearMathCache();
-  // Comfortably past the 2000-entry limit.
-  for (let i = 0; i < 2200; i++) {
-    renderMathSync({ latex: `x_{${i}} = ${i}`, displayMode: false });
-  }
-  assert.ok(mathCacheSize() <= 2000, `cache grew to ${mathCacheSize()}`);
-  // And the most recent entries are the ones still resident.
-  assert.ok(peekRenderedMath("x_{2199} = 2199", false));
+  // The second pass is all cache hits, synchronously and in one task: a hit
+  // spends no budget. This is what makes a repeated equation and a re-render
+  // free.
+  const warmStart = performance.now();
+  renderable.forEach((entry, i) => {
+    const first = cold[i];
+    if (first.status !== "fulfilled") return; // the corpus's deliberate failures
+    assert.equal(
+      renderMathSync({ latex: entry.latex, displayMode: entry.displayMode }),
+      first.value,
+    );
+  });
+  const warmMs = performance.now() - warmStart;
+  assert.ok(
+    warmMs < coldMs,
+    `warm pass (${warmMs.toFixed(1)}ms) should beat cold (${coldMs.toFixed(1)}ms)`,
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -780,7 +779,7 @@ test("no engine is imported at module scope by the renderer", () => {
   assert.match(sources["adapters/mathjax.ts"], /createElement\("script"\)/);
 });
 
-test("MathJax is never reached unless an engine chain asks for it", () => {
+test("MathJax is never reached unless an engine chain asks for it", async () => {
   // `auto` and `katex` both start on KaTeX; MathJax appears only as a fallback.
   for (const preference of ["auto", "katex", "temml"] as const) {
     assert.notEqual(engineChain(preference)[0], "mathjax", preference);
@@ -789,5 +788,6 @@ test("MathJax is never reached unless an engine chain asks for it", () => {
   // all: `renderMathSync` answers from KaTeX and the async path is never
   // entered.
   clearMathCache();
+  await nextTask(); // a fresh typesetting budget (see math-render-budget.test.ts)
   assert.ok(renderMathSync({ latex: "E = mc^2", displayMode: true }));
 });

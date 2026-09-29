@@ -1,8 +1,16 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+} from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 import type { PdfReaderState } from "./use-pdf-reader-state";
 import type { PdfSearchMatch } from "./types";
 import { PdfPageCanvas } from "./PdfPageCanvas";
+import { wheelDeltaPixels, wheelZoomFactor } from "./pdf-zoom";
 
 type PdfjsModule = typeof import("pdfjs-dist");
 type PdfTextContent = Awaited<ReturnType<PDFPageProxy["getTextContent"]>>;
@@ -75,6 +83,51 @@ export function PdfPageArea({
   );
   const scale = fitScale ? fitScale * reader.zoom : null;
 
+  // The point of the pages at the middle of the view, as a fraction of their
+  // size. When the pages change size (zoom), that point goes back to the
+  // middle instead of the same scroll offsets landing on different content.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const viewAnchor = useRef({ x: 0.5, y: 0.5, width: 0, height: 0 });
+  const recordAnchor = () => {
+    const el = containerRef.current;
+    const content = contentRef.current;
+    if (!el || !content) return;
+    const view = el.getBoundingClientRect();
+    const rect = content.getBoundingClientRect();
+    // The pages have resized and the observer below hasn't restored the view
+    // yet: the current scroll position is stale (or the browser's clamp), and
+    // the stored anchor is the one to keep.
+    if (rect.width !== viewAnchor.current.width || rect.height !== viewAnchor.current.height)
+      return;
+    viewAnchor.current = {
+      x: (view.left + view.width / 2 - rect.left) / rect.width,
+      y: (view.top + view.height / 2 - rect.top) / rect.height,
+      width: rect.width,
+      height: rect.height,
+    };
+  };
+  // Pages resize a render after `scale` changes (once the page proxy
+  // resolves), so reading the layout now also catches a scroll whose event
+  // hasn't been dispatched before the zoom.
+  useLayoutEffect(() => {
+    if (scale) recordAnchor();
+  }, [scale]);
+  useEffect(() => {
+    const el = containerRef.current;
+    const content = contentRef.current;
+    if (!el || !content) return;
+    const observer = new ResizeObserver(() => {
+      const { x, y } = viewAnchor.current;
+      const view = el.getBoundingClientRect();
+      const rect = content.getBoundingClientRect();
+      el.scrollLeft += rect.left + x * rect.width - (view.left + view.width / 2);
+      el.scrollTop += rect.top + y * rect.height - (view.top + view.height / 2);
+      viewAnchor.current = { x, y, width: rect.width, height: rect.height };
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
+
   // Only the focusable page surface owns these shortcuts. Controls, portals,
   // other readers and browser/selection shortcuts keep their own key handling.
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -129,19 +182,33 @@ export function PdfPageArea({
   };
 
   // Ctrl/Cmd + wheel (trackpad pinch on most browsers) zooms the page instead
-  // of the browser tab, matching `ImageViewer`'s existing pinch handling.
+  // of the browser tab, matching `ImageViewer`'s existing pinch handling. The
+  // zoom follows the size of the gesture (see `pdf-zoom.ts`); a pinch's burst
+  // of small events is summed and applied once per frame.
+  const zoomBy = reader.zoomBy;
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    let pending = 0;
+    let frame = 0;
     const onWheel = (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
-      if (event.deltaY < 0) reader.zoomIn();
-      else reader.zoomOut();
+      pending += wheelDeltaPixels(event.deltaY, event.deltaMode);
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const factor = wheelZoomFactor(pending);
+        pending = 0;
+        if (factor !== 1) zoomBy(factor);
+      });
     };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, [reader]);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      cancelAnimationFrame(frame);
+    };
+  }, [zoomBy]);
 
   // Horizontal swipe turns the page; a mostly-vertical drag is a scroll and is
   // left alone.
@@ -171,27 +238,33 @@ export function PdfPageArea({
       tabIndex={0}
       onKeyDown={onKeyDown}
       onPointerDown={onPointerDown}
+      onScroll={recordAnchor}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
-      className="pdf-page-area relative flex min-h-[calc(100dvh-7.5rem)] flex-1 items-center justify-center gap-8 overflow-auto p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+      className="pdf-page-area relative flex min-h-[calc(100dvh-7.5rem)] flex-1 overflow-auto p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
     >
-      {!scale ? (
-        <div className="h-[70vh] w-[54vh] max-w-md animate-pulse rounded-sm bg-muted/40" />
-      ) : (
-        visiblePages.map((pageNumber) => (
-          <PdfPageCanvas
-            key={pageNumber}
-            pageNumber={pageNumber}
-            scale={scale}
-            rotation={reader.rotation}
-            pdfjs={pdfjs}
-            getPage={getPage}
-            getTextContent={getTextContent}
-            matches={matchesByPage.get(pageNumber) ?? []}
-            activeMatch={activeMatch?.pageNumber === pageNumber ? activeMatch : null}
-          />
-        ))
-      )}
+      {/* Centered with auto margins, not justify/align-center: those center an
+          overflowing (zoomed) page by pushing its top and left edges out of
+          the scrollable area, where no scrolling can reach them. */}
+      <div ref={contentRef} className="m-auto flex items-center gap-8">
+        {!scale ? (
+          <div className="h-[70vh] w-[54vh] max-w-md animate-pulse rounded-sm bg-muted/40" />
+        ) : (
+          visiblePages.map((pageNumber) => (
+            <PdfPageCanvas
+              key={pageNumber}
+              pageNumber={pageNumber}
+              scale={scale}
+              rotation={reader.rotation}
+              pdfjs={pdfjs}
+              getPage={getPage}
+              getTextContent={getTextContent}
+              matches={matchesByPage.get(pageNumber) ?? []}
+              activeMatch={activeMatch?.pageNumber === pageNumber ? activeMatch : null}
+            />
+          ))
+        )}
+      </div>
     </div>
   );
 }

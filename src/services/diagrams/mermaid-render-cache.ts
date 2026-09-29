@@ -14,9 +14,15 @@
  *
  * In-flight renders are cached as promises rather than results, so two stages
  * mounting in the same tick share one render instead of racing to start two.
+ * Every render goes through `withMermaid` (mermaid-runtime.ts), so it is drawn
+ * with its own theme and settings even when other diagrams render beside it.
  */
 
+import { BoundedPromiseCache } from "@/lib/bounded-promise-cache";
 import { largeDiagramMermaidConfig } from "./mermaid-config";
+import { withMermaid } from "./mermaid-runtime";
+import { DiagramHeldError } from "./preflight";
+import { heldBack } from "./render-decision";
 import { clearRenderArtifacts } from "./render-error";
 
 export interface MermaidRenderResult {
@@ -24,75 +30,83 @@ export interface MermaidRenderResult {
 }
 
 /**
- * Small, because the entries are large.
+ * Bounded by the bytes of SVG held, not by how many diagrams.
  *
- * A handful of diagrams is enough to cover the document the reader is looking
- * at plus the one they just scrolled past; holding more risks pinning several
- * megabytes of SVG text for diagrams nobody will look at again.
+ * Six entries used to be the limit. Six small diagrams are a few hundred
+ * kilobytes, and a document with more than six re-rendered each one it
+ * scrolled back to. Six flattened ER diagrams could be tens of megabytes. Now
+ * the whole cache holds at most 12 MiB (a JavaScript string costs up to two
+ * bytes a character), however it is split. The entry just used always stays,
+ * even past the budget, so a large diagram still opens in full screen without
+ * a second render. The entry count only caps bookkeeping.
  */
-const MAX_ENTRIES = 6;
+export const RENDER_CACHE_BYTES = 12 * 1024 * 1024;
+const MAX_ENTRIES = 64;
 
-const cache = new Map<string, Promise<MermaidRenderResult>>();
+export const svgBytes = (result: MermaidRenderResult) => result.svg.length * 2;
+
+const cache = new BoundedPromiseCache<string, MermaidRenderResult>({
+  maxEntries: MAX_ENTRIES,
+  maxWeight: RENDER_CACHE_BYTES,
+  weigh: svgBytes,
+});
+const counts = { hits: 0, misses: 0 };
 
 function cacheKey(code: string, dark: boolean, performanceMode: boolean): string {
   return `${dark ? "d" : "l"}:${performanceMode ? "p" : "n"}:${code}`;
 }
 
-/** Drop the oldest entry once the map outgrows its budget. */
-function evict(): void {
-  while (cache.size > MAX_ENTRIES) {
-    const oldest = cache.keys().next();
-    if (oldest.done) return;
-    cache.delete(oldest.value);
-  }
-}
-
 /**
  * Render a diagram, reusing an identical render when one exists.
  *
- * Mermaid is imported lazily here rather than by each caller so the dynamic
- * import is also shared; the module registry would dedupe it anyway, but
- * keeping it inside the cache means a cache hit never touches the import at
- * all.
+ * A diagram the preflight holds back (preflight.ts) is refused with
+ * `DiagramHeldError` unless the reader chose to draw it (`allowHeavyRender`).
+ * Exports already fall back to the source when a render throws, so a
+ * 1,000-node mindmap no longer freezes an export either.
  */
-export async function renderMermaid(
+export function renderMermaid(
   code: string,
   dark: boolean,
   performanceMode: boolean,
 ): Promise<MermaidRenderResult> {
+  const held = heldBack(code);
+  if (held) return Promise.reject(new DiagramHeldError(held));
   const key = cacheKey(code, dark, performanceMode);
-  const hit = cache.get(key);
-  if (hit) return hit;
+  if (cache.has(key)) counts.hits++;
+  else counts.misses++;
+  // A failed render is not kept: the reader may fix the source and render the
+  // same key again. The cache drops a rejected promise by itself.
+  return cache.get(key, () =>
+    withMermaid(
+      async (mermaid) => {
+        // A unique id per render: Mermaid namespaces its marker defs by id, and
+        // two diagrams sharing one would have the second steal the first's
+        // arrowheads.
+        const id = `mermaid-${Math.random().toString(36).slice(2, 10)}`;
+        try {
+          const { svg } = await mermaid.render(id, code);
+          return { svg };
+        } catch (error) {
+          clearRenderArtifacts(id);
+          throw error;
+        }
+      },
+      {
+        label: "render",
+        config: { theme: dark ? "dark" : "default", ...largeDiagramMermaidConfig(performanceMode) },
+      },
+    ),
+  );
+}
 
-  const pending = (async () => {
-    const { default: mermaid } = await import("mermaid");
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: dark ? "dark" : "default",
-      ...largeDiagramMermaidConfig(performanceMode),
-    });
-    // A unique id per render: Mermaid namespaces its marker defs by id, and two
-    // diagrams sharing one would have the second steal the first's arrowheads.
-    const id = `mermaid-${Math.random().toString(36).slice(2, 10)}`;
-    try {
-      const { svg } = await mermaid.render(id, code);
-      return { svg };
-    } catch (error) {
-      clearRenderArtifacts(id);
-      throw error;
-    }
-  })();
-
-  // A failed render must not be cached: the reader may fix the source and
-  // re-render the same key, and a rejected promise would deny them forever.
-  pending.catch(() => cache.delete(key));
-
-  cache.set(key, pending);
-  evict();
-  return pending;
+/** What the cache holds, for tests and for debugging from the console. */
+export function mermaidRenderCacheStats() {
+  return { entries: cache.size, bytes: cache.weight, ...counts };
 }
 
 /** Forget everything. Exported for tests and for a hard document reload. */
 export function clearMermaidRenderCache(): void {
   cache.clear();
+  counts.hits = 0;
+  counts.misses = 0;
 }

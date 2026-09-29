@@ -163,23 +163,42 @@ const CONFIG = {
 const canSanitize = typeof window !== "undefined" && typeof window.document !== "undefined";
 
 /**
- * Registered once: allow MathJax's `mjx-*` custom elements through.
+ * Math's own DOMPurify instance, configured once.
  *
- * A hook rather than an enumerated tag list because MathJax emits an element
- * per MathML node type and per glyph class — dozens of names, versioned with
- * the engine. The prefix is the stable contract. Attributes are still filtered
- * by the allow-list above, so these elements can carry structure and nothing
- * else.
+ * `sanitize(html, CONFIG)` re-parses the config on every call: it rebuilds the
+ * html, SVG and MathML allow-lists, lowercasing each name. That was ~0.5 ms per
+ * equation, and most of a 1.2 s task on a 2,000-equation document. `setConfig`
+ * parses it once.
+ *
+ * Its own instance, not the shared default one, so neither the config nor the
+ * `mjx-*` hook below reaches other callers (the DOCX viewer sanitizes with
+ * DOMPurify's defaults).
+ *
+ * Note that `USE_PROFILES` takes precedence over `ALLOWED_TAGS`/`ALLOWED_ATTR`
+ * in DOMPurify: the effective policy is its html, SVG and MathML profiles
+ * minus the FORBID lists above.
  */
-let hookInstalled = false;
-function installHook(): void {
-  if (hookInstalled || !canSanitize) return;
-  hookInstalled = true;
-  DOMPurify.addHook("uponSanitizeElement", (node, data) => {
+let purifier: ReturnType<typeof DOMPurify> | null = null;
+function mathPurifier(): ReturnType<typeof DOMPurify> {
+  if (purifier) return purifier;
+  purifier = DOMPurify(window);
+  purifier.setConfig(CONFIG);
+  /**
+   * Allow MathJax's `mjx-*` custom elements through.
+   *
+   * A hook rather than an enumerated tag list because MathJax emits an element
+   * per MathML node type and per glyph class — dozens of names, versioned with
+   * the engine. The prefix is the stable contract. Attributes are still
+   * filtered, so these elements can carry structure and nothing else.
+   * DOMPurify clones the allow-list for each call when a hook is installed, so
+   * the names added here don't accumulate.
+   */
+  purifier.addHook("uponSanitizeElement", (_node, data) => {
     if (data.tagName?.startsWith(MJX_PREFIX)) {
       data.allowedTags[data.tagName] = true;
     }
   });
+  return purifier;
 }
 
 /**
@@ -192,6 +211,5 @@ function installHook(): void {
  */
 export function sanitizeMathMarkup(html: string): string {
   if (!canSanitize) return html;
-  installHook();
-  return DOMPurify.sanitize(html, CONFIG) as unknown as string;
+  return mathPurifier().sanitize(html) as unknown as string;
 }

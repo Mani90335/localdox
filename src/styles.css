@@ -504,6 +504,13 @@
     content-visibility: auto;
     contain-intrinsic-size: auto 240px;
   }
+  /* KaTeX draws an equation as dozens of nested, absolutely tuned spans, so
+     a display equation costs more in style and layout than a paragraph of
+     text. With 1,000 of them, returning from the editor spent ~850 ms there. */
+  .docs-prose .docs-math-block {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 5rem;
+  }
 }
 
 /* Documentation prose typography — tuned for long-form reading (Medium-style):
@@ -1421,7 +1428,8 @@ mjx-container[jax="CHTML"] {
 }
 .docs-math-scroll:focus-visible {
   outline: 2px solid var(--ring);
-  outline-offset: 2px;
+  /* Inset: the block's content-visibility clips anything drawn outside it. */
+  outline-offset: -2px;
   border-radius: 0.375rem;
 }
 /* Centre a short equation, left-align one that overflows: a wide equation that
@@ -1469,7 +1477,8 @@ mjx-container[jax="CHTML"] {
 .docs-math-actions {
   position: absolute;
   right: 0;
-  top: -0.35rem;
+  /* Inside the block: its content-visibility clips paint to the box. */
+  top: 0;
   display: flex;
   gap: 0.125rem;
   opacity: 0;
@@ -1841,6 +1850,15 @@ mjx-container[jax="CHTML"] {
 }
 .interactive-split {
   min-height: 20rem;
+}
+/* Beside the code, the frame fills its pane. Its height still follows its
+   content (the frame reports its body's height, not its own), so this can't
+   feed back into the size it reports. */
+.interactive-split .interactive-preview {
+  height: 100%;
+}
+.interactive-split .interactive-preview iframe {
+  min-height: 100%;
 }
 /* The group is the panel container; it must be allowed to shrink below its
    content's intrinsic width or the code pane pushes the block wider than the
