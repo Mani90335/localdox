@@ -119,8 +119,8 @@ function MindMapFigure({ tree }: { tree: NonNullable<ReturnType<typeof buildMind
   return (
     <div
       ref={hostRef}
-      className={`my-6 overflow-hidden rounded-xl border border-border bg-background ${
-        full ? "my-0 flex h-screen w-screen flex-col rounded-none border-0" : ""
+      className={`overflow-hidden bg-background ${
+        full ? "flex h-screen w-screen flex-col" : "my-6 rounded-xl border border-border"
       }`}
     >
       <div className="flex items-center justify-end border-b border-border/70 bg-background/40 px-2 py-1.5">
@@ -138,7 +138,12 @@ function MindMapFigure({ tree }: { tree: NonNullable<ReturnType<typeof buildMind
           {/* Bounded height: inside a document the map is a figure, not a page,
               and it must not grow past the text it belongs to. Full screen is
               the exception, and there it fills what it is given. */}
-          <MindMapView tree={tree} embedded={!full} onInspect={full ? undefined : setInspected} />
+          <MindMapView
+            tree={tree}
+            embedded={!full}
+            fill={full}
+            onInspect={full ? undefined : setInspected}
+          />
         </Suspense>
         {!full && inspected && (
           <div className="pointer-events-none absolute inset-0 z-10">

@@ -11,7 +11,7 @@ import {
   rememberOversized,
 } from "./render-decision";
 import { ModeTabs, type MermaidMode } from "./mermaid-mode-tabs";
-import { baseName, download, widthCap } from "./mermaid-diagram-helpers";
+import { baseName, download } from "./mermaid-diagram-helpers";
 import { useCameraPreference, useStepPreferences } from "./mermaid-reader-preferences";
 import { StageSpinner, MermaidError } from "./StageStatus";
 import { AnimatorStage } from "./AnimatorStage";
@@ -70,9 +70,6 @@ export function Mermaid({
   const { followNumbers, showNumbers } = useStepPreferences();
   const [renderError, setRenderError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  // Measured by the inline stage; the frame needs it too, to narrow with a tall
-  // diagram instead of drawing a full-width border around empty space.
-  const [stageRatio, setStageRatio] = useState<number | null>(null);
   // Present when the markdown viewer has delegated its save star to this tray.
   const saveAction = useSaveAction();
   // Trimming a multi-megabyte source on every state update is measurable. The
@@ -115,19 +112,6 @@ export function Mermaid({
   const [performanceImageUrl, setPerformanceImageUrl] = useState<string | null>(null);
   const handlePerformanceImage = useCallback((url: string | null) => {
     setPerformanceImageUrl(url);
-  }, []);
-  const frameCap = stageRatio ? (widthCap(stageRatio) ?? null) : null;
-  /**
-   * One callback for the stage's measured proportions, whatever the framing.
-   *
-   * It used to be `setStageRatio` inline and `undefined` in full screen, and
-   * every stage lists it as an effect dependency — so entering or leaving full
-   * screen re-ran each stage's render effect and laid the diagram out again.
-   * The full-screen stage's measurement is simply ignored instead.
-   */
-  const fullscreenRef = useRef(false);
-  const reportRatio = useCallback((ratio: number) => {
-    if (!fullscreenRef.current) setStageRatio(ratio);
   }, []);
 
   /**
@@ -174,9 +158,7 @@ export function Mermaid({
   const frameRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const sync = () => {
-      const on = document.fullscreenElement === frameRef.current;
-      fullscreenRef.current = on;
-      setFullscreen(on);
+      setFullscreen(document.fullscreenElement === frameRef.current);
     };
     document.addEventListener("fullscreenchange", sync);
     return () => document.removeEventListener("fullscreenchange", sync);
@@ -349,7 +331,6 @@ export function Mermaid({
             fill={stageFill}
             controls={controls}
             onError={setRenderError}
-            onRatio={reportRatio}
             onOversized={handleOversized}
             onUnsupported={handleUnsupported}
           />
@@ -359,13 +340,7 @@ export function Mermaid({
     if (effectiveMode === "raw" && gpu) {
       return (
         <Suspense fallback={<StageSpinner label="Loading large diagram…" />}>
-          <LargeDiagramStage
-            code={source}
-            dark={dark}
-            fill={stageFill}
-            onError={setRenderError}
-            onRatio={reportRatio}
-          />
+          <LargeDiagramStage code={source} dark={dark} fill={stageFill} onError={setRenderError} />
         </Suspense>
       );
     }
@@ -378,7 +353,6 @@ export function Mermaid({
           fill={stageFill}
           controls={controls}
           onError={setRenderError}
-          onRatio={reportRatio}
           performanceMode={performanceMode}
           onPerformanceImage={handlePerformanceImage}
           onOversized={handleOversized}
@@ -392,26 +366,23 @@ export function Mermaid({
         fill={stageFill}
         controls={controls}
         onError={setRenderError}
-        onRatio={reportRatio}
       />
     );
   };
 
   return (
     <>
-      {/* The frame hugs the stage rather than the column: a tall diagram is
-          capped to a screenful and narrower than the text, and a full-width card
-          around it would just re-draw the dead space the sizing removed. The cap
-          is the stage's, mirrored here, because `w-fit` would instead collapse a
-          wide diagram to its intrinsic width and shrink the picture. */}
+      {/* The frame always spans the text column, like every other block in
+          the document. A tall diagram's stage is still capped to a screenful
+          and centred inside it; the frame used to shrink to that cap, which
+          left diagrams in one document at a scatter of different widths. */}
       <div
         ref={frameRef}
         className={`mermaid-frame overflow-hidden border-border bg-muted/30 ${
           fullscreen
             ? "flex h-screen w-screen flex-col rounded-none border-0"
-            : "my-6 rounded-xl border mx-auto"
+            : "my-6 rounded-xl border"
         }`}
-        style={fullscreen ? undefined : frameCap ? { maxWidth: frameCap } : undefined}
         data-performance-mode={performanceMode ? "" : undefined}
       >
         {header}

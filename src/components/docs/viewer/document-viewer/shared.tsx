@@ -1,11 +1,11 @@
-import { ExportMenu } from "@/services/markdown-export/ExportMenu";
+import { EditButton } from "../EditButton";
+import { useEditAction } from "../EditFileContext";
 import type { DocumentUpdate } from "@/services/office-editing";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import { ViewerHeader, type ViewerNav } from "../../navigation/ViewerHeader";
 
 export interface Props {
   file: MdFile;
-  viewerAction?: React.ReactNode;
   isBookmarked?: boolean;
   onToggleBookmark?: () => void;
   onRemoveFile?: () => void;
@@ -113,26 +113,32 @@ export function ViewerFrame({
   children,
   action,
   navAction,
+  editing = false,
 }: {
   file?: MdFile;
   embedded?: boolean;
   children: React.ReactNode;
   action?: React.ReactNode;
+  /** The viewer is in its editor; the header's pencil has nothing to start. */
+  editing?: boolean;
   navAction?: React.ReactNode;
   icon?: React.ReactNode;
   isBookmarked?: boolean;
   onToggleBookmark?: () => void;
 } & Pick<Props, "prevFile" | "nextFile" | "onNavFile" | "onOpenPalette">) {
+  const edit = useEditAction(editing ? undefined : file);
   if (embedded) return <>{children}</>;
   return (
-    <section className="min-h-[calc(100dvh-4rem)] bg-background">
+    <section className="min-h-[calc(100dvh-var(--app-chrome-h))] bg-background">
       <ViewerHeader
         navAction={navAction}
         actions={
-          file ? (
+          // Exporting lives in the sidebar row's ⋮ ▸ Export, with every
+          // format; the header keeps to acting on the document itself.
+          edit ? (
             <>
               {action}
-              <ExportMenu file={file} />
+              <EditButton onEdit={edit} />
             </>
           ) : (
             action

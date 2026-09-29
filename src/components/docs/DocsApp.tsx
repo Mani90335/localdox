@@ -71,6 +71,9 @@ import {
 import { WorkspaceMenu } from "./workspace/WorkspaceMenu";
 import { WorkspaceSheet } from "./workspace/WorkspaceSheet";
 import { MoveToWorkspaceDialog } from "./workspace/MoveToWorkspaceDialog";
+import { MoveToBinDialog, type BinRequest } from "./workspace/MoveToBinDialog";
+import { NothingHere } from "./docs-app/NothingHere";
+import { EditFileContext } from "./viewer/EditFileContext";
 import type { AskAiPrefill } from "@/services/ai";
 
 // Code-split surfaces. None of these is on the path to reading a document — the
@@ -1527,12 +1530,88 @@ export function DocsApp() {
    * is one way too many: binning is the single gesture, and it is undoable for
    * thirty days from a place the reader can actually find.
    */
-  const moveToBin = useCallback(
-    (id: string) => {
-      setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, deletedAt: Date.now() } : f)));
+  const binNow = useCallback(
+    (fileIds: string[], folderIds: string[] = []) => {
+      const binning = new Set(fileIds);
+      const now = Date.now();
+      if (binning.size) {
+        setFiles((prev) => prev.map((f) => (binning.has(f.id) ? { ...f, deletedAt: now } : f)));
+      }
+      if (folderIds.length) {
+        // A folder has no Bin of its own; its documents are in `fileIds`
+        // already. Anything left under it (a hidden attachments folder) is
+        // lifted to the top level rather than orphaned.
+        const removing = new Set(folderIds);
+        setFolders((prev) =>
+          prev
+            .filter((f) => !removing.has(f.id))
+            .map((f) => (f.parentId && removing.has(f.parentId) ? { ...f, parentId: null } : f)),
+        );
+      }
+      // A binned document leaves the screen as well as the list. The column
+      // that was showing it shows nothing rather than falling back to some
+      // other document from its history, which would read as the wrong file
+      // having opened.
+      setPaneLayout((prev) => {
+        const showing = new Set(
+          prev.panes
+            .filter((pane) => pane.activeTabId && binning.has(pane.activeTabId))
+            .map((pane) => pane.id),
+        );
+        const next = closeFileEverywhere(prev, fileIds);
+        if (!showing.size) return next;
+        return {
+          ...next,
+          panes: next.panes.map((pane) =>
+            showing.has(pane.id) ? { ...pane, activeTabId: null } : pane,
+          ),
+        };
+      });
       markDirty();
     },
     [markDirty],
+  );
+
+  /** Waiting on the reader's answer: binning something that is open, or a folder. */
+  const [binRequest, setBinRequest] = useState<BinRequest | null>(null);
+
+  /**
+   * Bin now, or ask first.
+   *
+   * Asks only when the answer matters: a document on screen is about to vanish
+   * from under the reader, or a folder is about to leave the list (folders are
+   * not themselves recoverable). Anything else goes straight to the Bin.
+   */
+  const requestBin = useCallback(
+    (fileIds: string[], folderIds: string[] = []) => {
+      if (!fileIds.length && !folderIds.length) return;
+      const { files: current, paneLayout: layout } = snapshotRef.current;
+      const onScreen = new Set(layout.panes.map((pane) => pane.activeTabId));
+      const binning = new Set(fileIds);
+      const openNames = current
+        .filter((f) => binning.has(f.id) && onScreen.has(f.id))
+        .map((f) => f.name);
+      if (!openNames.length && !folderIds.length) {
+        binNow(fileIds, folderIds);
+        return;
+      }
+      setBinRequest({
+        fileIds,
+        folderIds,
+        openNames,
+        singleName:
+          fileIds.length === 1 && !folderIds.length
+            ? current.find((f) => f.id === fileIds[0])?.name
+            : undefined,
+      });
+    },
+    [binNow],
+  );
+  const moveToBin = useCallback((id: string) => requestBin([id]), [requestBin]);
+  const removeSelection = useCallback(
+    ({ fileIds, folderIds }: { fileIds: string[]; folderIds: string[] }) =>
+      requestBin(fileIds, folderIds),
+    [requestBin],
   );
 
   const restoreFromBin = useCallback(
@@ -1876,6 +1955,33 @@ flowchart LR
   const moveFileToFolder = useCallback(
     (fileId: string, folderId: string | null) => {
       setFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, folderId } : f)));
+      markDirty();
+    },
+    [markDirty],
+  );
+
+  /**
+   * Move a folder to where `targetId` sits: its place in the list, under the
+   * same parent. Refuses a drop into the folder's own subtree, for the same
+   * reason `moveFolderToFolder` does.
+   */
+  const reorderFolder = useCallback(
+    (folderId: string, targetId: string) => {
+      if (folderId === targetId) return;
+      setFolders((prev) => {
+        const from = prev.findIndex((f) => f.id === folderId);
+        const to = prev.findIndex((f) => f.id === targetId);
+        if (from === -1 || to === -1) return prev;
+        const parentId = prev[to].parentId ?? null;
+        const parentOf = new Map(prev.map((f) => [f.id, f.parentId ?? null]));
+        for (let at: string | null = parentId; at; at = parentOf.get(at) ?? null) {
+          if (at === folderId) return prev;
+        }
+        const next = [...prev];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, { ...moved, parentId });
+        return next;
+      });
       markDirty();
     },
     [markDirty],
@@ -3387,6 +3493,17 @@ flowchart LR
    * sidebar is unmounted on a phone once the drawer closes, and the move must
    * survive that — it is the reader's documents in flight.
    */
+  const binDialog = (
+    <MoveToBinDialog
+      request={binRequest}
+      onCancel={() => setBinRequest(null)}
+      onConfirm={() => {
+        if (binRequest) binNow(binRequest.fileIds, binRequest.folderIds);
+        setBinRequest(null);
+      }}
+    />
+  );
+
   const moveDialog = (
     <MoveToWorkspaceDialog
       open={pendingMove !== null}
@@ -3580,6 +3697,7 @@ flowchart LR
                   onSelect={handleSelect}
                   onAddFiles={() => inputRef.current?.click()}
                   onRemoveFile={moveToBin}
+                  onRemoveSelection={removeSelection}
                   onDownloadFile={downloadFile}
                   onDownloadFiles={downloadFiles}
                   onMoveToWorkspace={workspaces.length > 1 ? setPendingMove : undefined}
@@ -3599,6 +3717,7 @@ flowchart LR
                   onMoveFileToFolder={moveFileToFolder}
                   onMoveFolderToFolder={moveFolderToFolder}
                   onReorderFile={reorderFile}
+                  onReorderFolder={reorderFolder}
                   onSortByName={sortFilesByName}
                   view={sidebarView}
                   onView={setSidebarView}
@@ -3753,6 +3872,7 @@ flowchart LR
                     onSelect={handleSelect}
                     onAddFiles={() => inputRef.current?.click()}
                     onRemoveFile={moveToBin}
+                    onRemoveSelection={removeSelection}
                     onDownloadFile={downloadFile}
                     onDownloadFiles={downloadFiles}
                     onMoveToWorkspace={workspaces.length > 1 ? setPendingMove : undefined}
@@ -3772,6 +3892,7 @@ flowchart LR
                     onMoveFileToFolder={moveFileToFolder}
                     onMoveFolderToFolder={moveFolderToFolder}
                     onReorderFile={reorderFile}
+                    onReorderFolder={reorderFolder}
                     onSortByName={sortFilesByName}
                     view={sidebarView}
                     onView={setSidebarView}
@@ -3822,42 +3943,43 @@ flowchart LR
             binary-document viewers suspend here. The Markdown reader has its own
             placeholder (MarkdownViewerLazy), so a first open keeps the column's
             layout; a failed download of any of them lands here. */}
-            <ConversionContext.Provider
-              value={{
-                files,
-                runningId: conversion.runningId,
-                onConvert: conversion.start,
-                onCancel: conversion.cancel,
-                onOpen: handleSelect,
-              }}
-            >
-              <LazyBoundary
-                loading={<main className="min-w-0 flex-1" aria-busy />}
-                failed={<ChunkFailedNotice />}
-                resetKey={`${activeFileId}:${showSaved}`}
+            <EditFileContext.Provider value={editFile}>
+              <ConversionContext.Provider
+                value={{
+                  files,
+                  runningId: conversion.runningId,
+                  onConvert: conversion.start,
+                  onCancel: conversion.cancel,
+                  onOpen: handleSelect,
+                }}
               >
-                {/* In split view the column is pinned to the viewport and each pane
+                <LazyBoundary
+                  loading={<main className="min-w-0 flex-1" aria-busy />}
+                  failed={<ChunkFailedNotice />}
+                  resetKey={`${activeFileId}:${showSaved}`}
+                >
+                  {/* In split view the column is pinned to the viewport and each pane
                 scrolls itself. Without a real height here the group resolves
                 `h-full` against an auto-height parent, every pane grows to its
                 content, and the *window* ends up doing the scrolling — which is
                 why the panes used to move together. */}
-                <main
-                  className={
-                    paneLayout.panes.length > 1 && !showSaved
-                      ? "flex min-h-0 w-0 min-w-0 flex-1 flex-col overflow-hidden h-[calc(100dvh-var(--header-h,3.5rem))]"
-                      : "min-w-0 flex-1 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:pb-0"
-                  }
-                >
-                  {!showSaved &&
-                    paneLayout.panes.length === 1 &&
-                    activeFile &&
-                    conversionActions(activeFile)}
-                  {/* Saved is a page, not an overlay: it takes the content column
+                  <main
+                    className={
+                      paneLayout.panes.length > 1 && !showSaved
+                        ? "flex min-h-0 w-0 min-w-0 flex-1 flex-col overflow-hidden h-[calc(100dvh-var(--header-h,3.5rem))]"
+                        : "min-w-0 flex-1 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:pb-0"
+                    }
+                  >
+                    {!showSaved &&
+                      paneLayout.panes.length === 1 &&
+                      activeFile &&
+                      conversionActions(activeFile)}
+                    {/* Saved is a page, not an overlay: it takes the content column
                   instead of stacking on top of whatever document was open. */}
-                  {showSaved ? (
-                    savedPage
-                  ) : paneLayout.panes.length > 1 ? (
-                    /* Split view. Each pane carries its own tab strip and its own
+                    {showSaved ? (
+                      savedPage
+                    ) : paneLayout.panes.length > 1 ? (
+                      /* Split view. Each pane carries its own tab strip and its own
                    document; the focused pane is what the rest of the app means
                    by "the active file", so nothing outside here has to know
                    panes exist.
@@ -3869,198 +3991,204 @@ flowchart LR
                    window narrowed with a split already open used to land
                    exactly there. Below the width where two columns still read,
                    the panes stack instead. */
-                    <ResizablePanelGroup
-                      orientation={splitStacks ? "vertical" : "horizontal"}
-                      className="h-full"
-                    >
-                      {paneLayout.panes.map((pane, index) => {
-                        const paneFile = files.find((f) => f.id === pane.activeTabId) ?? null;
-                        const paneKind = paneFile
-                          ? (paneFile.kind ?? getDocumentKind(paneFile.name, paneFile.mimeType))
-                          : null;
-                        const paneIsBoard = paneKind === "board";
-                        return (
-                          <Fragment key={pane.id}>
-                            {index > 0 && <ResizableHandle withHandle />}
-                            <ResizablePanel
-                              defaultSize={`${Math.floor(100 / paneLayout.panes.length)}%`}
-                              minSize="20%"
-                            >
-                              <div
-                                onMouseDown={() => focusPane(pane.id)}
-                                className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+                      <ResizablePanelGroup
+                        orientation={splitStacks ? "vertical" : "horizontal"}
+                        className="h-full"
+                      >
+                        {paneLayout.panes.map((pane, index) => {
+                          const paneFile = files.find((f) => f.id === pane.activeTabId) ?? null;
+                          const paneKind = paneFile
+                            ? (paneFile.kind ?? getDocumentKind(paneFile.name, paneFile.mimeType))
+                            : null;
+                          const paneIsBoard = paneKind === "board";
+                          return (
+                            <Fragment key={pane.id}>
+                              {index > 0 && <ResizableHandle withHandle />}
+                              <ResizablePanel
+                                defaultSize={`${Math.floor(100 / paneLayout.panes.length)}%`}
+                                minSize="20%"
                               >
-                                {/* No tab strip. The open documents live in the
+                                <div
+                                  onMouseDown={() => focusPane(pane.id)}
+                                  className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+                                >
+                                  {/* No tab strip. The open documents live in the
                                 sidebar; a pane is just a column of reading, and
                                 the only chrome it carries is a thin header
                                 saying which document it holds and how to close
                                 it. */}
-                                <div
-                                  className={`flex h-9 shrink-0 items-center gap-2 border-b px-3 ${
-                                    pane.id === paneLayout.focusedPaneId
-                                      ? "border-border bg-background"
-                                      : "border-border/60 bg-muted/20"
-                                  }`}
-                                >
-                                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
-                                    {paneFile ? paneFile.name.replace(/\.[^.]+$/, "") : "Empty"}
-                                  </span>
-                                  <button
-                                    onClick={() => closePane(pane.id)}
-                                    aria-label="Close this pane"
-                                    title="Close this pane"
-                                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                  <div
+                                    className={`flex h-9 shrink-0 items-center gap-2 border-b px-3 ${
+                                      pane.id === paneLayout.focusedPaneId
+                                        ? "border-border bg-background"
+                                        : "border-border/60 bg-muted/20"
+                                    }`}
                                   >
-                                    <X className="h-3.5 w-3.5" />
-                                  </button>
+                                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
+                                      {paneFile ? paneFile.name.replace(/\.[^.]+$/, "") : "Empty"}
+                                    </span>
+                                    <button
+                                      onClick={() => closePane(pane.id)}
+                                      aria-label="Close this pane"
+                                      title="Close this pane"
+                                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                  <div
+                                    className={
+                                      paneIsBoard
+                                        ? "min-h-0 min-w-0 flex-1 overflow-hidden"
+                                        : "min-h-0 min-w-0 flex-1 overflow-y-auto px-4"
+                                    }
+                                  >
+                                    {paneFile && conversionActions(paneFile)}
+                                    {paneFile ? (
+                                      <PaneDocument
+                                        file={paneFile}
+                                        files={files}
+                                        saved={saved}
+                                        highlights={highlights}
+                                        workspaceFolders={folders}
+                                        onImportAttachments={importAttachments}
+                                        workspaceId={workspaceId}
+                                        workspaceRevision={workspaceRevision}
+                                        workspaceName={workspaceNameRef.current}
+                                        onContentChange={handleContentChange}
+                                        onDocumentSave={handleDocumentSave}
+                                        onEditorDirtyChange={(dirty) => {
+                                          if (dirty) officeDirtyPanes.current.add(pane.id);
+                                          else officeDirtyPanes.current.delete(pane.id);
+                                          syncEditorDirty();
+                                        }}
+                                        onRenameFile={renameFile}
+                                        onAddHighlight={addHighlight}
+                                        onUpdateHighlight={updateHighlight}
+                                        onRemoveHighlight={removeHighlight}
+                                        onRepairHighlights={repairHighlights}
+                                        onToggleSaved={toggleSaved}
+                                        onRemoveSaved={removeSaved}
+                                        onOpenArtifact={openEmbeddedArtifact}
+                                        readingMode={readingMode}
+                                        contentWidth={contentWidth}
+                                        // An edit request belongs to the column the
+                                        // reader is working in, not to every column
+                                        // showing that document. `revealInPane` has
+                                        // already moved focus to the pane holding the
+                                        // file, so this is that pane — and the same
+                                        // document deliberately opened side by side
+                                        // with itself no longer drops both copies
+                                        // into the editor at once.
+                                        startInEditFileId={
+                                          pane.id === paneLayout.focusedPaneId
+                                            ? autoEditFileId
+                                            : null
+                                        }
+                                        mathPreferences={mathPreferences}
+                                        onStartInEditConsumed={consumeStartInEdit}
+                                        // Only the pane showing the document a jump
+                                        // names is told about it.
+                                        activeSubtopicId={
+                                          paneFile.id === activeFileId ? activeHeadingId : null
+                                        }
+                                        highlightQuery={
+                                          paneFile.id === activeFileId ? highlightQuery : null
+                                        }
+                                        pendingSearch={
+                                          pendingSearch?.fileId === paneFile.id
+                                            ? pendingSearch
+                                            : null
+                                        }
+                                        onSearchShown={clearPendingSearch}
+                                      />
+                                    ) : (
+                                      <NothingHere compact />
+                                    )}
+                                  </div>
                                 </div>
-                                <div
-                                  className={
-                                    paneIsBoard
-                                      ? "min-h-0 min-w-0 flex-1 overflow-hidden"
-                                      : "min-h-0 min-w-0 flex-1 overflow-y-auto px-4"
-                                  }
-                                >
-                                  {paneFile && conversionActions(paneFile)}
-                                  {paneFile ? (
-                                    <PaneDocument
-                                      file={paneFile}
-                                      files={files}
-                                      saved={saved}
-                                      highlights={highlights}
-                                      workspaceFolders={folders}
-                                      onImportAttachments={importAttachments}
-                                      workspaceId={workspaceId}
-                                      workspaceRevision={workspaceRevision}
-                                      workspaceName={workspaceNameRef.current}
-                                      onContentChange={handleContentChange}
-                                      onDocumentSave={handleDocumentSave}
-                                      onEditorDirtyChange={(dirty) => {
-                                        if (dirty) officeDirtyPanes.current.add(pane.id);
-                                        else officeDirtyPanes.current.delete(pane.id);
-                                        syncEditorDirty();
-                                      }}
-                                      onRenameFile={renameFile}
-                                      onAddHighlight={addHighlight}
-                                      onUpdateHighlight={updateHighlight}
-                                      onRemoveHighlight={removeHighlight}
-                                      onRepairHighlights={repairHighlights}
-                                      onToggleSaved={toggleSaved}
-                                      onRemoveSaved={removeSaved}
-                                      onOpenArtifact={openEmbeddedArtifact}
-                                      readingMode={readingMode}
-                                      contentWidth={contentWidth}
-                                      // An edit request belongs to the column the
-                                      // reader is working in, not to every column
-                                      // showing that document. `revealInPane` has
-                                      // already moved focus to the pane holding the
-                                      // file, so this is that pane — and the same
-                                      // document deliberately opened side by side
-                                      // with itself no longer drops both copies
-                                      // into the editor at once.
-                                      startInEditFileId={
-                                        pane.id === paneLayout.focusedPaneId ? autoEditFileId : null
-                                      }
-                                      mathPreferences={mathPreferences}
-                                      onStartInEditConsumed={consumeStartInEdit}
-                                      // Only the pane showing the document a jump
-                                      // names is told about it.
-                                      activeSubtopicId={
-                                        paneFile.id === activeFileId ? activeHeadingId : null
-                                      }
-                                      highlightQuery={
-                                        paneFile.id === activeFileId ? highlightQuery : null
-                                      }
-                                      pendingSearch={
-                                        pendingSearch?.fileId === paneFile.id ? pendingSearch : null
-                                      }
-                                      onSearchShown={clearPendingSearch}
-                                    />
-                                  ) : (
-                                    <p className="px-2 py-16 text-center text-sm text-muted-foreground">
-                                      Nothing open in this pane. Drag a tab here, or pick a document
-                                      from the sidebar.
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            </ResizablePanel>
-                          </Fragment>
-                        );
-                      })}
-                    </ResizablePanelGroup>
-                  ) : activeFile &&
-                    (activeFile.kind === "markdown" ||
-                      activeFile.kind === "text" ||
-                      !activeFile.kind) ? (
-                    <MarkdownViewer
-                      file={activeFile}
-                      prevFile={prevFile}
-                      nextFile={nextFile}
-                      onNav={navFromViewer}
-                      activeSubtopicId={activeHeadingId}
-                      highlightQuery={highlightQuery}
-                      onContentChange={handleContentChange}
-                      onEditorDirtyChange={(dirty) => {
-                        editorDirtyRef.current = dirty;
-                        syncEditorDirty();
-                      }}
-                      startInEditFileId={autoEditFileId}
-                      onStartInEditConsumed={consumeStartInEdit}
-                      nextReadingMin={nextReadingMinutes}
-                      isBookmarked={!!activePageSaved}
-                      onToggleBookmark={toggleActivePageSaved}
-                      highlights={activeFileHighlights}
-                      onAddHighlight={addHighlightToActive}
-                      onUpdateHighlight={updateHighlight}
-                      onRemoveHighlight={removeHighlight}
-                      onRepairHighlights={repairHighlights}
-                      saved={activeFileSaved}
-                      onToggleSaved={toggleSavedOnActive}
-                      onRemoveSaved={removeSaved}
-                      pendingSaved={pendingSaved?.fileId === activeFile.id ? pendingSaved : null}
-                      onSavedShown={clearPendingSaved}
-                      pendingSearch={pendingSearch?.fileId === activeFile.id ? pendingSearch : null}
-                      onSearchShown={clearPendingSearch}
-                      onHome={goHome}
-                      onRenameFile={renameActiveFile}
-                      onShareFile={shareActiveFile}
-                      onAskAi={aiEnabled ? askAiFromSelection : undefined}
-                      readingMode={readingMode}
-                      contentWidth={contentWidth}
-                      mathPreferences={mathPreferences}
-                      workspaceId={workspaceId}
-                      workspaceRevision={workspaceRevision}
-                      workspaceFiles={files}
-                      workspaceFolders={folders}
-                      onImportAttachments={importAttachments}
-                      workspaceName={workspaceNameRef.current}
-                      onOpenArtifact={openEmbeddedArtifact}
-                    />
-                  ) : activeFile ? (
-                    <DocumentViewer
-                      key={activeFile.id}
-                      onDocumentSave={handleDocumentSave}
-                      onEditorDirtyChange={(dirty) => {
-                        editorDirtyRef.current = dirty;
-                        if (dirty) officeDirtyPanes.current.add("main");
-                        else officeDirtyPanes.current.delete("main");
-                        syncEditorDirty();
-                      }}
-                      file={activeFile}
-                      isBookmarked={!!findSaved(saved, { fileId: activeFile.id, kind: "file" })}
-                      onToggleBookmark={toggleActiveDocumentSaved}
-                      prevFile={prevFile}
-                      nextFile={nextFile}
-                      onNavFile={navToFile}
-                      onContentChange={handleContentChange}
-                      startInEditFileId={autoEditFileId}
-                      onStartInEditConsumed={consumeStartInEdit}
-                    />
-                  ) : null}
-                </main>
-              </LazyBoundary>
-            </ConversionContext.Provider>
+                              </ResizablePanel>
+                            </Fragment>
+                          );
+                        })}
+                      </ResizablePanelGroup>
+                    ) : activeFile &&
+                      (activeFile.kind === "markdown" ||
+                        activeFile.kind === "text" ||
+                        !activeFile.kind) ? (
+                      <MarkdownViewer
+                        file={activeFile}
+                        prevFile={prevFile}
+                        nextFile={nextFile}
+                        onNav={navFromViewer}
+                        activeSubtopicId={activeHeadingId}
+                        highlightQuery={highlightQuery}
+                        onContentChange={handleContentChange}
+                        onEditorDirtyChange={(dirty) => {
+                          editorDirtyRef.current = dirty;
+                          syncEditorDirty();
+                        }}
+                        startInEditFileId={autoEditFileId}
+                        onStartInEditConsumed={consumeStartInEdit}
+                        nextReadingMin={nextReadingMinutes}
+                        isBookmarked={!!activePageSaved}
+                        onToggleBookmark={toggleActivePageSaved}
+                        highlights={activeFileHighlights}
+                        onAddHighlight={addHighlightToActive}
+                        onUpdateHighlight={updateHighlight}
+                        onRemoveHighlight={removeHighlight}
+                        onRepairHighlights={repairHighlights}
+                        saved={activeFileSaved}
+                        onToggleSaved={toggleSavedOnActive}
+                        onRemoveSaved={removeSaved}
+                        pendingSaved={pendingSaved?.fileId === activeFile.id ? pendingSaved : null}
+                        onSavedShown={clearPendingSaved}
+                        pendingSearch={
+                          pendingSearch?.fileId === activeFile.id ? pendingSearch : null
+                        }
+                        onSearchShown={clearPendingSearch}
+                        onHome={goHome}
+                        onRenameFile={renameActiveFile}
+                        onShareFile={shareActiveFile}
+                        onAskAi={aiEnabled ? askAiFromSelection : undefined}
+                        readingMode={readingMode}
+                        contentWidth={contentWidth}
+                        mathPreferences={mathPreferences}
+                        workspaceId={workspaceId}
+                        workspaceRevision={workspaceRevision}
+                        workspaceFiles={files}
+                        workspaceFolders={folders}
+                        onImportAttachments={importAttachments}
+                        workspaceName={workspaceNameRef.current}
+                        onOpenArtifact={openEmbeddedArtifact}
+                      />
+                    ) : activeFile ? (
+                      <DocumentViewer
+                        key={activeFile.id}
+                        onDocumentSave={handleDocumentSave}
+                        onEditorDirtyChange={(dirty) => {
+                          editorDirtyRef.current = dirty;
+                          if (dirty) officeDirtyPanes.current.add("main");
+                          else officeDirtyPanes.current.delete("main");
+                          syncEditorDirty();
+                        }}
+                        file={activeFile}
+                        isBookmarked={!!findSaved(saved, { fileId: activeFile.id, kind: "file" })}
+                        onToggleBookmark={toggleActiveDocumentSaved}
+                        prevFile={prevFile}
+                        nextFile={nextFile}
+                        onNavFile={navToFile}
+                        onContentChange={handleContentChange}
+                        startInEditFileId={autoEditFileId}
+                        onStartInEditConsumed={consumeStartInEdit}
+                      />
+                    ) : (
+                      <NothingHere />
+                    )}
+                  </main>
+                </LazyBoundary>
+              </ConversionContext.Provider>
+            </EditFileContext.Provider>
           </div>
 
           <input
@@ -4096,6 +4224,7 @@ flowchart LR
 
           {settingsDialog}
           {moveDialog}
+          {binDialog}
 
           {dragOverlay}
           {shareDialog}

@@ -16,7 +16,8 @@ test.skip(!process.env.PLAYWRIGHT_PRODUCTION, "Requires the production bundle");
 test.use({ serviceWorkers: "block" });
 
 const MARKERS = {
-  reader: "Download HTML + Media",
+  // The Markdown reader's highlight menu; no other chunk carries this label.
+  reader: "Save this selection",
   editor: "Editing — changes save automatically",
   parser: "Cannot close document, a token",
   panes: "data-separator",

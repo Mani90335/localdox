@@ -36,7 +36,6 @@ import {
   Search,
   Crosshair,
   Code2,
-  Download,
   FileText,
 } from "lucide-react";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
@@ -104,8 +103,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ViewerHeader, ViewerPager } from "../navigation/ViewerHeader";
-import { ExportMenu } from "@/services/markdown-export/ExportMenu";
+import { EditButton } from "./EditButton";
 import { ESCAPE_DEPTH, useNavEscape } from "@/hooks/use-nav-history";
+import { usePortalContainer } from "@/hooks/use-portal-container";
 
 interface Props {
   file: MdFile;
@@ -338,26 +338,6 @@ function MarkdownViewerImpl({
     if (editMode) originalContentRef.current = liveContentRef.current;
   }, [editMode]);
 
-  const [exporting, setExporting] = useState(false);
-  const exportHTML = useCallback(async () => {
-    setExporting(true);
-    try {
-      const { downloadMarkdownHTML } = await import("@/services/markdown-export/media-bundle");
-      await downloadMarkdownHTML(file, {
-        workspaceId,
-        workspaceRevision,
-        workspaceFiles,
-        workspaceFolders,
-        workspaceName,
-        sourceFile: file,
-      });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not export this document.");
-    } finally {
-      setExporting(false);
-    }
-  }, [file, workspaceId, workspaceRevision, workspaceFiles, workspaceFolders, workspaceName]);
-
   // Back leaves the editor. Autosave has already written the draft, so this
   // drops nothing the reader typed.
   useNavEscape(editMode, () => setEditMode(false), ESCAPE_DEPTH.mode);
@@ -478,6 +458,9 @@ function MarkdownViewerImpl({
     | { mode: "edit"; hl: Highlight; x: number; y: number; label: string };
   const [menu, setMenu] = useState<HlMenu | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // A selection inside a figure in full screen (a JSON tree) opens the menu
+  // there, since <body> is not painted while it is up.
+  const menuContainer = usePortalContainer();
 
   const openCreateMenu = (at?: { x: number; y: number }) => {
     // Offsets are relative to whatever is rendered in contentRef: the active
@@ -517,7 +500,15 @@ function MarkdownViewerImpl({
   // Sections the reader has wrapped up, by heading id. Cleared on a document
   // switch: the ids belong to the document that was open.
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
-  useEffect(() => setCollapsedSections(new Set()), [file.id]);
+  // Reset during render, on an actual switch only. An effect keyed on `file.id`
+  // also ran on mount, after the first commit: a fold made while a long
+  // document was still mounting could land before that effect flushed, and the
+  // "reset" then wiped it.
+  const [foldsFileId, setFoldsFileId] = useState(file.id);
+  if (foldsFileId !== file.id) {
+    setFoldsFileId(file.id);
+    setCollapsedSections(new Set());
+  }
 
   const collapseCtx = useMemo<CollapseContextValue>(
     () => ({
@@ -920,6 +911,12 @@ function MarkdownViewerImpl({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file.id]);
 
+  /** The header's pencil: into the editor, caret at the top. */
+  const enterEditMode = useCallback(() => {
+    setEditMode(true);
+    setPendingSelect({ start: 0, end: 0 });
+  }, []);
+
   // Edit requested for the document already on screen — the sidebar's "Edit"
   // item, which now owns that action instead of a header button. The effect
   // above only fires on a document switch, so this is the case it cannot see.
@@ -1203,24 +1200,15 @@ function MarkdownViewerImpl({
             </Select>
           )
         }
-        /* Starring lives on the document's own row in the sidebar, and editing
-           lives in that row's menu. What is left here is the one control that
-           changes how this view reads — and when even that does not apply this
-           must be `undefined`, not an empty wrapper, or the header has no way
-           to tell it is empty and reserves its height for nothing. */
+        /* Starring lives on the document's own row in the sidebar, and exporting
+           in that row's ⋮ ▸ Export, where every format is listed. What is left
+           here acts on the document on screen: edit it, or change how it
+           reads. In the editor this must be `undefined`, not an empty wrapper,
+           or the header has no way to tell it is empty and reserves its height
+           for nothing. */
         actions={
           !editMode ? (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void exportHTML()}
-                disabled={exporting}
-                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
-                title="Download a styled HTML page; uploaded attachments are bundled in a ZIP and web media stays online"
-              >
-                <Download className="h-4 w-4" />
-                {exporting ? "Exporting…" : "Download HTML + Media"}
-              </button>
+            <div className="flex items-center gap-1">
               {onToggleReadingMode && (
                 <button
                   onClick={onToggleReadingMode}
@@ -1234,20 +1222,7 @@ function MarkdownViewerImpl({
                   <Files className="h-4 w-4" />
                 </button>
               )}
-              {/* Export sits with the document rather than only in the sidebar
-                  row menu: while reading is when you want it, and on a phone
-                  that panel is closed. */}
-              <ExportMenu
-                file={file}
-                mediaContext={{
-                  workspaceId,
-                  workspaceRevision,
-                  workspaceFiles,
-                  workspaceFolders,
-                  workspaceName,
-                  sourceFile: file,
-                }}
-              />
+              <EditButton onEdit={enterEditMode} />
             </div>
           ) : undefined
         }
@@ -1473,7 +1448,7 @@ function MarkdownViewerImpl({
                 )}
               </div>
             </div>,
-            document.body,
+            menuContainer ?? document.body,
           )}
 
         {lightbox && <Lightbox {...lightbox} onClose={() => setLightbox(null)} />}

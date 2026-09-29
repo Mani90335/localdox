@@ -5,6 +5,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { usePortalContainer } from "@/hooks/use-portal-container";
 
 /**
  * The one Modal for the whole app. A props-driven wrapper around Radix Dialog
@@ -64,7 +65,7 @@ export function Modal({
 }: ModalProps) {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitive.Portal>
+      <DialogPrimitive.Portal container={usePortalContainer()}>
         <DialogPrimitive.Overlay
           className={cn(
             "fixed inset-0 z-(--z-modal) bg-foreground/25 backdrop-blur-sm",

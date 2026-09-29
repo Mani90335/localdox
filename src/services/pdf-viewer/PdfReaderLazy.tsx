@@ -35,7 +35,7 @@ const PdfReader = lazy(async () => {
 function PdfBookPlaceholder() {
   return (
     <div
-      className="flex h-[calc(100dvh-7.5rem)] w-full items-center justify-center bg-muted/20"
+      className="flex h-[calc(100dvh-var(--app-chrome-h)-3.5rem)] w-full items-center justify-center bg-muted/20"
       role="status"
       aria-label="Loading PDF"
     >

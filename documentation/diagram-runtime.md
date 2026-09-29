@@ -158,8 +158,8 @@ also stays drawn while it is being edited.
 huge mindmap no longer freezes an export either.
 
 The source is a `div` with `role="region"` rather than a `<pre>`. The reading
-column styles every `pre` as a full-bleed code block, which pushed it past the
-card's edges.
+column styles every `pre` as a code block of its own (border, padding, shadow),
+which fought the card around it.
 
 ## Debugging
 

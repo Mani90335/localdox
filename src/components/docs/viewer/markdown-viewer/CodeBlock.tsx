@@ -49,7 +49,11 @@ function JsonFigure({ value }: { value: unknown }) {
           {full ? <Minimize2 className="h-3.5 w-3.5" /> : <Expand className="h-3.5 w-3.5" />}
         </button>
       </div>
-      <div className={full ? "min-h-0 flex-1 overflow-auto" : "max-h-128 overflow-auto"}>
+      {/* In full screen the tree's own panel fills the screen rather than
+          sitting as a short card at the top of an empty one. */}
+      <div
+        className={full ? "min-h-0 flex-1 overflow-auto *:min-h-full" : "max-h-128 overflow-auto"}
+      >
         <JsonTree value={value} />
       </div>
     </div>

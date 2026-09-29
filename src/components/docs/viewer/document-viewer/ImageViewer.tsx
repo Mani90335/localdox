@@ -155,7 +155,7 @@ export function ImageViewer({
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
-            className="image-canvas flex min-h-[calc(100dvh-7.5rem)] items-center justify-center overflow-hidden p-4 md:p-8"
+            className="image-canvas flex min-h-[calc(100dvh-var(--app-chrome-h)-3.5rem)] items-center justify-center overflow-hidden p-4 md:p-8"
             style={{
               cursor: zoom > 1 ? (dragRef.current ? "grabbing" : "grab") : "default",
               // Blocks touch pinch-zoom, which would zoom the page not the image.

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import * as XLSX from "xlsx";
 import path from "node:path";
+import { exportFile, openExportMenu } from "./sidebar-menu";
 
 async function expectFits(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
@@ -63,13 +64,9 @@ test("spreadsheet controls, sheet navigation, filtering and keyboard sorting", a
   await expect(page.getByText("Quarter complete", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Sales", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("spreadsheet-desktop.png"), fullPage: true });
-  await page.getByRole("button", { name: "Export", exact: true }).click();
-  await expect(page.getByRole("menuitem", { name: /^Convert to Markdown/ })).toBeVisible();
-  const download = page.waitForEvent("download");
-  await page.getByRole("menuitem", { name: /^Original file/ }).click();
-  expect((await download).suggestedFilename()).toBe("Quarterly sales.xlsx");
-  // The sidebar's file menu is a popover of buttons (not an ARIA menu), and
-  // the viewer header has its own Export button, so scope to the panel.
+  const download = await exportFile(page, "Original file");
+  expect(download.suggestedFilename()).toBe("Quarterly sales.xlsx");
+  // The sidebar's file menu is a popover of buttons (not an ARIA menu).
   await page.getByRole("button", { name: "Options", exact: true }).first().click();
   const fileMenu = page.locator("[data-sidebar-menu-panel]");
   await expect(fileMenu.getByRole("button", { name: "Rename", exact: true })).toBeVisible();
@@ -97,11 +94,12 @@ test("CSV viewer stays within a phone viewport and has one edit/export toolbar",
       ),
     });
   await expect(page.getByRole("textbox", { name: "Filter rows" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Edit spreadsheet", exact: true })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Export", exact: true })).toHaveCount(1);
+  // Editing is the header's only action; exporting lives in the sidebar row.
+  await expect(page.getByRole("button", { name: "Edit", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Export", exact: true })).toHaveCount(0);
   await expectFits(page);
   await page.screenshot({ path: testInfo.outputPath("csv-mobile.png"), fullPage: true });
-  await page.getByRole("button", { name: "Edit spreadsheet", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(page.getByRole("button", { name: "Sheet1", exact: true })).toHaveCount(0);
   await expectFits(page);
 });
@@ -115,11 +113,13 @@ test("DOCX reading surface and export fit desktop and mobile", async ({ page }, 
   await expect(
     page.getByRole("heading", { name: "handmade-rich.docx", exact: true }),
   ).toBeVisible();
+  const exportMenu = await openExportMenu(page);
+  await expect(exportMenu.getByRole("button", { name: "Convert to Markdown" })).toBeVisible();
+  await expect(exportMenu.getByRole("button", { name: "Original file" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(exportMenu).toBeHidden();
   await page.screenshot({ path: testInfo.outputPath("docx-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await expectFits(page);
-  await page.getByRole("button", { name: "Export", exact: true }).click();
-  await expect(page.getByRole("menuitem", { name: /^Convert to Markdown/ })).toBeVisible();
-  await page.keyboard.press("Escape");
   await page.screenshot({ path: testInfo.outputPath("docx-mobile.png"), fullPage: true });
 });

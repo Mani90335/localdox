@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { confirmMoveToBin } from "./sidebar-menu";
 
 // Two pages in one browser context share IndexedDB and BroadcastChannel,
 // exactly like two tabs of the same site.
@@ -150,6 +151,8 @@ test("the same document changed in two tabs keeps both versions (A01)", async ({
   // A bins a document; before that save lands, another tab edits it.
   await a.getByRole("button", { name: "Options", exact: true }).first().click();
   await a.getByText("Move to Bin", { exact: true }).click();
+  // It is the document on screen, so binning it asks first.
+  await confirmMoveToBin(a);
   await writeFromOtherTab(a, "# edited\n\nedit from the other tab\n");
 
   // A's save is refused and cannot be merged: the other tab's edit survives

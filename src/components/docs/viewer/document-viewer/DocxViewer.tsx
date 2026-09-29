@@ -10,7 +10,6 @@ interface MammothBrowser {
 export function DocxViewer({
   file,
   embedded,
-  viewerAction,
   isBookmarked,
   onToggleBookmark,
   prevFile,
@@ -55,7 +54,6 @@ export function DocxViewer({
     <ViewerFrame
       file={file}
       embedded={embedded}
-      action={viewerAction}
       isBookmarked={isBookmarked}
       onToggleBookmark={onToggleBookmark}
       prevFile={prevFile}

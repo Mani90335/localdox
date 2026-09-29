@@ -51,7 +51,14 @@ export function FileMenu({
   conversionDisabled?: boolean;
   hasMarkdownCopy?: boolean;
   onOpenMarkdown?: () => void;
-  onRename: () => void;
+  /**
+   * Absent for documents whose editor already carries a name field (Markdown
+   * and plain text): renaming lives where the document is being worked on,
+   * and a second route to it here was one more row to read past. Documents
+   * with no such editor — a PDF, an image — keep it, or they could never be
+   * renamed at all.
+   */
+  onRename?: () => void;
   /**
    * Send the document to the Bin. Recoverable for 30 days, which is why this
    * replaced both "Archive" and "Delete" — two ways to make a file go away,
@@ -146,15 +153,17 @@ export function FileMenu({
               }}
             />
           )}
-          <MenuItem
-            icon={Pencil}
-            label="Rename"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-              onRename();
-            }}
-          />
+          {onRename && (
+            <MenuItem
+              icon={Pencil}
+              label="Rename"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                onRename();
+              }}
+            />
+          )}
           {onAddToSplit && (
             <MenuItem
               icon={Columns2}

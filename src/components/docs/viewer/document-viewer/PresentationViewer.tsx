@@ -1,4 +1,3 @@
-import { ExportMenu } from "@/services/markdown-export/ExportMenu";
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Maximize, Minimize } from "lucide-react";
 import { dataUrlToArrayBuffer } from "@/lib/markdown/document-utils";
@@ -116,7 +115,9 @@ export function PresentationViewer({
         }
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [file.id, file.data]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -190,7 +191,7 @@ export function PresentationViewer({
   return (
     <section
       ref={containerRef}
-      className="presentation-shell min-h-[calc(100dvh-4rem)] bg-background text-foreground"
+      className="presentation-shell min-h-[calc(100dvh-var(--app-chrome-h))] bg-background text-foreground"
     >
       <ViewerHeader
         actions={
@@ -207,7 +208,6 @@ export function PresentationViewer({
             >
               {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
             </button>
-            <ExportMenu file={file} />
           </>
         }
       />
@@ -216,8 +216,8 @@ export function PresentationViewer({
       ) : !slide ? (
         <Loading label="Building presentation" />
       ) : (
-        <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col">
-          <div className="relative flex flex-1 items-center justify-center overflow-hidden p-4 md:p-8">
+        <div className="flex min-h-[calc(100dvh-var(--app-chrome-h)-3.5rem)] flex-col">
+          <div className="presentation-stage relative flex flex-1 items-center justify-center overflow-hidden p-4 md:p-8">
             {slideEl}
           </div>
           <div className="presentation-rail">

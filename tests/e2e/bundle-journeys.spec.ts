@@ -2,6 +2,7 @@ import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
+import { exportFile, openExportMenu } from "./sidebar-menu";
 
 test.skip(!process.env.PLAYWRIGHT_PRODUCTION, "Measures production bundles");
 // Disable registration in the top page below. Playwright's "block" init script
@@ -141,11 +142,14 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         break;
       case "conversion":
         await upload(page, "budget.csv", "Name,Count\nApples,4\nPears,2\n");
-        await expect(page.getByRole("button", { name: "Export", exact: true })).toBeVisible();
+        await expect(page.getByRole("textbox", { name: "Filter rows" })).toBeVisible();
         await page.waitForLoadState("networkidle");
         // CSV's viewer is a prerequisite, so keep its bytes in this journey too.
-        await page.getByRole("button", { name: "Export", exact: true }).click();
-        await page.getByRole("menuitem", { name: /^Convert to Markdown/ }).click();
+        await (
+          await openExportMenu(page)
+        )
+          .getByRole("button", { name: "Convert to Markdown", exact: true })
+          .click();
         await expect(page.getByText("Converted from budget.csv", { exact: true })).toBeVisible({
           timeout: 60_000,
         });
@@ -167,9 +171,8 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         await expect(page.getByText("Edited text.", { exact: true })).toBeVisible();
         break;
       case "export": {
-        const download = page.waitForEvent("download");
-        await page.getByRole("button", { name: "Download HTML + Media", exact: true }).click();
-        const html = await readFile((await (await download).path())!, "utf8");
+        const download = await exportFile(page, "Web page (.html)");
+        const html = await readFile((await download.path())!, "utf8");
         expect(html).toContain("<strong>complete</strong>");
         expect(html).toContain("<math");
         expect(html).not.toContain("katex-error");

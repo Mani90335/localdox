@@ -623,7 +623,10 @@
 .docs-prose > * {
   min-width: 0;
 }
-.docs-prose :is(pre, .workspace-artifact, .interactive-block, .docs-mermaid) {
+/* Code blocks stay inside the column like diagrams and mind maps do: a fence
+   that bled past the text was the one block in a document out of line with
+   everything around it. Long lines scroll inside the block instead. */
+.docs-prose :is(.workspace-artifact, .interactive-block, .docs-mermaid) {
   width: calc(100% + var(--bleed) * 2);
   margin-inline: calc(var(--bleed) * -1);
 }
@@ -1078,6 +1081,48 @@
     10px -10px,
     -10px 0;
   touch-action: none;
+}
+/*
+ * Element fullscreen: a viewer, diagram, mind map or JSON tree taken full
+ * screen with the Fullscreen API.
+ *
+ * The browser paints a black ::backdrop behind the fullscreen element. A
+ * translucent surface on it (the Mermaid frame is `bg-muted/30`) composites
+ * over that black instead of over the page: a grey veil in the light theme, a
+ * too-dark frame in the dark one. Painting the page background there makes the
+ * surface look exactly as it does inline. `::backdrop` inherits custom
+ * properties from its element in current engines; `Canvas` covers older ones.
+ *
+ * Viewers size their content as "the viewport minus the app chrome above
+ * them". In fullscreen there is no app chrome, so that height drops to zero
+ * rather than leaving a dead band under the content.
+ */
+:root {
+  --app-chrome-h: 4rem;
+}
+:fullscreen {
+  --app-chrome-h: 0px;
+}
+:not(:root):fullscreen::backdrop {
+  background: var(--background, Canvas);
+}
+/* A presented deck scales the slide to the screen: the widest 16:9 box that
+   fits the stage in both directions, with the rail kept on screen below it.
+   Inline, the slide's fixed cap made header + slide + rail taller than a
+   laptop screen, and fullscreen cut the rail off with no way to scroll. */
+.presentation-shell:fullscreen {
+  display: flex;
+  flex-direction: column;
+}
+.presentation-shell:fullscreen > div.flex-col {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.presentation-shell:fullscreen .presentation-stage {
+  container-type: size;
+}
+.presentation-shell:fullscreen .presentation-slide {
+  width: min(100cqw, 100cqh * 16 / 9);
 }
 .presentation-slide {
   position: relative;

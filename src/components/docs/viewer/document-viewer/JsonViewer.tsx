@@ -174,6 +174,7 @@ export function JsonViewer({
       nextFile={nextFile}
       onNavFile={onNavFile}
       onOpenPalette={onOpenPalette}
+      editing={editing}
       navAction={modeSwitch}
       action={
         // Entering the editor is the file's own action and lives in its

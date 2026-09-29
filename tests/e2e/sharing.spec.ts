@@ -224,11 +224,8 @@ test("sharing one file from the sidebar previews it and sends only that file", a
     .getByRole("button", { name: "Options", exact: true })
     .first()
     .click();
-  // The file menu is portaled; the reader has its own "Export" button too.
-  const fileMenu = page
-    .locator("div")
-    .filter({ has: page.getByRole("button", { name: "Move to Bin" }) })
-    .last();
+  // The file menu is portaled outside the row.
+  const fileMenu = page.locator("[data-sidebar-menu-panel]");
   await fileMenu.getByRole("button", { name: "Export", exact: true }).click();
   await page.getByRole("button", { name: "Share link" }).click();
 

@@ -111,6 +111,7 @@ export function HtmlFileViewer({
       nextFile={nextFile}
       onNavFile={onNavFile}
       onOpenPalette={onOpenPalette}
+      editing={editing}
       action={
         editing ? (
           // The editing session's own controls, the way the JSON editor does

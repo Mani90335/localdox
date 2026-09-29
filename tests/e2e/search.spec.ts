@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { confirmMoveToBin } from "./sidebar-menu";
 
 async function openSearch(page: Page, query: string) {
   await page
@@ -80,6 +81,9 @@ for (const fallback of [false, true]) {
     await expect(other.getByText("constant restored", { exact: true })).toBeVisible();
     await other.getByRole("button", { name: "Options", exact: true }).first().click();
     await other.getByText("Move to Bin", { exact: true }).click();
+    // It is the document on screen there, so binning it asks first.
+    await confirmMoveToBin(other);
+    await expect(other.getByText("Nothing here", { exact: true })).toBeVisible();
     await expect(results).toContainText('No results for "constant"');
     await expect(page.getByPlaceholder("Search all documents...")).toHaveValue("constant");
   });

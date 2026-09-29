@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { Pencil } from "lucide-react";
 import { DISCARD_PROMPT } from "@/lib/markdown/document-utils";
 import { ESCAPE_DEPTH, useNavEscape } from "@/hooks/use-nav-history";
 import { MermaidBlock } from "@/services/diagrams";
@@ -55,17 +54,9 @@ export function MermaidFileViewer({
       nextFile={nextFile}
       onNavFile={onNavFile}
       onOpenPalette={onOpenPalette}
-      action={
-        !editing ? (
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <Pencil className="h-3.5 w-3.5" /> Edit animation
-          </button>
-        ) : undefined
-      }
+      // The header's pencil starts the editor, the same as every other
+      // viewer's; hidden while the editor is open.
+      editing={editing}
     >
       {editing ? (
         <div className="mx-auto max-w-5xl px-4 py-6 md:px-8">
