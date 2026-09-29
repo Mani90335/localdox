@@ -14,8 +14,8 @@ export default defineConfig({
   },
   webServer: {
     command: process.env.PLAYWRIGHT_PRODUCTION
-      ? "bun run preview -- --host 127.0.0.1 --port 4175 --strictPort"
-      : "bun run dev -- --host 127.0.0.1 --port 4175 --strictPort",
+      ? "npm run preview -- --host 127.0.0.1 --port 4175 --strictPort"
+      : "npm run dev -- --host 127.0.0.1 --port 4175 --strictPort",
     url: "http://127.0.0.1:4175",
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,

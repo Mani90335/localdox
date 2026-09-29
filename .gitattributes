@@ -1,0 +1,2 @@
+# PDF offsets address exact bytes. Never rewrite text-like PDF fixtures on Windows.
+*.pdf -text

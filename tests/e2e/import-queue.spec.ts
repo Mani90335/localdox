@@ -3,7 +3,7 @@ import { test, expect, type Page } from "@playwright/test";
 // R04: a picked batch is read a few files at a time, one unreadable file
 // doesn't sink the rest, and the batch can be cancelled while it is read.
 //
-// FileReader.readAsDataURL is wrapped to count reads in flight, and on request
+// Blob.arrayBuffer is wrapped to count fingerprint reads in flight, and on request
 // to delay reads or fail one file the way Chrome does when a picked file was
 // moved or edited (NotReadableError).
 
@@ -18,34 +18,27 @@ async function instrument(page: Page, fault: Fault = {}) {
       );
     const reads = { active: 0, peak: 0, started: 0 };
     Object.assign(window, { __reads: reads });
-    const read = FileReader.prototype.readAsDataURL;
-    FileReader.prototype.readAsDataURL = function (this: FileReader, blob: Blob) {
+    const slice = File.prototype.slice;
+    File.prototype.slice = function (...args) {
+      const blob = slice.apply(this, args);
+      Object.defineProperty(blob, "pickedName", { value: this.name });
+      return blob;
+    };
+    const read = Blob.prototype.arrayBuffer;
+    Blob.prototype.arrayBuffer = async function () {
+      const name = (this as Blob & { pickedName?: string }).pickedName;
+      if (!name) return read.call(this);
       reads.active++;
       reads.started++;
       reads.peak = Math.max(reads.peak, reads.active);
-      // Counted down inside the reader's own handlers, before the app's code
-      // sees the result: the app starts its next read from onload, before any
-      // listener added here would run.
-      let open = true;
-      for (const key of ["onload", "onerror", "onabort"] as const) {
-        const handler = this[key];
-        this[key] = function (this: FileReader, event: ProgressEvent<FileReader>) {
-          if (open) reads.active--;
-          open = false;
-          return handler?.call(this, event);
-        };
+      try {
+        if (fault.delay) await new Promise((resolve) => setTimeout(resolve, fault.delay));
+        if (name === fault.fail)
+          throw new DOMException("The file could not be read.", "NotReadableError");
+        return await read.call(this);
+      } finally {
+        reads.active--;
       }
-      if (blob instanceof File && blob.name === fault.fail) {
-        setTimeout(() => {
-          const error = new DOMException("The file could not be read.", "NotReadableError");
-          Object.defineProperty(this, "error", { value: error });
-          this.dispatchEvent(new ProgressEvent("error"));
-          this.dispatchEvent(new ProgressEvent("loadend"));
-        }, 10);
-        return;
-      }
-      if (fault.delay) setTimeout(() => read.call(this, blob), fault.delay);
-      else read.call(this, blob);
     };
   }, fault);
 }

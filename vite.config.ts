@@ -9,6 +9,7 @@ import { mathjaxAsset } from "./build/vite-mathjax-asset";
 import { pdfjsAssets } from "./build/vite-pdfjs-assets";
 import { offlineShell } from "./build/vite-offline-shell";
 import { interactiveRuntime } from "./build/vite-interactive-runtime";
+import { bundleReport } from "./build/vite-bundle-report";
 
 export default defineConfig({
   plugins: [
@@ -50,9 +51,14 @@ export default defineConfig({
         "src/lib/search/local-search-client.ts",
       ],
     }),
+    // Run after the offline manifest: diagnostic metadata isn't an offline asset.
+    bundleReport(),
     nitro({ preset: "node-server" }),
   ],
   resolve: {
+    // Reader, Mermaid labels and rehype-katex export use the same renderer.
+    // Otherwise their nested 0.16 installs duplicate the app's 0.17 runtime.
+    dedupe: ["katex"],
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },

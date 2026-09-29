@@ -6,7 +6,9 @@ import { isLocalReference, isArtifactUrl } from "@/lib/markdown/media-references
 import { MarkdownMedia } from "./MarkdownMedia";
 import { remarkMedia, mediaUrlTransform, parseMediaSpec } from "@/lib/markdown/markdown-media";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
-import { dataUrlToBlob, getDocumentKind } from "@/lib/markdown/document-utils";
+import { getDocumentKind } from "@/lib/markdown/document-utils";
+import { binaryBody } from "@/lib/workspace/binary";
+import { useBinaryUrl } from "@/hooks/use-binary-url";
 const DocumentViewer = lazy(() =>
   import("./DocumentViewer").then((module) => ({ default: module.DocumentViewer })),
 );
@@ -232,22 +234,16 @@ function EmbeddedMarkdown({
 }
 
 function useObjectUrl(file?: MdFile) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!file) {
-      setUrl(null);
-      return;
-    }
-    const blob = file.data
-      ? dataUrlToBlob(file.data)
-      : new Blob([file.content], { type: file.mimeType || "text/plain" });
-    if (!blob) {
-      setUrl(null);
-      return;
-    }
-    const next = URL.createObjectURL(blob);
-    setUrl(next);
-    return () => URL.revokeObjectURL(next);
-  }, [file]);
-  return url;
+  const storedData = file?.data;
+  const content = file?.content;
+  const mimeType = file?.mimeType;
+  const data = useMemo(
+    () =>
+      storedData ??
+      (content !== undefined
+        ? binaryBody(new Blob([content], { type: mimeType || "text/plain" }))
+        : undefined),
+    [storedData, content, mimeType],
+  );
+  return useBinaryUrl(data) ?? null;
 }

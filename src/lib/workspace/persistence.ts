@@ -1,4 +1,4 @@
-import { sameData, migrateData, portableFiles } from "./binary.ts";
+import { sameData, migrateData, migrateFileData, portableFiles } from "./binary.ts";
 import type { FileData } from "./binary.ts";
 // Local-first persistence, Excalidraw-style. No backend.
 //
@@ -280,27 +280,27 @@ function openDb(): Promise<IDBDatabase> {
         db.createObjectStore(STORE, { keyPath: "id" });
       }
       if (event.oldVersion < 2) {
-      const files = db.createObjectStore(FILES, { keyPath: ["workspaceId", "id"] });
-      files.createIndex("workspaceId", "workspaceId");
-      const summaries = db.createObjectStore(SUMMARIES, { keyPath: "id" });
-      // One atomic migration: an aborted upgrade leaves the v1 data intact.
-      // Use a cursor so only one legacy workspace is materialized at a time.
-      const cursor = req.transaction!.objectStore(STORE).openCursor();
-      cursor.onsuccess = () => {
-        const row = cursor.result;
-        if (!row) return;
-        const workspace = row.value as WorkspaceRecord;
-        const migrated = workspace.files.map((file) => ({ ...file, data: migrateData(file.data) }));
-        for (const file of migrated) files.put({ ...file, workspaceId: workspace.id });
-        const { files: documents, ...metadata } = workspace;
-        row.update({
-          ...metadata,
-          fileIds: documents.map((f) => f.id),
-          revision: crypto.randomUUID(),
-        });
-        summaries.put(summaryOf(workspace, storedBytes(migrated)));
-        row.continue();
-      };
+        const files = db.createObjectStore(FILES, { keyPath: ["workspaceId", "id"] });
+        files.createIndex("workspaceId", "workspaceId");
+        const summaries = db.createObjectStore(SUMMARIES, { keyPath: "id" });
+        // One atomic migration: an aborted upgrade leaves the v1 data intact.
+        // Use a cursor so only one legacy workspace is materialized at a time.
+        const cursor = req.transaction!.objectStore(STORE).openCursor();
+        cursor.onsuccess = () => {
+          const row = cursor.result;
+          if (!row) return;
+          const workspace = row.value as WorkspaceRecord;
+          const migrated = workspace.files.map(migrateFileData);
+          for (const file of migrated) files.put({ ...file, workspaceId: workspace.id });
+          const { files: documents, ...metadata } = workspace;
+          row.update({
+            ...metadata,
+            fileIds: documents.map((f) => f.id),
+            revision: crypto.randomUUID(),
+          });
+          summaries.put(summaryOf(workspace, storedBytes(migrated)));
+          row.continue();
+        };
       } else {
         // v2 → v3 is one upgrade transaction. Cursor conversion bounds temporary
         // decoding to one file; abort leaves every old body and summary intact.
@@ -444,7 +444,8 @@ export const persistence = {
    */
   async putWorkspaces(records: WorkspaceRecord[]): Promise<string[]> {
     // Snapshot before awaiting; callers may keep editing their objects.
-    const snapshots = records.map((w) => ({ ...w, files: w.files.map((file) => ({ ...file, data: migrateData(file.data) })) }));
+    const originalData = records.map((w) => new Map(w.files.map((file) => [file.id, file.data])));
+    const snapshots = records.map((w) => ({ ...w, files: w.files.map(migrateFileData) }));
     if (new Set(snapshots.map((w) => w.id)).size !== snapshots.length)
       throw new Error("A workspace can only be written once per transaction");
     const db = await openDb();
@@ -477,7 +478,7 @@ export const persistence = {
             let bytes = 0;
             for (const file of w.files) {
               const unchanged = sameFile(cached?.files.get(file.id), file);
-              if (!unchanged) fileStore.put({ ...file, data: file.data, workspaceId: w.id });
+              if (!unchanged) fileStore.put({ ...file, workspaceId: w.id });
               const size =
                 (unchanged ? cached!.bytes.get(file.id) : undefined) ?? storedFileBytes(file);
               sizes[index].set(file.id, size);
@@ -503,7 +504,15 @@ export const persistence = {
       records[index].revision = revisions[index];
       for (const file of w.files) {
         const original = records[index].files.find((item) => item.id === file.id);
-        if (original && typeof original.data === "string" && typeof file.data !== "string") original.data = file.data;
+        // Adopt normalization only if the caller still holds the bytes saved.
+        // An edit made while the transaction ran belongs to the next save.
+        if (
+          original &&
+          typeof original.data === "string" &&
+          original.data === originalData[index].get(file.id) &&
+          typeof file.data !== "string"
+        )
+          original.data = file.data;
       }
       lastWrite = {
         id: w.id,
@@ -528,7 +537,10 @@ export const persistence = {
       const current = tx.objectStore(STORE).get(id);
       current.onsuccess = () => {
         const previous = current.result as StoredWorkspace | undefined;
-        if (!previous || (expectedRevision !== undefined && previous.revision !== expectedRevision)) {
+        if (
+          !previous ||
+          (expectedRevision !== undefined && previous.revision !== expectedRevision)
+        ) {
           failure = new WorkspaceConflictError(id, previous ? "changed" : "deleted");
           tx.abort();
           return;
@@ -846,7 +858,8 @@ export const CONTENT_WIDTH_MIN = 40;
 export const CONTENT_WIDTH_MAX = 100;
 
 function clampContentWidth(value: unknown): number {
-  const n = typeof value === "number" && Number.isFinite(value) ? value : DEFAULT_PREFS.contentWidth;
+  const n =
+    typeof value === "number" && Number.isFinite(value) ? value : DEFAULT_PREFS.contentWidth;
   return Math.min(CONTENT_WIDTH_MAX, Math.max(CONTENT_WIDTH_MIN, n));
 }
 
@@ -916,7 +929,11 @@ export const BACKUP_VERSION = 2;
 export async function serializeWorkspace(w: WorkspaceRecord): Promise<string> {
   const { revision: _revision, ...workspace } = w;
   return JSON.stringify(
-    { format: "localdox-workspace", version: BACKUP_VERSION, workspace: { ...workspace, files: await portableFiles(workspace.files) } },
+    {
+      format: "localdox-workspace",
+      version: BACKUP_VERSION,
+      workspace: { ...workspace, files: await portableFiles(workspace.files) },
+    },
     null,
     2,
   );
@@ -928,7 +945,11 @@ export async function serializeWorkspace(w: WorkspaceRecord): Promise<string> {
  * the caller must give it a fresh id before storing it alongside the original.
  */
 export function parseWorkspaceImport(json: string): WorkspaceRecord {
-  const data = parseImportJson(json) as { format?: unknown; version?: unknown; workspace?: unknown };
+  const data = parseImportJson(json) as {
+    format?: unknown;
+    version?: unknown;
+    workspace?: unknown;
+  };
   if (data && typeof data === "object" && "format" in data) {
     if (data.format !== "localdox-workspace")
       throw new ImportValidationError("This file is not a Localdox workspace backup.");

@@ -1,5 +1,5 @@
 /** Immutable binary body. `id` survives structured clones; edits get a new id. */
-export type BinaryBody = { id: string; blob: Blob };
+export type BinaryBody = { readonly id: string; readonly blob: Blob };
 /** Strings remain readable for legacy records and portable JSON imports. */
 export type FileData = string | BinaryBody;
 
@@ -26,8 +26,12 @@ export function dataBlob(data?: FileData, fallbackType = "application/octet-stre
   if (!/;base64$/i.test(header)) {
     // Percent escapes represent bytes, including non-UTF-8 legacy encodings.
     const parts = data.slice(comma + 1).split(/(%[\da-f]{2})/i);
-    return new Blob(parts.map((part) => /^%[\da-f]{2}$/i.test(part)
-      ? new Uint8Array([parseInt(part.slice(1), 16)]) : part), { type });
+    return new Blob(
+      parts.map((part) =>
+        /^%[\da-f]{2}$/i.test(part) ? new Uint8Array([parseInt(part.slice(1), 16)]) : part,
+      ),
+      { type },
+    );
   }
   const parts: Uint8Array<ArrayBuffer>[] = [];
   const payload = data.slice(comma + 1).replace(/\s/g, "");
@@ -52,6 +56,11 @@ export function migrateData(data?: FileData): FileData | undefined {
   }
 }
 
+/** Preserve absent binary fields on text records during normalization. */
+export function migrateFileData<T extends { data?: FileData }>(file: T): T {
+  return typeof file.data === "string" ? { ...file, data: migrateData(file.data) } : { ...file };
+}
+
 export async function portableData(data?: FileData): Promise<string | undefined> {
   if (typeof data === "string" || data === undefined) return data;
   // Only explicit exports pay for base64. Bound the intermediate binary strings.
@@ -66,7 +75,10 @@ export async function portableData(data?: FileData): Promise<string | undefined>
 export async function portableFiles<T extends { data?: FileData }>(files: readonly T[]) {
   const result: (Omit<T, "data"> & { data?: string })[] = [];
   // Avoid materializing every binary's ArrayBuffer concurrently.
-  for (const file of files) result.push({ ...file, data: await portableData(file.data) });
+  for (const file of files) {
+    const { data, ...metadata } = file;
+    result.push(data === undefined ? metadata : { ...metadata, data: await portableData(data) });
+  }
   return result;
 }
 
@@ -75,8 +87,12 @@ export async function dataFingerprint(data: FileData): Promise<string> {
   const blob = dataBlob(data)!;
   let pending = fingerprints.get(blob);
   if (!pending) {
-    pending = blob.arrayBuffer().then((bytes) => crypto.subtle.digest("SHA-256", bytes))
-      .then((hash) => Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join(""));
+    pending = blob
+      .arrayBuffer()
+      .then((bytes) => crypto.subtle.digest("SHA-256", bytes))
+      .then((hash) =>
+        Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join(""),
+      );
     fingerprints.set(blob, pending);
   }
   return pending;

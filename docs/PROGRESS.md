@@ -1,4 +1,65 @@
-Latest update — 2026-09-29 (B05 font loading: remove unused Inter requests and offline assets)
+Latest update — 2026-09-29 (B03 optional-feature bundle budgets and shared KaTeX)
+
+Completed B03 (Package 6). Measured production downloads by user journey,
+including worker scripts and conversion WASM. Added repeatable size ceilings
+through `npm run test:bundles` and a build report with client module ownership,
+imports, and raw/gzip sizes. Diagnostics are excluded from the offline catalog.
+
+What changed:
+- `vite.config.ts` deduplicates KaTeX to the app's 0.17.0 renderer. Previously
+  Mermaid and rehype-katex resolved separate nested 0.16.47 installations:
+  two named KaTeX chunks plus another copy inside HTML export. The client now
+  contains one implementation. No dependency versions or lockfile changed.
+- `build/vite-bundle-report.ts`, `scripts/check-bundle-budgets.mjs`, and
+  `tests/e2e/bundle-journeys.spec.ts` cover import, PDF, conversion, diagrams,
+  editing, export, XLSX, interactive React, and the math keyboard. The gate
+  checks rendered results, required engine/worker requests, optional-module
+  absence on empty startup, a single KaTeX implementation, and size ceilings.
+- Babel, MathLive, XLSX, PDF, and conversion stay optional. Babel's supported
+  TSX syntax is unchanged. The audit's 1.82 MB chunk belongs to Excalidraw and
+  is not downloaded by the nine measured journeys.
+
+Measured before → after (KiB gzip of additional JS/MJS/WASM after idle reader
+warm-up; fresh contexts, service-worker registration disabled):
+- Math flowchart: 420.1 → 345.2; HTML export after reading math: 215.3 → 140.4.
+- Unchanged: plain Markdown import 0; edit 8.4; PDF 517.4; CSV plus conversion
+  3,038.4; XLSX 156.6; interactive React 764.7; math keyboard 215.0.
+- Named renderer/export chunks lose 517,859 raw bytes (153,500 gzip bytes).
+  These are locally recompressed response-body sizes, not wire transfers or
+  latency measurements. The shell and reader prerequisite costs are additional.
+  The original diagram/export sizes exceed the new ceilings.
+
+Validation:
+- Chrome DevTools MCP: empty startup fetches no heavy optional engine;
+  a combined reader-math/diagram/export journey makes one KaTeX request,
+  renders both equations, exports MathML, and has no console warnings/errors.
+- All 10 new production bundle checks pass, including the finalized harness
+  on Nitro with unchanged executable byte totals. Typecheck, focused ESLint,
+  formatting, and diff checks pass. Unit suite: 467 passed, 2 credential-dependent
+  tests skipped. Final production build exits 0; its client bundle report is
+  byte-for-byte identical to the tested build.
+- Across reruns, 33/34 related browser regressions pass (conversion, export,
+  interactive examples, math, offline, startup, and viewers). Vite preview's
+  compression caused conversion/download-all timeouts; conversion passed on
+  Nitro. Nitro returns 404 for the generated `/_shell.html`, so offline testing
+  used static hosting, where download-all and opening a PDF offline passed.
+- The 2,000-equation stress gate is **not certified** on this host. An untouched
+  `cc6e4c5` baseline records a 257 ms task against its 100 ms limit; the changed
+  preview records 153 ms, while later changed-build runs time out waiting for
+  all equations. These single observations do not establish equivalent or
+  improved performance. The CSP test's missing HTML-image blocked-request event
+  also reproduced on baseline, then passed the final static-build rerun. No
+  existing test threshold, sandbox policy, or assertion was weakened.
+
+Details and reproduction: [optional-bundle-budgets.md](../documentation/optional-bundle-budgets.md).
+Raw before/after evidence: [b03-bundles](b03-bundles/), including
+[verification.json](b03-bundles/verification.json) and
+[devtools.json](b03-bundles/devtools.json). Chrome 154 on Windows only; no claim
+about mobile hardware, other browsers, or meeting the overall 200 KiB startup
+target. Other audit findings remain separate work.
+
+
+Previous update — 2026-09-29 (B05 font loading: remove unused Inter requests and offline assets)
 
 Completed B05 (Package 8). Measured the current production build before
 changing fonts: the UI follows the selected reading face (Atkinson
@@ -2660,3 +2721,13 @@ D02 is still open. Binary files currently stay as base64 strings through import,
 The fix needs a stable binary revision identifier: IndexedDB returns new Blob objects on reads, so object identity alone would cause false cross-tab conflicts. I’m adding that identifier, keeping base64 only at the portable JSON backup/share boundary, and retaining the existing file keys and atomic transactions.
 
 Stopped in middle, complete it
+
+D02 completed on 2026-09-29.
+
+- Finished the interrupted Blob implementation while preserving the existing file keys and atomic workspace transactions. Binary body IDs survive IndexedDB clones; replacement bytes receive a new ID. Legacy v1/v2 storage migrates atomically, and unreadable historical values remain recoverable.
+- Fixed save normalization so an edit made during a pending transaction is retained. Text records keep absent binary fields absent. UI-only saves from a cached revision still put zero file payloads; a binary replacement puts exactly its changed file.
+- Binary fingerprints now run inside the bounded import queue, retaining per-file failures and cancellation without base64 copies. Mounted image/media URLs are revoked on replacement or unmount. Backups/shares remain portable JSON, with asynchronous encoding only at export boundaries.
+- Updated backup, conversion, editing, import-queue and storage-limit regressions; added Blob migration/rollback, exact-byte round-trip, worker parsing, stable-ID merge, pending-edit and URL-lifetime coverage. Added `.gitattributes` to prevent Windows line-ending conversion from corrupting PDF fixture offsets.
+- Validation: typecheck and production build passed; the full unit suite passed 467 tests (2 credential-dependent tests skipped). All 29 relevant browser cases passed across the production run and corrected URL-selector rerun; the final media/URL run passed 3/3. Focused lint for binary/persistence helpers, URL consumers, benchmark and binary/browser regressions passed. Windows Nitro dev-server startup failed, so browser verification used production preview with installed Chrome 154.0.8037.58. Dependencies were restored from `bun.lock` without changing the manifest or lockfile.
+- Five alternating trials of eight 5 MiB binary bodies: logical storage fell from 55,924,288 to 41,943,040 bytes (25% less). Median preparation was 572.9 → 157.9 ms, committed write 412.4 → 174.1 ms, and IndexedDB read 185.3 → 33.0 ms. Blob reads return handles; decoding/viewer work is excluded. These local microbenchmarks do not measure disk overhead, retained heap, mobile hardware or OPFS.
+- Implementation/reproduction notes: [d02-binary-storage.md](d02-binary-storage.md); raw evidence: [d02-binary-storage-results.json](d02-binary-storage-results.json); harness: `scripts/bench-binary-storage.mjs`. IndexedDB Blobs are sufficient for this measured workload; D01 and other audit findings remain separate work.

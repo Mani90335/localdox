@@ -1,4 +1,4 @@
-import { dataBlob } from "@/lib/workspace/binary";
+import { dataBlob } from "../../lib/workspace/binary.ts";
 /**
  * The one door out of the app for a document.
  *

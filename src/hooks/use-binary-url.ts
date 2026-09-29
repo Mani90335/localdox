@@ -6,7 +6,12 @@ export function useBinaryUrl(data?: FileData) {
   const [state, setState] = useState<{ data: FileData; url: string }>();
   useEffect(() => {
     if (data === undefined) return;
-    const blob = dataBlob(data);
+    let blob: Blob | null;
+    try {
+      blob = dataBlob(data);
+    } catch {
+      return;
+    } // Retained unreadable legacy bytes show the viewer's error state.
     if (!blob) return;
     const url = URL.createObjectURL(blob);
     setState({ data, url });

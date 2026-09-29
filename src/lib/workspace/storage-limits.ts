@@ -47,7 +47,7 @@ export function formatBytes(bytes: number): string {
 //
 // One unit everywhere: a document's text as UTF-8 plus its binary exactly as
 // stored: Blob bytes, or legacy data URL characters until migrated. A file's `size`
-// is what was picked from disk, so it undercounts binaries, goes stale after
+// is what was picked from disk, so it omits text stored alongside CSV, goes stale after
 // an edit and arrives unchecked in backups and share links; nothing here reads
 // it.
 
