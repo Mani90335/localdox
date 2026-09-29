@@ -1,4 +1,67 @@
-Latest update — 2026-09-29 (R05 math: typeset in the reader again, within a per-task budget; MathJax works in production)
+Latest update — 2026-09-29 (R05 interactive examples, part 1: React previews run again; sandboxed frame hardened)
+
+Found while measuring R05's interactive-JSX half: an ```interactive-react
+example never ran, in dev or in the production build, so there was nothing
+to optimize yet. This part fixes that; the compile work (worker, cache,
+debounce) follows as part 2.
+
+What was wrong:
+- The React frame (sandbox="allow-scripts", so an opaque `null` origin)
+  navigated to the app route /interactive-runtime. Its module chunks are
+  fetched with CORS, and neither `vite dev`, `vite preview` nor the
+  firebase.json headers send Access-Control-Allow-Origin: every chunk was
+  blocked ("from origin 'null' has been blocked by CORS policy").
+- With CORS allowed (probed with a throwaway preview config), the app shell
+  booted inside the frame and its root threw on `navigator.serviceWorker`
+  ("Service worker is disabled because the context is sandboxed"), showing
+  the root error screen. Every example would also have booted the whole app.
+- Both frames grew a pixel per round to the 960 px cap: they reported
+  `documentElement.scrollHeight` (never below the frame's own height) and the
+  block added 2 px. ~660 height messages and reader re-renders per example.
+- The old runtime had no CSP: XMLHttpRequest and image URLs could reach any
+  server (only `fetch` was stubbed).
+- A compile error was only shown once the frame booted, so it never showed.
+
+What changed:
+- build/vite-interactive-runtime.ts bundles
+  src/services/interactive/frame-runtime.tsx with React into one classic
+  script (Vite lib build, iife) and exports its text as
+  `virtual:interactive-frame-runtime`. InteractiveBlock imports it with the
+  first React example and loads it into the frame through `srcdoc`: no CORS,
+  no route, no request per frame. The chunk is 193 KB (60 KB gzip), outside
+  the offline shell (checked in sw.js: in `files`, not `shell`). The dev
+  server rebuilds it when its sources change (checked).
+- Both frame documents (frame-document.ts) carry a CSP with no network
+  source: `connect-src 'none'`, images/media only data:/blob:.
+- The frame reports its body's height; html/body no longer have
+  `min-height: 100%`.
+- The block counts `booted` messages and re-sends the current code on each,
+  so a frame that reloads isn't left blank. The theme travels in the run
+  message; switching it doesn't reload the frame.
+- The /interactive-runtime route is removed (one fewer route chunk in the
+  offline shell).
+
+How it was tested:
+- tests/e2e/interactive.spec.ts, 4 tests on the production preview: a React
+  counter renders and responds with a settled height and no console errors;
+  an HTML example runs its script and settles below 200 px; image, XHR and an
+  HTML <img> to the app's own origin are all `net::ERR_BLOCKED_BY_CSP` and
+  none completes, while fetch and localStorage throw; a compile error shows
+  the block's alert. All 4 pass; against HEAD's build (f042344) all 4 fail.
+- Dev server checked by hand with Playwright: booted → run → ready, three
+  height messages.
+- typecheck; npm test 448/450 (2 skipped: live Gemini); build; ESLint on the
+  changed files: 0 errors, the 2 existing InteractiveBlock warnings.
+- offline.spec, stale-chunk.spec, startup-loading.spec on the production
+  preview: 15/15 (one startup-loading test failed on the cold server's first
+  request and passed on rerun and with --repeat-each=2).
+
+Limits: an example's frame still can't run offline before its first online
+use (as before: the runtime chunk is cached when first used or via Settings'
+download). Chromium only.
+
+
+Previous update — 2026-09-29 (R05 math: typeset in the reader again, within a per-task budget; MathJax works in production)
 
 Completed R05's math half (Package 8). The interactive-JSX half (Babel off the
 main thread, compile cache, debounced playground) is not done yet.

@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SavedRouteImport } from './routes/saved'
 import { Route as MdReaderRouteImport } from './routes/md-reader'
-import { Route as InteractiveRuntimeRouteImport } from './routes/interactive-runtime'
 import { Route as IndexRouteImport } from './routes/index'
 
 const SettingsRoute = SettingsRouteImport.update({
@@ -30,11 +29,6 @@ const MdReaderRoute = MdReaderRouteImport.update({
   path: '/md-reader',
   getParentRoute: () => rootRouteImport,
 } as any)
-const InteractiveRuntimeRoute = InteractiveRuntimeRouteImport.update({
-  id: '/interactive-runtime',
-  path: '/interactive-runtime',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -43,14 +37,12 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/interactive-runtime': typeof InteractiveRuntimeRoute
   '/md-reader': typeof MdReaderRoute
   '/saved': typeof SavedRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/interactive-runtime': typeof InteractiveRuntimeRoute
   '/md-reader': typeof MdReaderRoute
   '/saved': typeof SavedRoute
   '/settings': typeof SettingsRoute
@@ -58,29 +50,20 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/interactive-runtime': typeof InteractiveRuntimeRoute
   '/md-reader': typeof MdReaderRoute
   '/saved': typeof SavedRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    '/' | '/interactive-runtime' | '/md-reader' | '/saved' | '/settings'
+  fullPaths: '/' | '/md-reader' | '/saved' | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/interactive-runtime' | '/md-reader' | '/saved' | '/settings'
-  id:
-    | '__root__'
-    | '/'
-    | '/interactive-runtime'
-    | '/md-reader'
-    | '/saved'
-    | '/settings'
+  to: '/' | '/md-reader' | '/saved' | '/settings'
+  id: '__root__' | '/' | '/md-reader' | '/saved' | '/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  InteractiveRuntimeRoute: typeof InteractiveRuntimeRoute
   MdReaderRoute: typeof MdReaderRoute
   SavedRoute: typeof SavedRoute
   SettingsRoute: typeof SettingsRoute
@@ -109,13 +92,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MdReaderRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/interactive-runtime': {
-      id: '/interactive-runtime'
-      path: '/interactive-runtime'
-      fullPath: '/interactive-runtime'
-      preLoaderRoute: typeof InteractiveRuntimeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
@@ -128,7 +104,6 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  InteractiveRuntimeRoute: InteractiveRuntimeRoute,
   MdReaderRoute: MdReaderRoute,
   SavedRoute: SavedRoute,
   SettingsRoute: SettingsRoute,

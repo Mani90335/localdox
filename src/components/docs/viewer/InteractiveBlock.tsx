@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { htmlFrameDocument, reactFrameDocument } from "@/services/interactive/frame-document";
+import { FRAME_MESSAGE, RUN_MESSAGE, type RunMessage } from "@/services/interactive/frame-protocol";
 
 export type InteractiveKind = "html" | "react";
 export type InteractiveMode = "standard" | "preview" | "split" | "playground";
@@ -17,7 +19,6 @@ interface RuntimeError {
   stack?: string;
 }
 
-const FRAME_MESSAGE = "docucraft:interactive";
 const MIN_FRAME_HEIGHT = 176;
 const MAX_FRAME_HEIGHT = 960;
 
@@ -36,11 +37,14 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
   const runId = useRef(0);
   const [source, setSource] = useState(code);
   const [visible, setVisible] = useState(false);
-  const [frameReady, setFrameReady] = useState(false);
+  // Counts "booted" messages. A frame that reloads boots again and must be
+  // sent the current code again; a flag would already be set and stay silent.
+  const [frameBoots, setFrameBoots] = useState(0);
   const [frameHeight, setFrameHeight] = useState(300);
   const [error, setError] = useState<RuntimeError | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [compiled, setCompiled] = useState<string | RuntimeError | null>(null);
+  const [runtime, setRuntime] = useState<string | null>(null);
 
   useEffect(() => setSource(code), [code]);
 
@@ -57,8 +61,7 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
   }, []);
 
   useEffect(() => {
-    const syncTheme = () =>
-      setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
+    const syncTheme = () => setTheme(pageTheme());
     syncTheme();
     const observer = new MutationObserver(syncTheme);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
@@ -91,20 +94,42 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
     };
   }, [kind, source, visible]);
 
+  // React and the preview runtime, inlined into the frame (see frame-document.ts).
+  useEffect(() => {
+    if (kind !== "react" || !visible) return;
+    let cancelled = false;
+    import("virtual:interactive-frame-runtime").then(
+      (module) => !cancelled && setRuntime(module.default),
+      (cause) => !cancelled && setError(toRuntimeError(cause)),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [kind, visible]);
+  // Built once per runtime: the theme travels with each run, so switching it
+  // doesn't reload the frame.
+  const reactDocument = useMemo(
+    () => (runtime ? reactFrameDocument(runtime, pageTheme()) : undefined),
+    [runtime],
+  );
+
   const sendToFrame = useCallback(() => {
     const frame = iframeRef.current?.contentWindow;
-    if (!frame || !visible || !frameReady) return;
+    if (!frame || !visible || frameBoots === 0) return;
     if (compiled === null) return;
     if (typeof compiled !== "string") {
       setError(compiled);
       return;
     }
     setError(null);
-    const id = `${++runId.current}`;
-    if (kind === "react") {
-      frame.postMessage({ type: "docucraft:interactive-run", id, code: compiled, theme }, "*");
-    }
-  }, [compiled, frameReady, kind, theme, visible]);
+    const message: RunMessage = {
+      type: RUN_MESSAGE,
+      id: `${++runId.current}`,
+      code: compiled,
+      theme,
+    };
+    frame.postMessage(message, "*");
+  }, [compiled, frameBoots, theme, visible]);
 
   useEffect(() => {
     if (kind === "react") sendToFrame();
@@ -120,7 +145,7 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
         message?: string;
         stack?: string;
       };
-      if (data.event === "booted") setFrameReady(true);
+      if (data.event === "booted") setFrameBoots((boots) => boots + 1);
       if (data.event === "height" && typeof data.height === "number") {
         setFrameHeight(Math.min(MAX_FRAME_HEIGHT, Math.max(MIN_FRAME_HEIGHT, data.height + 2)));
       }
@@ -153,11 +178,7 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
         title={`Interactive ${kind} preview`}
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
-        src={kind === "react" ? "/interactive-runtime" : undefined}
-        srcDoc={kind === "html" ? htmlDocument(source, theme) : undefined}
-        onLoad={() => {
-          if (kind === "html") setFrameReady(true);
-        }}
+        srcDoc={kind === "html" ? htmlFrameDocument(source, theme) : reactDocument}
         style={{ height: frameHeight }}
       />
       {error && <ErrorPanel error={error} onDismiss={() => setError(null)} />}
@@ -220,30 +241,6 @@ function toRuntimeError(value: unknown): RuntimeError {
   return { message: error.message, stack: error.stack };
 }
 
-function htmlDocument(source: string, theme: "light" | "dark") {
-  const colors =
-    theme === "dark"
-      ? "color-scheme:dark;background:#151b2b;color:#edf2ff"
-      : "color-scheme:light;background:#fff;color:#172033";
-  return `<!doctype html><html><head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; font-src data:; media-src data: blob:" />
-    <style>html,body{min-height:100%;margin:0}body{padding:18px;font:15px/1.5 ui-sans-serif,system-ui,sans-serif;${colors}}*{box-sizing:border-box}</style>
-    <script>
-      (() => {
-        const deny=()=>{throw new Error('This API is disabled inside interactive documentation blocks.')};
-        const UnsafeFunction=Function;
-        window.open=deny; window.fetch=deny; window.eval=deny; window.Function=deny;
-        ['localStorage','sessionStorage','indexedDB','caches','Notification','Clipboard','showOpenFilePicker','showSaveFilePicker'].forEach((name)=>{try{Object.defineProperty(window,name,{configurable:true,get:deny,set:deny})}catch{}});
-        try{Object.defineProperty(document,'cookie',{configurable:true,get:deny,set:deny})}catch{}
-        if(navigator.mediaDevices) navigator.mediaDevices.getUserMedia=deny;
-        if(navigator.geolocation) navigator.geolocation.getCurrentPosition=deny;
-        new ResizeObserver(()=>parent.postMessage({type:'${FRAME_MESSAGE}',event:'height',height:document.documentElement.scrollHeight},'*')).observe(document.documentElement);
-        addEventListener('error',(event)=>parent.postMessage({type:'${FRAME_MESSAGE}',event:'error',message:event.message,stack:event.error&&event.error.stack},'*'));
-        parent.postMessage({type:'${FRAME_MESSAGE}',event:'booted'},'*');
-        void UnsafeFunction;
-      })();
-    </script>
-  </head><body>${source}</body></html>`;
+function pageTheme(): "light" | "dark" {
+  return document.documentElement.classList.contains("dark") ? "dark" : "light";
 }

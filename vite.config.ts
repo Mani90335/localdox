@@ -8,6 +8,7 @@ import path from "path";
 import { mathjaxAsset } from "./build/vite-mathjax-asset";
 import { pdfjsAssets } from "./build/vite-pdfjs-assets";
 import { offlineShell } from "./build/vite-offline-shell";
+import { interactiveRuntime } from "./build/vite-interactive-runtime";
 
 export default defineConfig({
   plugins: [
@@ -29,6 +30,9 @@ export default defineConfig({
     // for the consumer.
     mathjaxAsset(),
     pdfjsAssets(),
+    // The ```interactive-react preview runtime, inlined into its sandboxed
+    // frame. See the plugin's header.
+    interactiveRuntime(),
     // Emits /sw.js so the app reopens offline. See the plugin's header.
     offlineShell({
       // Lazy, but needed offline without a download: reading and editing
