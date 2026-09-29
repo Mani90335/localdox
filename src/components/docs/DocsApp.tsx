@@ -129,7 +129,6 @@ import {
 } from "@/lib/markdown/document-utils";
 import { clearArtifactResolutionCache } from "@/lib/workspace/workspace-artifacts";
 import { IMPORT_QUEUE, runBounded } from "@/lib/workspace/import-queue";
-import { warmAppFonts } from "@/lib/fonts/fonts";
 import { toast } from "sonner";
 import { holdReload, registerReloadGuard, reloadConfirmed } from "@/lib/app/safe-reload";
 import { useHistory } from "@/hooks/use-history";
@@ -550,7 +549,7 @@ export function DocsApp() {
 
   const { sidebarWrapRef, sidebarInnerRef } = useSidebarCollapseAnimation(sidebarCollapsed);
 
-  // Warm the UI font and the Markdown reader after first contentful paint. The
+  // Warm the Markdown reader after first contentful paint. The
   // reader is out of the startup download so the shell paints sooner, but
   // nearly every visit opens a document next: fetching it while the reader is
   // still choosing a file keeps that first open as quick as when it was
@@ -561,7 +560,6 @@ export function DocsApp() {
     let idle = 0;
     const start = () => {
       idle = requestIdleCallbackSafe(() => {
-        warmAppFonts();
         preloadMarkdownViewer();
       });
     };
