@@ -6,6 +6,7 @@ import {
   newWorkspaceRecord,
   WorkspaceConflictError,
 } from "../src/lib/workspace/persistence.ts";
+import { portableFiles } from "../src/lib/workspace/binary.ts";
 
 Object.assign(globalThis, { indexedDB, IDBKeyRange });
 
@@ -67,7 +68,7 @@ test("workspace storage migration, incremental writes and transaction safety", a
   await t.test("v1 upgrade preserves file bytes, order, bin state and UI", async () => {
     const { revision, ...upgraded } = (await persistence.getWorkspace(legacy.id))!;
     assert.equal(typeof revision, "string");
-    assert.deepEqual(upgraded, legacy);
+    assert.deepEqual({ ...upgraded, files: await portableFiles(upgraded.files) }, legacy);
     const [summary] = await persistence.listWorkspaceSummaries();
     assert.equal(summary.docCount, 2);
     assert.equal("files" in summary, false);
@@ -130,18 +131,21 @@ test("workspace storage migration, incremental writes and transaction safety", a
     assert.deepEqual(await persistence.getWorkspace(legacy.id), changed);
   });
 
-  await t.test("overlapping saves from one snapshot: the second is refused, not merged", async () => {
-    const workspace = (await persistence.getWorkspace(legacy.id))!;
-    const first = { ...workspace, files: [{ ...workspace.files[0], content: "first" }] };
-    const second = { ...workspace, files: [{ ...workspace.files[0], content: "second" }] };
-    const results = await Promise.allSettled([
-      persistence.putWorkspace(first),
-      persistence.putWorkspace(second),
-    ]);
-    assert.equal(results[0].status, "fulfilled");
-    assert.equal(results[1].status, "rejected");
-    assert.equal((await persistence.getWorkspace(legacy.id))!.files[0].content, "first");
-  });
+  await t.test(
+    "overlapping saves from one snapshot: the second is refused, not merged",
+    async () => {
+      const workspace = (await persistence.getWorkspace(legacy.id))!;
+      const first = { ...workspace, files: [{ ...workspace.files[0], content: "first" }] };
+      const second = { ...workspace, files: [{ ...workspace.files[0], content: "second" }] };
+      const results = await Promise.allSettled([
+        persistence.putWorkspace(first),
+        persistence.putWorkspace(second),
+      ]);
+      assert.equal(results[0].status, "fulfilled");
+      assert.equal(results[1].status, "rejected");
+      assert.equal((await persistence.getWorkspace(legacy.id))!.files[0].content, "first");
+    },
+  );
 
   await t.test("serial saves apply in order and each checks the previous commit", async () => {
     const workspace = (await persistence.getWorkspace(legacy.id))!;
@@ -158,7 +162,7 @@ test("workspace storage migration, incremental writes and transaction safety", a
   await t.test("a different tab's revision refuses the write and keeps its data", async () => {
     const workspace = (await persistence.getWorkspace(legacy.id))!;
     const db = await new Promise<IDBDatabase>((resolve) => {
-      const req = indexedDB.open("localdox", 2);
+      const req = indexedDB.open("localdox");
       req.onsuccess = () => resolve(req.result);
     });
     await new Promise<void>((resolve) => {

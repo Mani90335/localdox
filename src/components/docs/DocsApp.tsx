@@ -34,7 +34,7 @@ import {
   useSidebarCollapseAnimation,
   SIDEBAR_WIDTH,
 } from "./docs-app/use-sidebar-collapse-animation";
-import { toMdFile, uniqueFileName, findDuplicate } from "./docs-app/file-helpers";
+import { toMdFile, uniqueFileName, findDuplicate, fileFingerprint } from "./docs-app/file-helpers";
 import { availableWorkspaceName, resolveWorkspaceName } from "./docs-app/workspace-naming";
 import { ConflictBanner } from "./docs-app/ConflictBanner";
 import { SaveErrorBanner } from "./docs-app/SaveErrorBanner";
@@ -1065,17 +1065,27 @@ export function DocsApp() {
         // A few files at a time (import-queue.ts), each succeeding or failing
         // on its own.
         let shown = 0;
-        const results = await runBounded(accepted, importDocumentFile, {
-          ...IMPORT_QUEUE,
-          weigh: estimateStoredBytes,
-          signal: cancel.signal,
-          onSettled: (done) => {
-            const percent = Math.round((done / total) * 100);
-            if (percent === shown) return;
-            shown = percent;
-            toast.loading(`${uploading} ${percent}%`, { id: toastId });
+        const results = await runBounded(
+          accepted,
+          async (picked) => {
+            const file = await importDocumentFile(picked);
+            // Hash inside the bounded queue: no base64 copy, and an unreadable
+            // binary fails only its own item. Duplicate checks reuse this hash.
+            await fileFingerprint(file);
+            return file;
           },
-        });
+          {
+            ...IMPORT_QUEUE,
+            weigh: estimateStoredBytes,
+            signal: cancel.signal,
+            onSettled: (done) => {
+              const percent = Math.round((done / total) * 100);
+              if (percent === shown) return;
+              shown = percent;
+              toast.loading(`${uploading} ${percent}%`, { id: toastId });
+            },
+          },
+        );
         const parsed: MdFile[] = [];
         const unreadable: string[] = [];
         results.forEach((result, i) => {
@@ -1112,6 +1122,7 @@ export function DocsApp() {
         const pool = [...snapshotRef.current.files];
 
         for (const file of parsed) {
+          cancel.signal.throwIfAborted();
           const dup = await findDuplicate(file, pool);
           if (dup?.kind === "content") {
             skipped.push(file.name);

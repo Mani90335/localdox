@@ -55,25 +55,14 @@ test("a document counts its text as UTF-8 and its binary as stored, never its si
 
 test("the pre-read estimate matches what importDocumentFile stores", () => {
   const bytes = new Uint8Array(1_000);
-  const dataUrl = (type: string, n: number) =>
-    `data:${type};base64,`.length + Buffer.from(new Uint8Array(n)).toString("base64").length;
-  assert.equal(
-    estimateStoredBytes(new File([bytes], "a.png", { type: "image/png" })),
-    dataUrl("image/png", 1_000),
-  );
+  assert.equal(estimateStoredBytes(new File([bytes], "a.png", { type: "image/png" })), 1_000);
   assert.equal(
     estimateStoredBytes(new File([bytes.subarray(0, 998)], "b.pdf", { type: "application/pdf" })),
-    dataUrl("application/pdf", 998),
+    998,
   );
-  assert.equal(
-    estimateStoredBytes(new File([bytes], "c.bin")),
-    dataUrl("application/octet-stream", 1_000),
-  );
+  assert.equal(estimateStoredBytes(new File([bytes], "c.bin")), 1_000);
   assert.equal(estimateStoredBytes(new File(["# hi"], "d.md", { type: "text/markdown" })), 4);
-  assert.equal(
-    estimateStoredBytes(new File(["a,b"], "e.csv", { type: "text/csv" })),
-    3 + dataUrl("text/csv", 3),
-  );
+  assert.equal(estimateStoredBytes(new File(["a,b"], "e.csv", { type: "text/csv" })), 6);
 });
 
 test("each commit keeps its workspace's stored total on the summary row", async () => {
@@ -81,12 +70,12 @@ test("each commit keeps its workspace's stored total on the summary row", async 
   const ws = newWorkspaceRecord("Totals");
   ws.files = [doc("a", "héllo"), doc("b", "", "data:image/png;base64," + "A".repeat(400))];
   await persistence.putWorkspace(ws);
-  assert.equal(await summaryBytes(ws.id), 6 + 422);
+  assert.equal(await summaryBytes(ws.id), 6 + 300);
 
   // An edit re-measures only what changed; the total follows it.
   ws.files = [doc("a", "héllo wörld"), ws.files[1]];
   await persistence.putWorkspace(ws);
-  assert.equal(await summaryBytes(ws.id), 13 + 422);
+  assert.equal(await summaryBytes(ws.id), 13 + 300);
 
   // Removing a file (emptying the Bin) frees its bytes.
   ws.files = [ws.files[0]];
@@ -129,8 +118,8 @@ test("summaries from older builds are measured once and written back", async () 
   });
   assert.equal(await summaryBytes(ws.id), undefined);
   const totals = await persistence.storedBytesByWorkspace();
-  assert.equal(totals.get(ws.id), 300 + 17);
-  assert.equal(await summaryBytes(ws.id), 300 + 17);
+  assert.equal(totals.get(ws.id), 300 + 3);
+  assert.equal(await summaryBytes(ws.id), 300 + 3);
 });
 
 test("usage counts every workspace, with the open one taken from memory", async () => {

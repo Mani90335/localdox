@@ -54,7 +54,7 @@ export type DuplicateKind = "content" | "name";
 export async function fileFingerprint(f: { content?: string; data?: FileData }): Promise<string> {
   // Binary files carry their bytes in `data`; text ones in `content`. Either is
   // a faithful identity for "the same file uploaded twice".
-  return f.data ? dataFingerprint(f.data) : (f.content ?? "");
+  return f.data ? `binary:${await dataFingerprint(f.data)}` : f.content ? `text:${f.content}` : "";
 }
 
 export async function findDuplicate(
@@ -64,7 +64,11 @@ export async function findDuplicate(
   const print = await fileFingerprint(incoming);
   if (print) {
     for (const file of existing) {
-      if (await fileFingerprint(file) === print) return { kind: "content", file };
+      try {
+        if ((await fileFingerprint(file)) === print) return { kind: "content", file };
+      } catch {
+        // An unreadable historical body must not prevent a new file import.
+      }
     }
   }
   const clash = existing.find((f) => f.name === incoming.name);
