@@ -1,0 +1,116 @@
+[
+  {
+    "file": "anydoc_wasm_bg-CNV9QoDY.wasm",
+    "bytes": 6691779,
+    "gzip": 2948199,
+    "katexVersions": []
+  },
+  {
+    "file": "compiler.worker-XDA3X9-5.js",
+    "bytes": 2967068,
+    "gzip": 668383,
+    "katexVersions": []
+  },
+  {
+    "file": "chunk-EIO257PC-BiAg7S3S.js",
+    "bytes": 1821047,
+    "gzip": 735631,
+    "katexVersions": []
+  },
+  {
+    "file": "pdf.worker.min-Dswkl-cV.mjs",
+    "bytes": 1265413,
+    "gzip": 376093,
+    "katexVersions": []
+  },
+  {
+    "file": "mathlive.min-Ketwy1t6.js",
+    "bytes": 807992,
+    "gzip": 220192,
+    "katexVersions": []
+  },
+  {
+    "file": "chunk-KEIR6QF5-Dj-OpFgW.js",
+    "bytes": 662684,
+    "gzip": 142277,
+    "katexVersions": []
+  },
+  {
+    "file": "prod-BaHMZLfU.js",
+    "bytes": 551448,
+    "gzip": 165262,
+    "katexVersions": []
+  },
+  {
+    "file": "chunk-K2UTITRG-DVI9mR4U.js",
+    "bytes": 537077,
+    "gzip": 177046,
+    "katexVersions": []
+  },
+  {
+    "file": "mammoth.browser-DHhXrNvP.js",
+    "bytes": 491705,
+    "gzip": 118061,
+    "katexVersions": []
+  },
+  {
+    "file": "cytoscape.esm-CQFVGiJu.js",
+    "bytes": 435277,
+    "gzip": 136915,
+    "katexVersions": []
+  },
+  {
+    "file": "pdf-OvkWcaCi.js",
+    "bytes": 431181,
+    "gzip": 127899,
+    "katexVersions": []
+  },
+  {
+    "file": "spreadsheet.worker-DOMlalqE.js",
+    "bytes": 430570,
+    "gzip": 142699,
+    "katexVersions": []
+  },
+  {
+    "file": "xlsx-CfqBtJmm.js",
+    "bytes": 424835,
+    "gzip": 140371,
+    "katexVersions": []
+  },
+  {
+    "file": "media-bundle-Cv2K4fzk.js",
+    "bytes": 271943,
+    "gzip": 82350,
+    "katexVersions": [
+      "0.16.47"
+    ]
+  },
+  {
+    "file": "katex-B7rAX3Vi.js",
+    "bytes": 258879,
+    "gzip": 76742,
+    "katexVersions": [
+      "0.16.47"
+    ]
+  },
+  {
+    "file": "katex-Bl2xMUIU.js",
+    "bytes": 257774,
+    "gzip": 76616,
+    "katexVersions": [
+      "0.17.0"
+    ]
+  },
+  {
+    "file": "chunk-WYO6CB5R-B0MgksbP.js",
+    "bytes": 234633,
+    "gzip": 35236,
+    "katexVersions": []
+  },
+  {
+    "file": "temml-BtVvYCeY.js",
+    "bytes": 202039,
+    "gzip": 58896,
+    "katexVersions": []
+  }
+]

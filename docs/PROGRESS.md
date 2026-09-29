@@ -1,4 +1,65 @@
-Latest update — 2026-09-29 (B05 font loading: remove unused Inter requests and offline assets)
+Latest update — 2026-09-29 (B03 optional-feature bundle budgets and shared KaTeX)
+
+Completed B03 (Package 6). Measured production downloads by user journey,
+including worker scripts and conversion WASM. Added repeatable size ceilings
+through `npm run test:bundles` and a build report with client module ownership,
+imports, and raw/gzip sizes. Diagnostics are excluded from the offline catalog.
+
+What changed:
+- `vite.config.ts` deduplicates KaTeX to the app's 0.17.0 renderer. Previously
+  Mermaid and rehype-katex resolved separate nested 0.16.47 installations:
+  two named KaTeX chunks plus another copy inside HTML export. The client now
+  contains one implementation. No dependency versions or lockfile changed.
+- `build/vite-bundle-report.ts`, `scripts/check-bundle-budgets.mjs`, and
+  `tests/e2e/bundle-journeys.spec.ts` cover import, PDF, conversion, diagrams,
+  editing, export, XLSX, interactive React, and the math keyboard. The gate
+  checks rendered results, required engine/worker requests, optional-module
+  absence on empty startup, a single KaTeX implementation, and size ceilings.
+- Babel, MathLive, XLSX, PDF, and conversion stay optional. Babel's supported
+  TSX syntax is unchanged. The audit's 1.82 MB chunk belongs to Excalidraw and
+  is not downloaded by the nine measured journeys.
+
+Measured before → after (KiB gzip of additional JS/MJS/WASM after idle reader
+warm-up; fresh contexts, service-worker registration disabled):
+- Math flowchart: 420.1 → 345.2; HTML export after reading math: 215.3 → 140.4.
+- Unchanged: plain Markdown import 0; edit 8.4; PDF 517.4; CSV plus conversion
+  3,038.4; XLSX 156.6; interactive React 764.7; math keyboard 215.0.
+- Named renderer/export chunks lose 517,859 raw bytes (153,500 gzip bytes).
+  These are locally recompressed response-body sizes, not wire transfers or
+  latency measurements. The shell and reader prerequisite costs are additional.
+  The original diagram/export sizes exceed the new ceilings.
+
+Validation:
+- Chrome DevTools MCP: empty startup fetches no heavy optional engine;
+  a combined reader-math/diagram/export journey makes one KaTeX request,
+  renders both equations, exports MathML, and has no console warnings/errors.
+- All 10 new production bundle checks pass, including the finalized harness
+  on Nitro with unchanged executable byte totals. Typecheck, focused ESLint,
+  formatting, and diff checks pass. Unit suite: 467 passed, 2 credential-dependent
+  tests skipped. Final production build exits 0; its client bundle report is
+  byte-for-byte identical to the tested build.
+- Across reruns, 33/34 related browser regressions pass (conversion, export,
+  interactive examples, math, offline, startup, and viewers). Vite preview's
+  compression caused conversion/download-all timeouts; conversion passed on
+  Nitro. Nitro returns 404 for the generated `/_shell.html`, so offline testing
+  used static hosting, where download-all and opening a PDF offline passed.
+- The 2,000-equation stress gate is **not certified** on this host. An untouched
+  `cc6e4c5` baseline records a 257 ms task against its 100 ms limit; the changed
+  preview records 153 ms, while later changed-build runs time out waiting for
+  all equations. These single observations do not establish equivalent or
+  improved performance. The CSP test's missing HTML-image blocked-request event
+  also reproduced on baseline, then passed the final static-build rerun. No
+  existing test threshold, sandbox policy, or assertion was weakened.
+
+Details and reproduction: [optional-bundle-budgets.md](../documentation/optional-bundle-budgets.md).
+Raw before/after evidence: [b03-bundles](b03-bundles/), including
+[verification.json](b03-bundles/verification.json) and
+[devtools.json](b03-bundles/devtools.json). Chrome 154 on Windows only; no claim
+about mobile hardware, other browsers, or meeting the overall 200 KiB startup
+target. Other audit findings remain separate work.
+
+
+Previous update — 2026-09-29 (B05 font loading: remove unused Inter requests and offline assets)
 
 Completed B05 (Package 8). Measured the current production build before
 changing fonts: the UI follows the selected reading face (Atkinson
