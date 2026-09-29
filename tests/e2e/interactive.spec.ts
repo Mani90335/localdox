@@ -145,3 +145,99 @@ test("a compile error is reported in the block", async ({ page }) => {
   await expect(alert).toBeVisible();
   await expect(alert).toContainText("Preview error");
 });
+
+// R05: a playground compiles (in a worker) once typing pauses, not per
+// keystroke. Before, each keystroke compiled on the reader's thread, remounted
+// the example (losing its state) and flashed an error for every half-typed
+// line; an HTML playground reloaded its frame per keystroke.
+
+const clearFrameEvents = (page: Page) =>
+  page.evaluate(() => {
+    (window as unknown as { __frameEvents: string[] }).__frameEvents = [];
+  });
+
+async function typeAtEnd(page: Page, text: string) {
+  const editor = page.getByLabel("Interactive component source");
+  await editor.click();
+  await editor.evaluate((element: HTMLTextAreaElement) =>
+    element.setSelectionRange(element.value.length, element.value.length),
+  );
+  await page.keyboard.type(text, { delay: 40 });
+}
+
+test("a playground runs edits once typing pauses, compiled in a worker", async ({ page }) => {
+  const workers: string[] = [];
+  page.on("worker", (worker) => workers.push(worker.url()));
+  await upload(
+    page,
+    "playground.md",
+    "# Playground\n\n" +
+      fence(
+        "interactive-react",
+        `export default function Counter() {
+  const [count, setCount] = useState(2);
+  return <button onClick={() => setCount((c) => c + 1)}>Count {count}</button>;
+}`,
+        "playground",
+      ),
+  );
+  const frame = page.frameLocator('iframe[title="Interactive react preview"]');
+  await frame.getByRole("button", { name: "Count 2" }).click();
+  await expect(frame.getByRole("button", { name: "Count 3" })).toBeVisible();
+  expect(workers.some((url) => /compiler\.worker/.test(url))).toBe(true);
+
+  // Every keystroke leaves valid code; none of them runs while typing.
+  await clearFrameEvents(page);
+  await typeAtEnd(page, "\n// Counts clicks");
+  expect(await frameEvents(page)).not.toContain("ready");
+  await expect(frame.getByRole("button", { name: "Count 3" })).toBeVisible();
+
+  // Once typing pauses: one run with the new code (a fresh mount).
+  await expect(frame.getByRole("button", { name: "Count 2" })).toBeVisible();
+  await page.waitForTimeout(600);
+  expect((await frameEvents(page)).filter((event) => event === "ready")).toHaveLength(1);
+});
+
+test("a half-typed line shows its error only once typing pauses", async ({ page }) => {
+  await upload(
+    page,
+    "errors.md",
+    "# Errors\n\n" +
+      fence(
+        "interactive-react",
+        `export default function A() { return <p>fine</p>; }`,
+        "playground",
+      ),
+  );
+  const frame = page.frameLocator('iframe[title="Interactive react preview"]');
+  await expect(frame.getByText("fine")).toBeVisible();
+  const alert = page.locator(".interactive-error");
+
+  await typeAtEnd(page, "\nconst total = [1, 2");
+  await expect(alert).toHaveCount(0);
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText("Preview error");
+  // The last good run stays on screen meanwhile.
+  await expect(frame.getByText("fine")).toBeVisible();
+
+  await clearFrameEvents(page);
+  await typeAtEnd(page, "];");
+  await expect(alert).toHaveCount(0);
+  await expect.poll(() => frameEvents(page)).toContain("ready");
+});
+
+test("an HTML playground reloads its frame once typing pauses", async ({ page }) => {
+  await upload(
+    page,
+    "html-playground.md",
+    "# HTML\n\n" + fence("interactive-html", `<p>Hello</p>`, "playground"),
+  );
+  const frame = page.frameLocator('iframe[title="Interactive html preview"]');
+  await expect(frame.getByText("Hello")).toBeVisible();
+  await clearFrameEvents(page);
+  await typeAtEnd(page, "<p>World</p>");
+  expect(await frameEvents(page)).not.toContain("booted");
+  await expect(frame.getByText("World")).toBeVisible();
+  await page.waitForTimeout(600);
+  expect((await frameEvents(page)).filter((event) => event === "booted")).toHaveLength(1);
+});

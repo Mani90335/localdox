@@ -21,6 +21,8 @@ interface RuntimeError {
 
 const MIN_FRAME_HEIGHT = 176;
 const MAX_FRAME_HEIGHT = 960;
+/** How long a playground waits after the last keystroke before it compiles. */
+const EDIT_SETTLE_MS = 400;
 
 export function interactiveMode(meta?: string): InteractiveMode {
   const flags = new Set((meta ?? "").toLowerCase().split(/\s+/).filter(Boolean));
@@ -46,7 +48,22 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
   const [compiled, setCompiled] = useState<string | RuntimeError | null>(null);
   const [runtime, setRuntime] = useState<string | null>(null);
 
-  useEffect(() => setSource(code), [code]);
+  // What the preview shows. The document's code applies at once; playground
+  // edits apply once typing pauses. Each keystroke used to compile, remount
+  // the example (losing its state) and flash an error for every half-typed
+  // line, and an HTML example reloaded its frame per keystroke.
+  const [settled, setSettled] = useState(code);
+
+  useEffect(() => {
+    setSource(code);
+    setSettled(code);
+  }, [code]);
+
+  useEffect(() => {
+    if (source === settled) return;
+    const timer = setTimeout(() => setSettled(source), EDIT_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [source, settled]);
 
   // Avoid compiling/mounting below-the-fold examples until they approach the
   // reader. The frame stays empty until then, so each document can hold many demos.
@@ -68,31 +85,29 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
     return () => observer.disconnect();
   }, []);
 
-  // Babel is a sizeable browser compiler. Load and run it only for React
-  // examples that have reached the viewport (or entered playground mode).
+  // Compiled by Babel in a worker, once per distinct source, and only for
+  // examples near the viewport (services/interactive/compiler-client.ts).
+  // The preview keeps its last run until the new code arrives.
   useEffect(() => {
     if (kind !== "react" || !visible) return;
     let cancelled = false;
-    setCompiled(null);
-    void import("@babel/standalone").then(({ transform }) => {
-      try {
-        if (/^\s*import\s/m.test(source)) {
-          throw new Error("React and hooks are provided automatically; remove import statements.");
-        }
-        const output = transform(source, {
-          filename: "interactive-component.tsx",
-          presets: ["typescript", ["react", { runtime: "classic" }]],
-          plugins: ["transform-modules-commonjs"],
-        }).code;
-        if (!cancelled) setCompiled(output);
-      } catch (cause) {
-        if (!cancelled) setCompiled(toRuntimeError(cause));
-      }
-    });
+    import("@/services/interactive/compiler")
+      .then(({ compiler }) => compiler.compile(settled))
+      .then(
+        (result) =>
+          !cancelled &&
+          setCompiled(result.ok ? result.code : { message: result.message, stack: result.stack }),
+        (cause) => !cancelled && setCompiled(toRuntimeError(cause)),
+      );
     return () => {
       cancelled = true;
     };
-  }, [kind, source, visible]);
+  }, [kind, settled, visible]);
+
+  // A compile error shows at once; it doesn't wait for the frame.
+  useEffect(() => {
+    if (compiled !== null && typeof compiled !== "string") setError(compiled);
+  }, [compiled]);
 
   // React and the preview runtime, inlined into the frame (see frame-document.ts).
   useEffect(() => {
@@ -116,11 +131,7 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
   const sendToFrame = useCallback(() => {
     const frame = iframeRef.current?.contentWindow;
     if (!frame || !visible || frameBoots === 0) return;
-    if (compiled === null) return;
-    if (typeof compiled !== "string") {
-      setError(compiled);
-      return;
-    }
+    if (typeof compiled !== "string") return;
     setError(null);
     const message: RunMessage = {
       type: RUN_MESSAGE,
@@ -131,9 +142,7 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
     frame.postMessage(message, "*");
   }, [compiled, frameBoots, theme, visible]);
 
-  useEffect(() => {
-    if (kind === "react") sendToFrame();
-  }, [sendToFrame]);
+  useEffect(() => sendToFrame(), [sendToFrame]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -178,7 +187,7 @@ export function InteractiveBlock({ kind, code, meta }: InteractiveBlockProps) {
         title={`Interactive ${kind} preview`}
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
-        srcDoc={kind === "html" ? htmlFrameDocument(source, theme) : reactDocument}
+        srcDoc={kind === "html" ? htmlFrameDocument(settled, theme) : reactDocument}
         style={{ height: frameHeight }}
       />
       {error && <ErrorPanel error={error} onDismiss={() => setError(null)} />}

@@ -1,4 +1,89 @@
-Latest update — 2026-09-29 (R05 interactive examples, part 1: React previews run again; sandboxed frame hardened)
+Latest update — 2026-09-29 (R05 interactive examples, part 2: compiled in a worker, cached, playground edits settle first)
+
+Completes R05's interactive-JSX half (Package 8); the math half was done
+earlier. Part 1 (previous update, 3b65bac) made React examples run at all.
+
+What was wrong (measured on part 1's build, which already ran examples):
+- Babel (2.97 MB) loaded and compiled on the reader's thread. Opening any
+  React example: one 93 ms task at 1× CPU, 407 ms at 4×.
+- A playground compiled on every keystroke and remounted the example: a
+  31-character comment typed into a 614-line playground gave 29 runs and, at
+  4× CPU, 21 long tasks (1.2 s). Each run reset the example's state (a counter
+  you had clicked), and a half-typed line flashed "Preview error". An HTML
+  playground reloaded its frame per keystroke.
+- Nothing was cached: returning to a document recompiled every example.
+- Correction to part 1's commit message: a compile error still waited for the
+  frame to boot before showing. It now shows at once.
+
+What changed:
+- src/services/interactive/compiler.worker.ts loads Babel and compiles
+  (compile.ts). compiler-client.ts: one compile at a time, in order; results
+  (including compile errors) cached by source in a BoundedPromiseCache
+  (4 MiB, LRU, in-flight compiles shared); a 10 s limit after the worker is
+  ready terminates it; a crash fails only that compile; a worker that never
+  starts fails everything waiting once. Compiler failures are never cached, so
+  the next attempt (back online, say) starts over.
+- No main-thread fallback: a worker bundle can't share a chunk with the page,
+  so it shipped Babel twice (2.97 MB more in the offline download), and the
+  likely cause of a failed start (script not cached, offline) stops a
+  main-thread Babel too. The page's babel-*.js chunk is gone from the build.
+- compiler.ts (the worker URL) is imported on demand, so the worker stays out
+  of the offline shell (checked in sw.js: `files` only).
+- InteractiveBlock: playground edits settle for 400 ms before compiling (or
+  reloading an HTML frame); the preview keeps its last run meanwhile. The
+  existing exhaustive-deps lint warning is gone.
+- In split and playground mode the frame fills its pane with CSS (it had only
+  "filled" it through the height loop fixed in part 1).
+
+Measured (production builds of part 1 and part 2, both served by Nitro,
+Chromium via Playwright, bench/interactive-jsx.mjs; bench/ is gitignored):
+- 4× CPU: open one example, longest task 407 → none over 50 ms; mounted →
+  preview ready 665 → 354 ms (median of 5, alternating builds). Typing the
+  comment into the 614-line playground: 29 → 1 runs, 21 long tasks (1,196 ms)
+  → 0, task time 2,266 → 257 ms, error flashes 1 → 0. Twelve examples on a
+  page: 405 ms task → none, task time 1,414 → 827 ms.
+- 1× CPU: open longest task 93 ms → none; mounted → ready 185 → 245 ms (the
+  worker starts after the 1.9 KB compiler module arrives: ~60 ms slower,
+  without the freeze).
+- The first bench runs on `vite preview` showed 2.7–4.5 s to first preview:
+  that server gzips the 3 MB script per request. Not a property of the app.
+
+How it was tested:
+- tests/interactive-compiler.test.ts, 8 tests (real Babel, fake worker):
+  TSX output and error results; one compile per source and shared in-flight;
+  in-order queue; timeout terminates and isn't cached; crash fails one
+  compile; failed start fails all waiting once then retries; byte-bounded
+  LRU; close settles everything. Mutations (bypassing the cache, failing only
+  the current compile on a failed start) are caught.
+- tests/e2e/interactive.spec.ts, 3 new (7 total): a playground doesn't run
+  while typing and keeps the example's state, then runs once, compiled in a
+  worker; a half-typed line's error appears only after the pause, and fixing
+  it clears it; an HTML playground reloads once. 7/7 on the production
+  preview, 14/14 with --repeat-each=2.
+- Chrome DevTools MCP (production build, isolated context): example renders
+  with no long tasks; network shows compiler (1.9 KB), the frame runtime and
+  compiler.worker, no main-thread Babel chunk; no console errors. On the dev
+  server: typing a comment gave no runs while typing, one after the pause,
+  and the frame's height equals its pane's (320 px).
+- typecheck; npm test 456/458 (2 skipped: live Gemini); build; ESLint on the
+  changed files: 0 errors, 1 old warning (InteractiveBlock's exported helper).
+- Full production suite on a private port (4631), 9.4 min: 156 passed,
+  1 skipped, 3 failed. The 3 are the known ones: both sharing.spec link
+  checks hard-code port 4175 ("Received …:4631/#share…"), and the
+  mobile-navigation drawer close fails on plain HEAD too.
+
+Limits:
+- The first React example waits for the 2.97 MB worker script (0.66 MB gzip).
+  Replacing Babel with a smaller compiler (Sucrase, for instance) would cut
+  that but changes what syntax is accepted; left for B03.
+- A compile already running when its example's source changes isn't
+  cancelled; with the 400 ms pause, that's at most one extra compile.
+- After a failed start (offline), the block shows the error until its source
+  changes or the document reopens; there's no retry button.
+- Chromium only; no Safari, Firefox, phone or screen reader.
+
+
+Previous update — 2026-09-29 (R05 interactive examples, part 1: React previews run again; sandboxed frame hardened)
 
 Found while measuring R05's interactive-JSX half: an ```interactive-react
 example never ran, in dev or in the production build, so there was nothing
@@ -2506,7 +2591,7 @@ Pending (not started, or started but not committed)
 - Package 6: B01 is done (B01 update above), D03 is done (D03 update above) and B02 is done (latest update: small startup shell; 338 → 220.8 KB gzip, still above the 200 KiB target, with zod in persistence as the next lever). B03 (per-journey optional bundles) and D01–D02 (loading whole workspaces, binary storage) remain.
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
-- Package 8: R06 is done. B04 is done (B04 update above). A12 is done. R05's math half is done (latest update: math typeset in the reader again, a per-task typesetting budget, a byte-bounded cache, MathJax published for production); its interactive-JSX half (Babel off the main thread, compile cache, debounced playground) remains, as do B05 and the lint debt (76 errors).
+- Package 8: R06 is done. B04 is done (B04 update above). A12 is done. R05 is done: its math half (math typeset in the reader again, a per-task typesetting budget, a byte-bounded cache, MathJax published for production) and its interactive-JSX half (React examples run, in a self-contained sandboxed frame; Babel in a worker, a compile cache, playground edits settle first; latest two updates). B05 and the lint debt (76 errors) remain.
 
 None of PLAN.md's release gates are formally met yet. A01–A03 and A09/A10 now have passing reproductions, which is what the reliability gate asks for, and Package 3's offline criterion now has a passing reproduction too.
 

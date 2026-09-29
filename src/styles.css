@@ -1851,6 +1851,15 @@ mjx-container[jax="CHTML"] {
 .interactive-split {
   min-height: 20rem;
 }
+/* Beside the code, the frame fills its pane. Its height still follows its
+   content (the frame reports its body's height, not its own), so this can't
+   feed back into the size it reports. */
+.interactive-split .interactive-preview {
+  height: 100%;
+}
+.interactive-split .interactive-preview iframe {
+  min-height: 100%;
+}
 /* The group is the panel container; it must be allowed to shrink below its
    content's intrinsic width or the code pane pushes the block wider than the
    reading column. Keyed off the element the library gives us — it sets its own
