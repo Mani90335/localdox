@@ -11,6 +11,7 @@
 
 import { z } from "zod";
 import type { DocumentKind } from "../markdown/markdown-utils.ts";
+import { MAX_NOTE_CHARS } from "./notes.ts";
 
 /** Upper bound on the raw JSON of one import and on its decoded payload bytes. */
 export const MAX_IMPORT_BYTES = 128 * 1024 * 1024;
@@ -107,6 +108,29 @@ const highlightSchema = z.object({
   label: optionalText,
 });
 
+const noteSchema = z
+  .object({
+    id,
+    fileId: id,
+    fileName: z.string().max(4096).catch(""),
+    content: z.string().max(MAX_NOTE_CHARS),
+    source: z
+      .object({
+        quote: z.string().catch(""),
+        prefix: optionalText.catch(undefined),
+        suffix: optionalText.catch(undefined),
+        start: optionalCount,
+        end: optionalCount,
+        subtopicId: optionalText.catch(undefined),
+        headingId: optionalText.catch(undefined),
+        sectionTitle: optionalText.catch(undefined),
+      })
+      .catch({ quote: "" }),
+    createdAt: count.catch(0),
+    updatedAt: count.optional().catch(undefined),
+  })
+  .transform(({ updatedAt, ...note }) => ({ ...note, updatedAt: updatedAt ?? note.createdAt }));
+
 const ids = z.array(z.unknown()).transform((list) =>
   list.filter((value): value is string => typeof value === "string"),
 );
@@ -145,6 +169,8 @@ const workspaceSchema = z.object({
   // rebuilds file/section stars from `bookmarks` on hydrate in that case.
   saved: z.array(savedSchema).max(100_000).optional(),
   highlights: z.array(highlightSchema).max(100_000).default([]),
+  // Absent in exports written before notes existed.
+  notes: z.array(noteSchema).max(100_000).default([]),
   bookmarks: ids.default([]),
   ui: uiSchema,
 });
@@ -228,6 +254,7 @@ export function validateWorkspaceImport(value: unknown): ImportedWorkspace {
   assertUnique(w.folders, "folders");
   assertUnique(w.saved ?? [], "saved items");
   assertUnique(w.highlights, "highlights");
+  assertUnique(w.notes, "notes");
 
   const folders = new Map(w.folders.map((folder) => [folder.id, folder]));
   for (const folder of w.folders) {
@@ -246,7 +273,9 @@ export function validateWorkspaceImport(value: unknown): ImportedWorkspace {
   }
 
   // Dangling references are dropped rather than rejected: they carry no data
-  // of their own and an otherwise faithful backup should still open.
+  // of their own and an otherwise faithful backup should still open. Notes are
+  // the exception — each carries its own copy of the passage, so one whose
+  // source is gone is still worth keeping.
   const fileIds = new Set(w.files.map((file) => file.id));
   const live = (fileId: string) => fileIds.has(fileId);
   return {

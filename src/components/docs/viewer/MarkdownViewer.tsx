@@ -37,6 +37,7 @@ import {
   Crosshair,
   Code2,
   FileText,
+  NotebookPen,
 } from "lucide-react";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { ReadingMode } from "@/lib/workspace/persistence";
@@ -66,10 +67,13 @@ import { createHighlightPainter } from "@/lib/markdown/highlight-registry";
 import {
   findSaved,
   savedExcerpt,
+  type PassageTarget,
   type SavedDraft,
   type SavedItem,
 } from "@/lib/workspace/saved-items";
+import type { NoteDraft } from "@/lib/workspace/notes";
 import { locateInSource, sourceLinesForSelection } from "@/lib/markdown/source-locate";
+import { selectionToMarkdown } from "@/lib/markdown/selection-markdown";
 import { copyText } from "@/lib/workspace/share";
 import {
   fileSubtopics,
@@ -148,10 +152,11 @@ interface Props {
   onToggleSaved?: (draft: SavedDraft) => void;
   onRemoveSaved?: (id: string) => void;
   /**
-   * A saved item the reader just opened from the Saved list: scroll to it and
-   * flash it once, then call `onSavedShown` so it isn't replayed on re-render.
+   * A passage the reader just opened — a star from the Saved list, or a note's
+   * source link: scroll to it and flash it once, then call `onSavedShown` so it
+   * isn't replayed on re-render.
    */
-  pendingSaved?: SavedItem | null;
+  pendingSaved?: PassageTarget | null;
   onSavedShown?: () => void;
   /**
    * A search hit the reader just opened from the palette: the line it matched,
@@ -191,6 +196,11 @@ interface Props {
   contentWidth?: number;
   /** Open the Ask AI panel prefilled from the current selection. */
   onAskAi?: (prefill: { selection: string; actionId?: string }) => void;
+  /** Keep the selection as a note. Hidden from the selection menu when omitted. */
+  onCopyToNotes?: (draft: NoteDraft) => void;
+  /** Show or hide the Notes panel; the header button is hidden when omitted. */
+  onToggleNotes?: () => void;
+  notesOpen?: boolean;
 }
 
 const stripExt = (name: string) => name.replace(/\.(md|markdown|mdx|txt)$/i, "");
@@ -246,6 +256,9 @@ function MarkdownViewerImpl({
   onToggleReadingMode,
   contentWidth = 50,
   onAskAi,
+  onCopyToNotes,
+  onToggleNotes,
+  notesOpen = false,
 }: Props) {
   const singleMode = readingMode === "single";
   const containerRef = useRef<HTMLDivElement>(null);
@@ -454,6 +467,8 @@ function MarkdownViewerImpl({
         x: number;
         y: number;
         label: string;
+        /** The selection itself, kept for copying it as Markdown. */
+        range?: Range;
       }
     | { mode: "edit"; hl: Highlight; x: number; y: number; label: string };
   const [menu, setMenu] = useState<HlMenu | null>(null);
@@ -483,6 +498,9 @@ function MarkdownViewerImpl({
       x: at ? at.x : r ? r.left + r.width / 2 : window.innerWidth / 2,
       y: at ? at.y : r ? r.top : 120,
       label: "",
+      // A copy, so typing a label (which clears the live selection) or
+      // clicking a button in the menu doesn't take it away.
+      range: range?.cloneRange(),
     });
   };
 
@@ -638,6 +656,59 @@ function MarkdownViewerImpl({
     setInspectMissed(!span);
     setEditMode(true);
     setPendingSelect(span ?? { start: Math.max(0, chunkStart), end: Math.max(0, chunkStart) });
+  };
+
+  /**
+   * Keep the selection as a note: its content as clean Markdown (see
+   * selection-markdown.ts), plus a quote anchor to find it again by.
+   *
+   * The saved range is preferred; if a re-render has since replaced the nodes
+   * it pointed into, it is rebuilt from the offsets taken when the menu opened.
+   */
+  const copyToNotes = () => {
+    const container = contentRef.current;
+    if (!onCopyToNotes || !container || menu?.mode !== "create") return;
+    const range =
+      menu.range && !menu.range.collapsed && container.contains(menu.range.commonAncestorContainer)
+        ? menu.range
+        : buildRange(container, menu.start, menu.end);
+    const content = (range && selectionToMarkdown(range, container)) || menu.text.trim();
+
+    // The heading the passage sits under. Paged mode strips each page's own
+    // title from the render (it is the masthead), so the page stands in for it.
+    let heading: HTMLElement | null = null;
+    if (range) {
+      for (const candidate of container.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")) {
+        const before =
+          candidate.contains(range.startContainer) ||
+          !!(
+            candidate.compareDocumentPosition(range.startContainer) &
+            Node.DOCUMENT_POSITION_FOLLOWING
+          );
+        if (!before) break;
+        if (candidate.id) heading = candidate;
+      }
+    }
+    const page = singleMode ? undefined : activeChunk;
+    onCopyToNotes({
+      content,
+      source: {
+        // From the same text index `findAnchor` searches when the note is
+        // followed back. `Selection.toString()` is layout-aware (it adds line
+        // breaks around KaTeX's spans), so it never matches that index exactly
+        // across an equation, and the jump would flash only a prefix.
+        quote: textBetween(container, menu.start, menu.end) || menu.text,
+        prefix: menu.prefix,
+        suffix: menu.suffix,
+        start: menu.start,
+        end: menu.end,
+        subtopicId: page?.id,
+        headingId: heading?.id ?? page?.id,
+        sectionTitle: heading?.textContent?.trim() || page?.title,
+      },
+    });
+    window.getSelection()?.removeAllRanges();
+    setMenu(null);
   };
 
   const copySource = (text: string) => {
@@ -1209,6 +1280,19 @@ function MarkdownViewerImpl({
         actions={
           !editMode ? (
             <div className="flex items-center gap-1">
+              {onToggleNotes && (
+                <button
+                  onClick={onToggleNotes}
+                  aria-label="Notes"
+                  aria-pressed={notesOpen}
+                  title={notesOpen ? "Hide notes" : "Show notes"}
+                  className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11 ${
+                    notesOpen ? "bg-accent text-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  <NotebookPen className="h-4 w-4" />
+                </button>
+              )}
               {onToggleReadingMode && (
                 <button
                   onClick={onToggleReadingMode}
@@ -1373,6 +1457,16 @@ function MarkdownViewerImpl({
                   <Code2 className="h-3.5 w-3.5" /> Copy code
                 </button>
               </div>
+
+              {menu.mode === "create" && onCopyToNotes && (
+                <button
+                  onClick={copyToNotes}
+                  title="Keep this passage in the Notes panel. The document is not changed."
+                  className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                >
+                  <NotebookPen className="h-3.5 w-3.5" /> Copy selection to notes
+                </button>
+              )}
 
               <div className="flex items-center gap-1">
                 {/* Saving lives here rather than on a star pinned to every

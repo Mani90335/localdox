@@ -73,6 +73,8 @@ import { WorkspaceSheet } from "./workspace/WorkspaceSheet";
 import { MoveToWorkspaceDialog } from "./workspace/MoveToWorkspaceDialog";
 import { MoveToBinDialog, type BinRequest } from "./workspace/MoveToBinDialog";
 import { NothingHere } from "./docs-app/NothingHere";
+import { NotesPanel, type NoteSourceState } from "./notes/NotesPanelLazy";
+import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { EditFileContext } from "./viewer/EditFileContext";
 import type { AskAiPrefill } from "@/services/ai";
 
@@ -165,10 +167,20 @@ import {
   newSavedId,
   savedKey,
   toLegacyBookmarks,
+  type PassageTarget,
   type SavedDraft,
   type SavedEntry,
   type SavedItem,
 } from "@/lib/workspace/saved-items";
+import {
+  createNote,
+  editNote,
+  MAX_NOTE_CHARS,
+  resolveNoteSource,
+  sortNotes,
+  type Note,
+  type NoteDraft,
+} from "@/lib/workspace/notes";
 import {
   copyLink,
   fetchShare,
@@ -205,6 +217,9 @@ type Theme = ThemePref;
 // same array. A fresh `[]` would be a new prop identity on every render.
 const EMPTY_HIGHLIGHTS: Highlight[] = [];
 const EMPTY_SAVED: SavedItem[] = [];
+
+/** Whether the Notes panel was open — a per-device convenience, not workspace data. */
+const NOTES_OPEN_KEY = "localdox:notes-open";
 
 interface WorkspaceLite {
   id: string;
@@ -456,8 +471,19 @@ export function DocsApp() {
   // code block or a passage the reader selected. Legacy `${fileId}#${sectionId}`
   // bookmarks are read as saved items on hydrate (see `migrateBookmarks`).
   const [saved, setSaved] = useState<SavedItem[]>([]);
-  /** A saved item the reader just opened — handed to the viewer to scroll to. */
-  const [pendingSaved, setPendingSaved] = useState<SavedItem | null>(null);
+  /**
+   * A passage the reader just opened — a star, or a note's source link —
+   * handed to the viewer to scroll to.
+   */
+  const [pendingSaved, setPendingSaved] = useState<PassageTarget | null>(null);
+  // Passages copied out of documents into the Notes panel. Snapshots: edits to
+  // their source never rewrite them (see lib/workspace/notes.ts).
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const notesOpenRef = useRef(notesOpen);
+  notesOpenRef.current = notesOpen;
+  /** The note just copied, marked in the panel for a moment. */
+  const [freshNoteId, setFreshNoteId] = useState<string | null>(null);
   // Highlights are the one reader action with no other way back — a mis-drag
   // silently replaces whatever it overlaps — so they get an undo stack.
   // `resetHighlights` loads a workspace without making the previous one's
@@ -527,6 +553,7 @@ export function DocsApp() {
     sidebarCollapsed,
     saved,
     highlights,
+    notes,
     recentFileIds,
   });
   snapshotRef.current = {
@@ -538,6 +565,7 @@ export function DocsApp() {
     sidebarCollapsed,
     saved,
     highlights,
+    notes,
     recentFileIds,
   };
   const scrollRef = useRef(0);
@@ -634,6 +662,7 @@ export function DocsApp() {
       bookmarks: toLegacyBookmarks(s.saved),
       saved: s.saved,
       highlights: s.highlights,
+      notes: s.notes,
       ui: {
         activeFileId: s.activeFileId,
         expanded: s.expanded,
@@ -839,6 +868,7 @@ export function DocsApp() {
       setSidebarCollapsed(!!ws.ui?.sidebarCollapsed);
       setSaved(ws.saved?.length ? ws.saved : migrateBookmarks(ws.bookmarks ?? [], parsed));
       resetHighlights((ws.highlights ?? []).filter((h) => typeof h.text === "string"));
+      setNotes(ws.notes ?? []);
       setWorkspaceId(ws.id);
       workspaceIdRef.current = ws.id;
       workspaceNameRef.current = ws.name;
@@ -2136,6 +2166,87 @@ flowchart LR
     [markDirty],
   );
 
+  // ---- notes ----
+
+  // The panel's open state is the reader's, per device; it is not part of the
+  // workspace and never syncs. Read after mount so the server render and the
+  // first client render agree.
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(NOTES_OPEN_KEY) === "1") setNotesOpen(true);
+    } catch {
+      // Storage blocked: the panel simply starts closed.
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(NOTES_OPEN_KEY, notesOpen ? "1" : "0");
+    } catch {
+      // Not remembered; nothing else depends on it.
+    }
+  }, [notesOpen]);
+  const toggleNotes = useCallback(() => setNotesOpen((open) => !open), []);
+  const closeNotes = useCallback(() => setNotesOpen(false), []);
+
+  useEffect(() => {
+    if (!freshNoteId) return;
+    const timer = setTimeout(() => setFreshNoteId(null), 2000);
+    return () => clearTimeout(timer);
+  }, [freshNoteId]);
+
+  const addNote = useCallback(
+    (fileId: string, draft: NoteDraft) => {
+      const file = filesRef.current.find((f) => f.id === fileId);
+      if (!file || !draft.content.trim()) return;
+      const note = createNote(draft, file);
+      setNotes((prev) => [...prev, note]);
+      setFreshNoteId(note.id);
+      markDirty();
+      const truncated = draft.content.length > MAX_NOTE_CHARS;
+      toast.success("Copied to notes", {
+        id: "note-added",
+        description: truncated
+          ? `That selection was very long; the first ${MAX_NOTE_CHARS.toLocaleString()} characters were kept.`
+          : undefined,
+        action: notesOpenRef.current
+          ? undefined
+          : { label: "Show notes", onClick: () => setNotesOpen(true) },
+      });
+    },
+    [markDirty],
+  );
+
+  const updateNote = useCallback(
+    (id: string, content: string) => {
+      setNotes((prev) => prev.map((note) => (note.id === id ? editNote(note, content) : note)));
+      markDirty();
+    },
+    [markDirty],
+  );
+
+  // Deleting is immediate and undoable, rather than confirmed: a note is one
+  // click to make, and a confirmation on every tidy-up teaches readers to
+  // click through confirmations.
+  const removeNote = useCallback(
+    (id: string) => {
+      const note = snapshotRef.current.notes.find((n) => n.id === id);
+      if (!note) return;
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+      markDirty();
+      toast("Note deleted", {
+        id: "note-deleted",
+        action: {
+          label: "Undo",
+          onClick: () => {
+            setNotes((prev) => (prev.some((n) => n.id === id) ? prev : [...prev, note]));
+            markDirty();
+          },
+        },
+      });
+    },
+    [markDirty],
+  );
+
   const sortFilesByName = useCallback(() => {
     setFiles((prev) => {
       const next = [...prev].sort((a, b) => a.name.localeCompare(b.name));
@@ -2482,6 +2593,7 @@ flowchart LR
       setFiles([]);
       setFolders([]);
       setSaved([]);
+      setNotes([]);
       setSaveStatus("idle");
     } finally {
       setResolvingConflict(false);
@@ -2592,6 +2704,7 @@ flowchart LR
         setFolders((prev) => prev.filter((folder) => !plan.removeFolderIds.has(folder.id)));
         setSaved((prev) => prev.filter((item) => !plan.removeFileIds.has(item.fileId)));
         setHighlights((prev) => prev.filter((item) => !plan.removeFileIds.has(item.fileId)));
+        setNotes((prev) => prev.filter((item) => !plan.removeFileIds.has(item.fileId)));
         // A moved document must not stay open in a pane pointing at a file this
         // workspace no longer has.
         setPaneLayout((prev) => closeFileEverywhere(prev, [...plan.removeFileIds]));
@@ -3096,6 +3209,13 @@ flowchart LR
     [toggleSaved, activeFile],
   );
 
+  const copyToNotesFromActive = useCallback(
+    (draft: NoteDraft) => {
+      if (activeFile) addNote(activeFile.id, draft);
+    },
+    [addNote, activeFile],
+  );
+
   const shareActiveFile = useCallback(() => {
     if (activeFile) shareFile(activeFile.id);
   }, [shareFile, activeFile]);
@@ -3187,6 +3307,71 @@ flowchart LR
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [openFromHome, showSettings],
   );
+
+  /**
+   * A note's source link. Resolved against the document's Markdown first (see
+   * `resolveNoteSource`), so the right page opens even if the passage has
+   * moved, and a passage or document that is gone says so instead of opening
+   * somewhere unrelated.
+   */
+  const openNoteSource = useCallback(
+    async (note: Note) => {
+      const file = filesRef.current.find((f) => f.id === note.fileId);
+      const status = resolveNoteSource(note, file);
+      const name = file?.name ?? note.fileName;
+      if (status.kind === "missing-document") {
+        toast.info("The source document is no longer in this workspace.", {
+          id: "note-source",
+          description: "The note keeps its own copy of the passage.",
+        });
+        return;
+      }
+      if (status.kind === "binned") {
+        toast.info(`“${name}” is in the Bin.`, {
+          id: "note-source",
+          description: "Restore it from Settings ▸ Storage to follow this link.",
+        });
+        return;
+      }
+      // On a phone the sheet covers the very passage being opened.
+      if (mobileNavigation) setNotesOpen(false);
+      const target = status.kind === "found" ? status.subtopicId : (status.target ?? undefined);
+      if (showSettings) await openFromHome(note.fileId, target);
+      else handleSelect(note.fileId, target);
+      if (status.kind === "missing-passage") {
+        toast.info("This passage is no longer in the document.", {
+          id: "note-source",
+          description: target ? "Opened the section it came from." : undefined,
+        });
+        return;
+      }
+      // Stored offsets are only a hint, and only in the space they were
+      // measured in: the page they came from, or the whole document.
+      const sameSpace =
+        !status.moved &&
+        (note.source.subtopicId === undefined) === (readingModeRef.current === "single");
+      setPendingSaved({
+        fileId: note.fileId,
+        text: note.source.quote,
+        prefix: note.source.prefix,
+        suffix: note.source.suffix,
+        start: sameSpace ? note.source.start : undefined,
+      });
+    },
+    [mobileNavigation, showSettings, openFromHome, handleSelect],
+  );
+
+  // What the panel shows about each note's source, by file id.
+  const filesById = useMemo(() => new Map(files.map((file) => [file.id, file])), [files]);
+  const noteFileName = useCallback((fileId: string) => filesById.get(fileId)?.name, [filesById]);
+  const noteSourceState = useCallback(
+    (fileId: string): NoteSourceState => {
+      const file = filesById.get(fileId);
+      return !file ? "missing" : file.deletedAt != null ? "binned" : "live";
+    },
+    [filesById],
+  );
+  const sortedNotes = useMemo(() => sortNotes(notes), [notes]);
 
   const goHome = useCallback(() => navigate({ to: "/" }), [navigate]);
   // An optional tab lands the dialog straight on a section — "All workspaces"
@@ -4103,6 +4288,18 @@ flowchart LR
                                             : null
                                         }
                                         onSearchShown={clearPendingSearch}
+                                        // Only the focused pane takes a jump, so
+                                        // the same document open twice scrolls once.
+                                        pendingSaved={
+                                          pendingSaved?.fileId === paneFile.id &&
+                                          pane.id === paneLayout.focusedPaneId
+                                            ? pendingSaved
+                                            : null
+                                        }
+                                        onSavedShown={clearPendingSaved}
+                                        onCopyToNotes={addNote}
+                                        onToggleNotes={toggleNotes}
+                                        notesOpen={notesOpen}
                                       />
                                     ) : (
                                       <NothingHere compact />
@@ -4153,6 +4350,9 @@ flowchart LR
                         onRenameFile={renameActiveFile}
                         onShareFile={shareActiveFile}
                         onAskAi={aiEnabled ? askAiFromSelection : undefined}
+                        onCopyToNotes={copyToNotesFromActive}
+                        onToggleNotes={toggleNotes}
+                        notesOpen={notesOpen}
                         readingMode={readingMode}
                         contentWidth={contentWidth}
                         mathPreferences={mathPreferences}
@@ -4191,7 +4391,45 @@ flowchart LR
                 </LazyBoundary>
               </ConversionContext.Provider>
             </EditFileContext.Provider>
+
+            {/* Notes, docked beside the reading column on a wide screen so they
+                stay in view while reading. Narrower screens get a sheet below. */}
+            {notesOpen && !mobileNavigation && (
+              <aside className="sticky top-0 h-dvh w-80 shrink-0 border-l border-border bg-background xl:w-88">
+                <LazyBoundary>
+                  <NotesPanel
+                    variant="docked"
+                    notes={sortedNotes}
+                    fileName={noteFileName}
+                    sourceState={noteSourceState}
+                    onOpenSource={openNoteSource}
+                    onUpdate={updateNote}
+                    onRemove={removeNote}
+                    onClose={closeNotes}
+                    freshId={freshNoteId}
+                  />
+                </LazyBoundary>
+              </aside>
+            )}
           </div>
+
+          {mobileNavigation && (
+            <BottomSheet open={notesOpen} onOpenChange={setNotesOpen} title="Notes">
+              <LazyBoundary>
+                <NotesPanel
+                  variant="sheet"
+                  notes={sortedNotes}
+                  fileName={noteFileName}
+                  sourceState={noteSourceState}
+                  onOpenSource={openNoteSource}
+                  onUpdate={updateNote}
+                  onRemove={removeNote}
+                  onClose={closeNotes}
+                  freshId={freshNoteId}
+                />
+              </LazyBoundary>
+            </BottomSheet>
+          )}
 
           <input
             ref={inputRef}

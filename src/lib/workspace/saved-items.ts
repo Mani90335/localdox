@@ -45,6 +45,15 @@ export interface SavedItem {
   orphaned?: boolean;
 }
 
+/**
+ * What opening a passage needs: the document, and where in it to scroll and
+ * flash. A star is one; a note's source link builds one from its quote anchor.
+ */
+export type PassageTarget = Pick<
+  SavedItem,
+  "fileId" | "headingId" | "blockSrc" | "text" | "prefix" | "suffix" | "start"
+>;
+
 /** Everything about a new star except the identity the store assigns it. */
 export type SavedDraft = Omit<SavedItem, "id" | "fileId" | "createdAt">;
 

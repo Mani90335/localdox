@@ -1,4 +1,53 @@
-Latest update — 2026-09-29 (D01 part 1 merged with upstream D02/B03/B05: other workspaces are read without bodies and without resetting the open workspace's save cache)
+Latest update — 2026-10-01 (Notes panel: copy a selection as clean Markdown, keep it as a snapshot, follow it back to its source)
+
+Select text in a Markdown document → **Copy selection to notes**. The passage
+is kept as Markdown in a Notes panel: docked right of the reading column at
+≥1024px, a bottom sheet below that. The source document is never modified.
+Details: documentation/notes-panel.md.
+
+What changed:
+- Model `src/lib/workspace/notes.ts`: `Note { id, fileId, fileName, content,
+  source: quote anchor, createdAt, updatedAt }`, stored as
+  `WorkspaceRecord.notes`. Notes are snapshots: only an explicit edit changes
+  them, and they outlive their source document.
+- Clean copy `src/lib/markdown/selection-markdown.ts`: walks the DOM between
+  the selection's boundary points, drops viewer chrome, emits GFM (lists, task
+  boxes, tables with header, fenced code with language, callouts) and the
+  LaTeX source of any equation touched.
+- Source links: `resolveNoteSource` finds the quote in the Markdown (exact
+  matches only: whole quote, then lines of ≥20 chars) and opens the page it is
+  on *now*. The viewer then flashes it via the existing star jump
+  (`pendingSaved`, now `PassageTarget`; split panes now receive it too). A gone
+  passage opens its heading with a toast; a binned or deleted source says so.
+- Persistence: autosave, 3-way merge (no live-file filter), backup
+  export/import (validated; no version bump), and cross-workspace move. Never
+  included in share links (they upload to an external host).
+- `locateInSource` gained `{ exactOnly }`. Inspect's behavior is unchanged.
+
+Found in the browser, not by unit tests: the math sanitizer leaves KaTeX's
+annotation as bare text inside `<math>` (handled), and `Selection.toString()`
+doesn't match the `textContent` index across equations (the quote now comes
+from `textBetween`).
+
+Tests:
+- tests/notes.test.ts (25): clean copy, snapshot semantics, search, anchors
+  (moved, repeated, crossed math, broken, binned, missing), and storage (backup
+  round trip, validation, IndexedDB, two-tab merge, cross-workspace move).
+- tests/e2e/notes.spec.ts (2): select → copy → stored Markdown → reload →
+  search → follow from page 1 back to the flashed passage on page 2; the phone
+  sheet.
+- Run: `npm test` 501 pass / 0 fail (503 total; the other 2 are skips); tsc
+  clean except the pre-existing src/routes/__root.tsx error (also on HEAD with a
+  frozen-lockfile install); eslint 0 new errors or warnings (import-schema.ts's
+  3 Prettier errors are on HEAD). Production build e2e, private port: notes,
+  highlighting, persistence, durability, editing, math, long-markdown,
+  storage-persistence, search, bundle-journeys all passed; `test:bundles` 10/10.
+
+Known limits: Mermaid/embeds/media copy as nothing; local images copy as alt
+text; MathJax equations copy their MathML text; an empty workspace has no
+viewer to open the panel from.
+
+Previous update — 2026-09-29 (D01 part 1 merged with upstream D02/B03/B05: other workspaces are read without bodies and without resetting the open workspace's save cache)
 
 Merged upstream/main (eb5424b: D02 Blob bodies, B03 bundle budgets, B05
 fonts) into main, which held D01 part 1's first version (2ab5273, entry

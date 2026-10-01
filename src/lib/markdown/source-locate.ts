@@ -211,6 +211,12 @@ export function locateInSource(
   source: string,
   selection: string,
   prefer?: { from: number; to: number },
+  /**
+   * Accept only a match of the whole selection. The fallbacks below land the
+   * editor caret *near* lost text, which is right for Inspect but would make a
+   * note's source link claim a passage still exists when it does not.
+   */
+  { exactOnly = false }: { exactOnly?: boolean } = {},
 ): SourceSpan | null {
   const needle = compact(selection).text;
   if (!needle) return null;
@@ -257,6 +263,7 @@ export function locateInSource(
 
   const exact = search(needle);
   if (exact !== -1) return spanFor(exact, needle.length);
+  if (exactOnly) return null;
 
   // Selections that cross a rendered boundary we didn't model (a table row, a
   // stripped heading) won't match whole. Anchor on the longest prefix that does

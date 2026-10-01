@@ -18,9 +18,10 @@
  *    workspaces through an import or a share link is not, and it carries its
  *    original id. Colliding ids are reassigned, and every reference to them is
  *    rewritten to match.
- *  - **Stars and highlights hang off file ids.** They live in the workspace
- *    record beside the files rather than inside them, so they have to be moved
- *    explicitly. Left behind, the reader's annotations vanish with no warning.
+ *  - **Stars, highlights and notes hang off file ids.** They live in the
+ *    workspace record beside the files rather than inside them, so they have
+ *    to be moved explicitly. Left behind, the reader's annotations vanish with
+ *    no warning — and a note's source link would point at nothing.
  *
  * The planning half is pure and exhaustively testable; `persistence` is only
  * touched by the caller that applies the result.
@@ -29,6 +30,7 @@
 import type { FolderRecord, PersistedFile, WorkspaceRecord } from "./persistence";
 import type { SavedItem } from "./saved-items";
 import type { Highlight } from "../markdown/dom-highlighter";
+import type { Note } from "./notes";
 
 /** What the reader picked in the sidebar. */
 export interface TransferSelection {
@@ -43,6 +45,8 @@ export interface TransferPlan {
   folders: FolderRecord[];
   saved: SavedItem[];
   highlights: Highlight[];
+  /** Notes copied from the moving documents — they follow their source. */
+  notes: Note[];
   /** Ids to drop from the source — expanded to include folder descendants. */
   removeFileIds: Set<string>;
   removeFolderIds: Set<string>;
@@ -107,7 +111,7 @@ export function expandFolderIds(
  * landing point, because the folder they referred to is not coming with them.
  */
 export function planTransfer(
-  source: Pick<WorkspaceRecord, "files" | "folders" | "saved" | "highlights">,
+  source: Pick<WorkspaceRecord, "files" | "folders" | "saved" | "highlights" | "notes">,
   destination: Pick<WorkspaceRecord, "files" | "folders">,
   selection: TransferSelection,
   destinationParentId: string | null = null,
@@ -176,12 +180,16 @@ export function planTransfer(
   const highlights = (source.highlights ?? [])
     .filter((item) => fileIdMap.has(item.fileId))
     .map((item) => ({ ...item, fileId: fileIdMap.get(item.fileId)! }));
+  const notes = (source.notes ?? [])
+    .filter((item) => fileIdMap.has(item.fileId))
+    .map((item) => ({ ...item, fileId: fileIdMap.get(item.fileId)! }));
 
   return {
     files,
     folders,
     saved,
     highlights,
+    notes,
     removeFileIds: new Set(movingFiles.map((file) => file.id)),
     removeFolderIds: movingFolderIds,
     renamedFileIds,
@@ -216,6 +224,7 @@ export function applyToDestination(
     folders: [...(destination.folders ?? []), ...plan.folders],
     saved: [...(destination.saved ?? []), ...plan.saved],
     highlights: [...(destination.highlights ?? []), ...plan.highlights],
+    notes: [...(destination.notes ?? []), ...plan.notes],
     ui: {
       ...destination.ui,
       // The incoming documents go at the end of the destination's order. Left
@@ -231,7 +240,7 @@ export function applyToDestination(
 
 /** What is left of the source once the moved records are gone. */
 export function removeFromSource<
-  T extends Pick<WorkspaceRecord, "files" | "folders" | "saved" | "highlights">,
+  T extends Pick<WorkspaceRecord, "files" | "folders" | "saved" | "highlights" | "notes">,
 >(source: T, plan: TransferPlan): T {
   return {
     ...source,
@@ -239,5 +248,6 @@ export function removeFromSource<
     folders: (source.folders ?? []).filter((folder) => !plan.removeFolderIds.has(folder.id)),
     saved: (source.saved ?? []).filter((item) => !plan.removeFileIds.has(item.fileId)),
     highlights: (source.highlights ?? []).filter((item) => !plan.removeFileIds.has(item.fileId)),
+    notes: (source.notes ?? []).filter((item) => !plan.removeFileIds.has(item.fileId)),
   };
 }

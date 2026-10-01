@@ -6,7 +6,8 @@ import type { Highlight } from "@/lib/markdown/dom-highlighter";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { FolderRecord, ReadingMode } from "@/lib/workspace/persistence";
 import type { MathPreferences } from "@/services/math";
-import type { SavedDraft, SavedItem } from "@/lib/workspace/saved-items";
+import type { PassageTarget, SavedDraft, SavedItem } from "@/lib/workspace/saved-items";
+import type { NoteDraft } from "@/lib/workspace/notes";
 import type { PendingSearch } from "@/lib/search/schema";
 
 const EMPTY_HIGHLIGHTS: Highlight[] = [];
@@ -62,6 +63,11 @@ export function PaneDocument({
   highlightQuery = null,
   pendingSearch = null,
   onSearchShown,
+  pendingSaved = null,
+  onSavedShown,
+  onCopyToNotes,
+  onToggleNotes,
+  notesOpen,
 }: {
   file: MdFile;
   files: MdFile[];
@@ -103,6 +109,12 @@ export function PaneDocument({
   highlightQuery?: string | null;
   pendingSearch?: PendingSearch | null;
   onSearchShown?: () => void;
+  /** A star or note source to scroll to — gated by the parent like a search hit. */
+  pendingSaved?: PassageTarget | null;
+  onSavedShown?: () => void;
+  onCopyToNotes?: (fileId: string, draft: NoteDraft) => void;
+  onToggleNotes?: () => void;
+  notesOpen?: boolean;
 }) {
   const fileHighlights = useMemo(() => {
     const mine = highlights.filter((hl) => hl.fileId === file.id);
@@ -125,6 +137,10 @@ export function PaneDocument({
   const renameFile = useCallback(
     (name: string) => onRenameFile(file.id, name),
     [onRenameFile, file.id],
+  );
+  const copyToNotes = useCallback(
+    (draft: NoteDraft) => onCopyToNotes?.(file.id, draft),
+    [onCopyToNotes, file.id],
   );
 
   // A split is a layout concern, not a document-type mode. Resolve the viewer
@@ -167,6 +183,11 @@ export function PaneDocument({
       highlightQuery={highlightQuery}
       pendingSearch={pendingSearch}
       onSearchShown={onSearchShown}
+      pendingSaved={pendingSaved}
+      onSavedShown={onSavedShown}
+      onCopyToNotes={onCopyToNotes ? copyToNotes : undefined}
+      onToggleNotes={onToggleNotes}
+      notesOpen={notesOpen}
       onContentChange={onContentChange}
       onRenameFile={renameFile}
       startInEditFileId={startInEditFileId}

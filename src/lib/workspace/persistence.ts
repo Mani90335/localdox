@@ -110,6 +110,7 @@ export interface PersistedUI {
 
 import type { Highlight } from "../markdown/dom-highlighter";
 import type { SavedItem } from "./saved-items";
+import type { Note } from "./notes";
 
 export interface WorkspaceRecord {
   /**
@@ -133,6 +134,11 @@ export interface WorkspaceRecord {
   /** Stars on files, sections, blocks and selections. */
   saved?: SavedItem[];
   highlights?: Highlight[];
+  /**
+   * Passages copied into the Notes panel. Unlike stars and highlights they
+   * are not dropped with their source document: a note is a snapshot.
+   */
+  notes?: Note[];
   ui: PersistedUI;
 }
 
@@ -789,6 +795,7 @@ export function newWorkspaceRecord(name: string): WorkspaceRecord {
     bookmarks: [],
     saved: [],
     highlights: [],
+    notes: [],
     ui: emptyUI(),
   };
 }
@@ -1062,6 +1069,7 @@ export function parseWorkspaceImport(json: string): WorkspaceRecord {
     bookmarks: w.bookmarks,
     ...(w.saved ? { saved: w.saved } : {}),
     highlights: w.highlights,
+    notes: w.notes,
     ui: {
       activeFileId: w.ui.activeFileId,
       expanded: w.ui.expanded,
