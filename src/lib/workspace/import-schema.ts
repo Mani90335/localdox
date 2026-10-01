@@ -12,6 +12,7 @@
 import { z } from "zod";
 import type { DocumentKind } from "../markdown/markdown-utils.ts";
 import { MAX_NOTE_CHARS } from "./notes.ts";
+import { MAX_SCRATCHPAD_CHARS, MAX_SCRATCHPAD_TITLE } from "./rough-work.ts";
 
 /** Upper bound on the raw JSON of one import and on its decoded payload bytes. */
 export const MAX_IMPORT_BYTES = 128 * 1024 * 1024;
@@ -111,7 +112,8 @@ const highlightSchema = z.object({
 const noteSchema = z
   .object({
     id,
-    fileId: id,
+    // "" for a note saved from rough work that had no document.
+    fileId: z.string().max(512),
     fileName: z.string().max(4096).catch(""),
     content: z.string().max(MAX_NOTE_CHARS),
     source: z
@@ -130,10 +132,42 @@ const noteSchema = z
           .catch(undefined),
       })
       .catch({ quote: "" }),
+    origin: z
+      .object({
+        kind: z.literal("rough-work"),
+        scratchpadId: id,
+        title: z.string().max(4096).catch(""),
+      })
+      .optional()
+      .catch(undefined),
     createdAt: count.catch(0),
     updatedAt: count.optional().catch(undefined),
   })
-  .transform(({ updatedAt, ...note }) => ({ ...note, updatedAt: updatedAt ?? note.createdAt }));
+  .transform(({ updatedAt, origin, ...note }) => ({
+    ...note,
+    ...(origin ? { origin } : {}),
+    updatedAt: updatedAt ?? note.createdAt,
+  }));
+
+const scratchpadSchema = z
+  .object({
+    id,
+    title: z
+      .string()
+      .transform((title) => title.trim().slice(0, MAX_SCRATCHPAD_TITLE) || "Scratchpad")
+      .catch("Scratchpad"),
+    content: z.string().max(MAX_SCRATCHPAD_CHARS),
+    fileId: id.nullish().catch(null),
+    fileName: z.string().max(4096).optional().catch(undefined),
+    createdAt: count.catch(0),
+    updatedAt: count.optional().catch(undefined),
+  })
+  .transform(({ updatedAt, fileId, fileName, ...pad }) => ({
+    ...pad,
+    fileId: fileId ?? null,
+    ...(fileId && fileName !== undefined ? { fileName } : {}),
+    updatedAt: updatedAt ?? pad.createdAt,
+  }));
 
 const ids = z.array(z.unknown()).transform((list) =>
   list.filter((value): value is string => typeof value === "string"),
@@ -175,6 +209,8 @@ const workspaceSchema = z.object({
   highlights: z.array(highlightSchema).max(100_000).default([]),
   // Absent in exports written before notes existed.
   notes: z.array(noteSchema).max(100_000).default([]),
+  // Absent in exports written before rough work existed.
+  scratchpads: z.array(scratchpadSchema).max(MAX_IMPORT_FILES).default([]),
   bookmarks: ids.default([]),
   ui: uiSchema,
 });
@@ -259,6 +295,7 @@ export function validateWorkspaceImport(value: unknown): ImportedWorkspace {
   assertUnique(w.saved ?? [], "saved items");
   assertUnique(w.highlights, "highlights");
   assertUnique(w.notes, "notes");
+  assertUnique(w.scratchpads, "scratchpads");
 
   const folders = new Map(w.folders.map((folder) => [folder.id, folder]));
   for (const folder of w.folders) {
@@ -277,9 +314,9 @@ export function validateWorkspaceImport(value: unknown): ImportedWorkspace {
   }
 
   // Dangling references are dropped rather than rejected: they carry no data
-  // of their own and an otherwise faithful backup should still open. Notes are
-  // the exception — each carries its own copy of the passage, so one whose
-  // source is gone is still worth keeping.
+  // of their own and an otherwise faithful backup should still open. Notes and
+  // scratchpads are the exception — each carries text of its own, so one whose
+  // document is gone is still worth keeping.
   const fileIds = new Set(w.files.map((file) => file.id));
   const live = (fileId: string) => fileIds.has(fileId);
   return {

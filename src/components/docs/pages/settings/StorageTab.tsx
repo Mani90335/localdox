@@ -13,6 +13,7 @@ export function StorageSettings({
   onClearStorage,
   workspaceId,
   files,
+  writing,
   binCount,
   onEmptyBin,
 }: {
@@ -20,6 +21,11 @@ export function StorageSettings({
   /** The open workspace, counted as this tab holds it (unsaved edits too). */
   workspaceId: string | null;
   files: MdFile[];
+  /** Its notes and rough work, which count toward the same limit. */
+  writing?: {
+    notes: readonly { content: string }[];
+    scratchpads: readonly { title: string; content: string }[];
+  };
   /** How many documents the Bin is holding, for the pressure prompt. */
   binCount: number;
   onEmptyBin: () => void;
@@ -44,13 +50,13 @@ export function StorageSettings({
 
   useEffect(() => {
     let alive = true;
-    measureStoredBytes(() => ({ id: workspaceId, files }))
+    measureStoredBytes(() => ({ id: workspaceId, files, ...writing }))
       .then((bytes) => alive && setUsage(bytes))
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [workspaceId, files]);
+  }, [workspaceId, files, writing]);
 
   const cap = browser?.quota ? capFromQuota(browser.quota) : null;
   const pct = usage != null && cap ? Math.min(100, (usage / cap) * 100) : null;

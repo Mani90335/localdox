@@ -18,7 +18,7 @@ import {
   validateWorkspaceImport,
 } from "./import-schema.ts";
 import { parseDerivation, remapDerivation } from "../../services/doc-conversion/types.ts";
-import { storedBytes, storedFileBytes } from "./storage-limits.ts";
+import { recordTextBytes, storedBytes, storedFileBytes } from "./storage-limits.ts";
 
 export interface PersistedFile {
   derivedFrom?: import("@/services/doc-conversion").Derivation;
@@ -111,6 +111,7 @@ export interface PersistedUI {
 import type { Highlight } from "../markdown/dom-highlighter";
 import type { SavedItem } from "./saved-items";
 import type { Note } from "./notes";
+import type { Scratchpad } from "./rough-work";
 
 export interface WorkspaceRecord {
   /**
@@ -139,6 +140,11 @@ export interface WorkspaceRecord {
    * are not dropped with their source document: a note is a snapshot.
    */
   notes?: Note[];
+  /**
+   * Rough work: the reader's scratchpads. Working space, never part of a
+   * document's text; optionally associated with one (see rough-work.ts).
+   */
+  scratchpads?: Scratchpad[];
   ui: PersistedUI;
 }
 
@@ -553,7 +559,7 @@ export const persistence = {
             for (const id of previous?.fileIds ?? []) {
               if (!nextIds.has(id)) fileStore.delete([w.id, id]);
             }
-            let bytes = 0;
+            let bytes = recordTextBytes(w);
             for (const file of w.files) {
               const unchanged = sameFile(cached?.files.get(file.id), file);
               if (!unchanged) fileStore.put({ ...file, workspaceId: w.id });
@@ -677,8 +683,8 @@ export const persistence = {
   /**
    * Stored bytes per workspace, from the summary rows. A row written by an
    * older build has no total yet: its files are measured once, one row at a
-   * time through a cursor, and the total is written back in the same
-   * transaction.
+   * time through a cursor, with the notes and rough work on its workspace row,
+   * and the total is written back in the same transaction.
    */
   async storedBytesByWorkspace(): Promise<Map<string, number>> {
     const summaries = await persistence.listWorkspaceSummaries();
@@ -691,9 +697,14 @@ export const persistence = {
     if (missing.length === 0) return totals;
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([FILES, SUMMARIES], "readwrite");
+      const tx = db.transaction([STORE, FILES, SUMMARIES], "readwrite");
       for (const id of missing) {
         let bytes = 0;
+        // Notes and rough work live on the workspace row itself.
+        const row = tx.objectStore(STORE).get(id);
+        row.onsuccess = () => {
+          if (row.result) bytes += recordTextBytes(row.result as StoredWorkspace);
+        };
         const cursor = tx.objectStore(FILES).index("workspaceId").openCursor(id);
         cursor.onsuccess = () => {
           const row = cursor.result;
@@ -796,6 +807,7 @@ export function newWorkspaceRecord(name: string): WorkspaceRecord {
     saved: [],
     highlights: [],
     notes: [],
+    scratchpads: [],
     ui: emptyUI(),
   };
 }
@@ -1070,6 +1082,7 @@ export function parseWorkspaceImport(json: string): WorkspaceRecord {
     ...(w.saved ? { saved: w.saved } : {}),
     highlights: w.highlights,
     notes: w.notes,
+    scratchpads: w.scratchpads,
     ui: {
       activeFileId: w.ui.activeFileId,
       expanded: w.ui.expanded,

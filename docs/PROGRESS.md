@@ -1,4 +1,43 @@
-Latest update — 2026-10-01 (Source addressing: search hits, Inspect source and note links land on the exact occurrence; search in tables and diagrams fixed)
+Latest update — 2026-10-01 (Rough work: math scratchpads in the Notes panel)
+
+The Notes panel has two tabs, **Notes** and **Rough work**. A scratchpad is
+private working space for equations and intermediate steps: Markdown with
+`$…$`/`$$…$$`, the editor's toolbar and shortcuts, the MathLive keyboard, and a
+live preview drawn by the notes' idle-time renderer. It never touches a
+document unless the reader confirms an insertion. Details:
+documentation/rough-work.md.
+
+- Model `src/lib/workspace/rough-work.ts`: `Scratchpad { id, title, content,
+  fileId | null, fileName?, createdAt, updatedAt }` on
+  `WorkspaceRecord.scratchpads`. Optional document association (new pads link
+  to the open document; Unlink/Link in the menu), kept after the document is gone.
+- Actions: New, Rename, Duplicate, Link/Unlink, Clear contents (confirmation
+  dialog, then Undo), Delete (Undo), Save (selection) as note (the note carries
+  `origin` and links back to the pad), Insert (selection) into document. The
+  insert dialog shows what goes in and where (end of this page / end of the
+  document). It re-checks at Insert (document unchanged, not open in the editor:
+  `editor/open-editors.ts`), lands on and flashes the exact span, and offers Undo.
+- Persistence: autosave (500 ms pause + workspace write), draft journal under
+  `rough:<padId>` with crash recovery into the pad, two-tab merge, backup
+  import/export (validated), linked pads follow a moved document, never in
+  share links.
+- Storage accounting now counts notes and rough work (`recordTextBytes`) in
+  summary totals, lazy re-measure, the open workspace, backup imports and
+  Settings ▸ Storage.
+- Bugs found by the new e2e tests and fixed before landing: an outside change
+  applied in a layout effect let the journal stage stale text, which a reload
+  offered back over restored work (now synced during render); and the journal's
+  base hash was frozen at open, so post-autosave drafts restored as copies.
+
+Tests: tests/rough-work.test.ts (18), tests/e2e/rough-work.spec.ts (8, also
+16/16 with --repeat-each=2). Unit 534 pass / 0 fail (536 total). E2E on a
+private-port production build: rough-work, notes, durability, editing, math,
+persistence, storage-budget, storage-persistence, addressing,
+mobile-navigation 58/59; the one failure (mobile drawer close) fails the same on
+a HEAD build. Bundle journeys 10/10. tsc: only the pre-existing __root.tsx
+error. eslint: nothing new in any touched file.
+
+Previous update — 2026-10-01 (Source addressing: search hits, Inspect source and note links land on the exact occurrence; search in tables and diagrams fixed)
 
 Every rendered block now carries its span in the file's Markdown
 (`data-src="start:end"`, stamped by `rehypeSourceAddress` through segments and

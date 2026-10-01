@@ -59,8 +59,21 @@ export interface Note {
   /** The copied passage, as Markdown. */
   content: string;
   source: NoteSource;
+  /**
+   * Set on a note saved from rough work rather than copied out of a document.
+   * Its link back is the scratchpad (see rough-work.ts); `source` is empty,
+   * and `fileId` is the pad's document, or "" when the pad had none.
+   */
+  origin?: NoteOrigin;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface NoteOrigin {
+  kind: "rough-work";
+  scratchpadId: string;
+  /** The pad's title when the note was saved; shown once the pad is gone. */
+  title: string;
 }
 
 /** What the reader produces; the workspace adds identity and the file. */
@@ -121,7 +134,12 @@ export function searchNotes(
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return [...notes];
   return notes.filter((note) => {
-    const hay = [note.content, nameOf(note.fileId) ?? note.fileName, note.source.sectionTitle ?? ""]
+    const hay = [
+      note.content,
+      nameOf(note.fileId) ?? note.fileName,
+      note.source.sectionTitle ?? "",
+      note.origin?.title ?? "",
+    ]
       .join("\n")
       .toLowerCase();
     return words.every((word) => hay.includes(word));
@@ -155,7 +173,7 @@ export type NoteSourceStatus =
 const MIN_ANCHOR_LINE = 20;
 
 /** Where each page starts and ends in the document source. */
-function chunkRanges(content: string, chunks: MdChunk[]) {
+export function chunkRanges(content: string, chunks: MdChunk[]) {
   const ranges: Array<{ id: string; from: number; to: number }> = [];
   let cursor = 0;
   for (const chunk of chunks) {

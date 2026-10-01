@@ -18,9 +18,9 @@
  *    workspaces through an import or a share link is not, and it carries its
  *    original id. Colliding ids are reassigned, and every reference to them is
  *    rewritten to match.
- *  - **Stars, highlights and notes hang off file ids.** They live in the
- *    workspace record beside the files rather than inside them, so they have
- *    to be moved explicitly. Left behind, the reader's annotations vanish with
+ *  - **Stars, highlights, notes and linked rough work hang off file ids.**
+ *    They live in the workspace record beside the files rather than inside
+ *    them, so they have to be moved explicitly. Left behind, the reader's annotations vanish with
  *    no warning — and a note's source link would point at nothing.
  *
  * The planning half is pure and exhaustively testable; `persistence` is only
@@ -31,6 +31,7 @@ import type { FolderRecord, PersistedFile, WorkspaceRecord } from "./persistence
 import type { SavedItem } from "./saved-items";
 import type { Highlight } from "../markdown/dom-highlighter";
 import type { Note } from "./notes";
+import type { Scratchpad } from "./rough-work";
 
 /** What the reader picked in the sidebar. */
 export interface TransferSelection {
@@ -47,6 +48,8 @@ export interface TransferPlan {
   highlights: Highlight[];
   /** Notes copied from the moving documents — they follow their source. */
   notes: Note[];
+  /** Rough work linked to the moving documents; unlinked pads stay put. */
+  scratchpads: Scratchpad[];
   /** Ids to drop from the source — expanded to include folder descendants. */
   removeFileIds: Set<string>;
   removeFolderIds: Set<string>;
@@ -111,7 +114,10 @@ export function expandFolderIds(
  * landing point, because the folder they referred to is not coming with them.
  */
 export function planTransfer(
-  source: Pick<WorkspaceRecord, "files" | "folders" | "saved" | "highlights" | "notes">,
+  source: Pick<
+    WorkspaceRecord,
+    "files" | "folders" | "saved" | "highlights" | "notes" | "scratchpads"
+  >,
   destination: Pick<WorkspaceRecord, "files" | "folders">,
   selection: TransferSelection,
   destinationParentId: string | null = null,
@@ -183,6 +189,9 @@ export function planTransfer(
   const notes = (source.notes ?? [])
     .filter((item) => fileIdMap.has(item.fileId))
     .map((item) => ({ ...item, fileId: fileIdMap.get(item.fileId)! }));
+  const scratchpads = (source.scratchpads ?? [])
+    .filter((pad) => pad.fileId !== null && fileIdMap.has(pad.fileId))
+    .map((pad) => ({ ...pad, fileId: fileIdMap.get(pad.fileId!)! }));
 
   return {
     files,
@@ -190,6 +199,7 @@ export function planTransfer(
     saved,
     highlights,
     notes,
+    scratchpads,
     removeFileIds: new Set(movingFiles.map((file) => file.id)),
     removeFolderIds: movingFolderIds,
     renamedFileIds,
@@ -225,6 +235,7 @@ export function applyToDestination(
     saved: [...(destination.saved ?? []), ...plan.saved],
     highlights: [...(destination.highlights ?? []), ...plan.highlights],
     notes: [...(destination.notes ?? []), ...plan.notes],
+    scratchpads: [...(destination.scratchpads ?? []), ...plan.scratchpads],
     ui: {
       ...destination.ui,
       // The incoming documents go at the end of the destination's order. Left
@@ -240,7 +251,10 @@ export function applyToDestination(
 
 /** What is left of the source once the moved records are gone. */
 export function removeFromSource<
-  T extends Pick<WorkspaceRecord, "files" | "folders" | "saved" | "highlights" | "notes">,
+  T extends Pick<
+    WorkspaceRecord,
+    "files" | "folders" | "saved" | "highlights" | "notes" | "scratchpads"
+  >,
 >(source: T, plan: TransferPlan): T {
   return {
     ...source,
@@ -249,5 +263,8 @@ export function removeFromSource<
     saved: (source.saved ?? []).filter((item) => !plan.removeFileIds.has(item.fileId)),
     highlights: (source.highlights ?? []).filter((item) => !plan.removeFileIds.has(item.fileId)),
     notes: (source.notes ?? []).filter((item) => !plan.removeFileIds.has(item.fileId)),
+    scratchpads: (source.scratchpads ?? []).filter(
+      (pad) => pad.fileId === null || !plan.removeFileIds.has(pad.fileId),
+    ),
   };
 }

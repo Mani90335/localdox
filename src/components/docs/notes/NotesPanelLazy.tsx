@@ -1,7 +1,8 @@
 import { deferredModule } from "@/lib/app/deferred-module";
 import type { NotesPanelProps } from "./NotesPanel";
 
-export type { NoteSourceState } from "./NotesPanel";
+export type { NoteSourceState, NotesTab } from "./NotesPanel";
+export type { InsertRequest, InsertTarget, RoughWorkProps } from "./RoughWorkPanel";
 
 /**
  * The Notes panel, downloaded the first time it opens. It renders Markdown,

@@ -175,6 +175,7 @@ reading mode.
 | Backup export/import | `serializeWorkspace`, `import-schema.ts` | validated; malformed fields repaired, duplicate ids rejected, old backups import with `[]` |
 | Move to another workspace | `workspace-transfer.ts` | notes follow their document, renumbered with it |
 | Share links | `share.ts` | **never included**: shares upload to an external host, and notes are private |
+| Storage accounting | `recordTextBytes` | note content counts toward the storage cap, like documents |
 
 No backup version bump was needed. Older builds drop the unknown `notes` field,
 and newer builds default it to `[]`.
@@ -183,6 +184,10 @@ Panel open/closed is a per-device convenience in `localStorage`
 (`localdox:notes-open`), not workspace data.
 
 ## UI
+
+The panel has two tabs: **Notes** and **Rough work** (scratchpads; see
+rough-work.md). A note saved from rough work carries `origin` instead of a
+source passage, and its link opens the scratchpad.
 
 - **Desktop (≥1024px):** a docked column (`w-80`, `xl:w-88`) right of the
   reading column, sticky to the viewport. It stays open across documents and

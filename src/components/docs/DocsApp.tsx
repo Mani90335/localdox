@@ -73,7 +73,15 @@ import { WorkspaceSheet } from "./workspace/WorkspaceSheet";
 import { MoveToWorkspaceDialog } from "./workspace/MoveToWorkspaceDialog";
 import { MoveToBinDialog, type BinRequest } from "./workspace/MoveToBinDialog";
 import { NothingHere } from "./docs-app/NothingHere";
-import { NotesPanel, type NoteSourceState } from "./notes/NotesPanelLazy";
+import {
+  NotesPanel,
+  type InsertRequest,
+  type InsertTarget,
+  type NoteSourceState,
+  type NotesTab,
+  type RoughWorkProps,
+} from "./notes/NotesPanelLazy";
+import { isEditorOpen } from "./editor/open-editors";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { EditFileContext } from "./viewer/EditFileContext";
 import type { AskAiPrefill } from "@/services/ai";
@@ -182,6 +190,23 @@ import {
   type NoteDraft,
 } from "@/lib/workspace/notes";
 import {
+  createScratchpad,
+  duplicateScratchpad,
+  editScratchpad,
+  insertIntoDocument,
+  insertionPoints,
+  linkScratchpad,
+  newScratchpadId,
+  noteFromScratchpad,
+  pageAt,
+  renameScratchpad,
+  scratchpadDraftId,
+  scratchpadDrafts,
+  scratchpadOfDraft,
+  sortScratchpads,
+  type Scratchpad,
+} from "@/lib/workspace/rough-work";
+import {
   copyLink,
   fetchShare,
   parseSharedFiles,
@@ -197,6 +222,8 @@ import {
   formatBytes,
   isQuotaExceeded,
   storedBytes,
+  storedRecordBytes,
+  recordTextBytes,
   utf8Length,
 } from "@/lib/workspace/storage-limits";
 import { reserveStorage, type StorageReservation } from "@/lib/workspace/storage-budget";
@@ -220,6 +247,9 @@ const EMPTY_SAVED: SavedItem[] = [];
 
 /** Whether the Notes panel was open — a per-device convenience, not workspace data. */
 const NOTES_OPEN_KEY = "localdox:notes-open";
+/** Which of its tabs was showing, and the scratchpad open in Rough work. Per device too. */
+const NOTES_TAB_KEY = "localdox:notes-tab";
+const ROUGH_PAD_KEY = "localdox:rough-pad";
 
 interface WorkspaceLite {
   id: string;
@@ -246,7 +276,7 @@ function importSharedWorkspaceOnce(key: string): Promise<WorkspaceRecord> {
       // meet before the app has even drawn.
       const already = await persistence.listWorkspaceSummaries();
       ws.name = availableWorkspaceName(`${ws.name} (Shared)`, already);
-      const room = await reserveStorage(storedBytes(ws.files));
+      const room = await reserveStorage(storedRecordBytes(ws));
       try {
         await persistence.serial(() => persistence.putWorkspace(ws));
       } finally {
@@ -484,6 +514,14 @@ export function DocsApp() {
   notesOpenRef.current = notesOpen;
   /** The note just copied, marked in the panel for a moment. */
   const [freshNoteId, setFreshNoteId] = useState<string | null>(null);
+  const [notesTab, setNotesTab] = useState<NotesTab>("notes");
+  // Rough work: the reader's scratchpads. Working space that never becomes part
+  // of a document unless the reader inserts it (see lib/workspace/rough-work.ts).
+  const [scratchpads, setScratchpads] = useState<Scratchpad[]>([]);
+  const [activePadId, setActivePadId] = useState<string | null>(null);
+  // Whether the scratchpad field holds text it hasn't handed over yet. Like
+  // `editorDirtyRef`, it is journalled, and holds off adopting another tab's write.
+  const roughDirtyRef = useRef(false);
   // Highlights are the one reader action with no other way back — a mis-drag
   // silently replaces whatever it overlaps — so they get an undo stack.
   // `resetHighlights` loads a workspace without making the previous one's
@@ -554,6 +592,7 @@ export function DocsApp() {
     saved,
     highlights,
     notes,
+    scratchpads,
     recentFileIds,
   });
   snapshotRef.current = {
@@ -566,11 +605,13 @@ export function DocsApp() {
     saved,
     highlights,
     notes,
+    scratchpads,
     recentFileIds,
   };
   const scrollRef = useRef(0);
   const activeFileNameRef = useRef<string | null>(null);
   const readingModeRef = useRef(readingMode);
+  const activeHeadingIdRef = useRef<string | null>(null);
   const workspaceIdRef = useRef<string | null>(null);
   const workspaceNameRef = useRef("My workspace");
   const createdAtRef = useRef(Date.now());
@@ -663,6 +704,7 @@ export function DocsApp() {
       saved: s.saved,
       highlights: s.highlights,
       notes: s.notes,
+      scratchpads: s.scratchpads,
       ui: {
         activeFileId: s.activeFileId,
         expanded: s.expanded,
@@ -765,7 +807,8 @@ export function DocsApp() {
           return false;
         }
         // Journalled drafts this record now holds are safe to forget.
-        if (journal.has(id)) journal.settle(id, record.files);
+        if (journal.has(id))
+          journal.settle(id, [...record.files, ...scratchpadDrafts(record.scratchpads)]);
         if (workspaceIdRef.current !== id) return true;
         storageRevisionRef.current = record.revision;
         storedRecordRef.current = record;
@@ -781,6 +824,7 @@ export function DocsApp() {
           merging &&
           mutationRef.current === pending &&
           !editorDirtyRef.current &&
+          !roughDirtyRef.current &&
           !officeDirtyPanes.current.size
         )
           adoptRef.current(record);
@@ -869,6 +913,7 @@ export function DocsApp() {
       setSaved(ws.saved?.length ? ws.saved : migrateBookmarks(ws.bookmarks ?? [], parsed));
       resetHighlights((ws.highlights ?? []).filter((h) => typeof h.text === "string"));
       setNotes(ws.notes ?? []);
+      setScratchpads(ws.scratchpads ?? []);
       setWorkspaceId(ws.id);
       workspaceIdRef.current = ws.id;
       workspaceNameRef.current = ws.name;
@@ -1049,7 +1094,12 @@ export function DocsApp() {
 
   /** This tab's open workspace, unsaved edits included, for storage-budget. */
   const openWorkspace = useCallback(
-    () => ({ id: workspaceIdRef.current, files: snapshotRef.current.files }),
+    () => ({
+      id: workspaceIdRef.current,
+      files: snapshotRef.current.files,
+      notes: snapshotRef.current.notes,
+      scratchpads: snapshotRef.current.scratchpads,
+    }),
     [],
   );
 
@@ -1319,6 +1369,7 @@ export function DocsApp() {
   );
   activeFileNameRef.current = activeFile?.name ?? null;
   readingModeRef.current = readingMode;
+  activeHeadingIdRef.current = activeHeadingId;
 
   // Identity of the workspace's file set, used to invalidate the artifact
   // resolution cache and to key embed rendering. Built by walking every file, so
@@ -1359,7 +1410,10 @@ export function DocsApp() {
    */
   const editorDirtyRef = useRef(false);
   const syncEditorDirty = useCallback(
-    () => setEditorDirty(editorDirtyRef.current || officeDirtyPanes.current.size > 0),
+    () =>
+      setEditorDirty(
+        editorDirtyRef.current || roughDirtyRef.current || officeDirtyPanes.current.size > 0,
+      ),
     [],
   );
   const confirmDiscardDraft = useCallback((fileId?: string) => {
@@ -2325,6 +2379,245 @@ flowchart LR
     [markDirty],
   );
 
+  // ---- rough work ----
+
+  // Which tab and which pad were showing: per device, like the panel itself.
+  useEffect(() => {
+    try {
+      const tab = localStorage.getItem(NOTES_TAB_KEY);
+      if (tab === "notes" || tab === "rough") setNotesTab(tab);
+      setActivePadId(localStorage.getItem(ROUGH_PAD_KEY));
+    } catch {
+      // Storage blocked: Notes, and the most recent pad.
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(NOTES_TAB_KEY, notesTab);
+      if (activePadId) localStorage.setItem(ROUGH_PAD_KEY, activePadId);
+    } catch {
+      // Not remembered; nothing else depends on it.
+    }
+  }, [notesTab, activePadId]);
+
+  /** The live document in the reader, which new pads are linked to. */
+  const readerFile = useCallback(() => {
+    const s = snapshotRef.current;
+    const file = s.files.find((f) => f.id === s.activeFileId && f.deletedAt == null);
+    return file ? { id: file.id, name: file.name } : null;
+  }, []);
+
+  const updateScratchpad = useCallback(
+    (id: string, change: (pad: Scratchpad) => Scratchpad) => {
+      setScratchpads((prev) => prev.map((pad) => (pad.id === id ? change(pad) : pad)));
+      markDirty();
+    },
+    [markDirty],
+  );
+
+  const createPad = useCallback(() => {
+    const pad = createScratchpad(snapshotRef.current.scratchpads, readerFile());
+    setScratchpads((prev) => [...prev, pad]);
+    setActivePadId(pad.id);
+    markDirty();
+  }, [markDirty, readerFile]);
+
+  const changePad = useCallback(
+    (id: string, content: string) => updateScratchpad(id, (pad) => editScratchpad(pad, content)),
+    [updateScratchpad],
+  );
+  const renamePad = useCallback(
+    (id: string, title: string) => updateScratchpad(id, (pad) => renameScratchpad(pad, title)),
+    [updateScratchpad],
+  );
+  const linkPad = useCallback(
+    (id: string, fileId: string | null) => {
+      const file = fileId ? filesRef.current.find((f) => f.id === fileId) : undefined;
+      updateScratchpad(id, (pad) =>
+        linkScratchpad(pad, file ? { id: file.id, name: file.name } : null),
+      );
+    },
+    [updateScratchpad],
+  );
+
+  // The editor hands its pending text over just before these run, so they
+  // work from the pad as the queued update leaves it, not from the last render.
+  const duplicatePad = useCallback(
+    (id: string) => {
+      const copyId = newScratchpadId();
+      setScratchpads((prev) => {
+        const source = prev.find((pad) => pad.id === id);
+        return source ? [...prev, { ...duplicateScratchpad(source, prev), id: copyId }] : prev;
+      });
+      setActivePadId(copyId);
+      markDirty();
+    },
+    [markDirty],
+  );
+
+  // Confirmed in the panel first; Undo is a second chance, not the safeguard.
+  const clearPad = useCallback(
+    (id: string) => {
+      let before: Scratchpad | undefined;
+      setScratchpads((prev) =>
+        prev.map((pad) => (pad.id === id ? ((before = pad), editScratchpad(pad, "")) : pad)),
+      );
+      markDirty();
+      toast("Scratchpad cleared", {
+        id: "rough-cleared",
+        action: {
+          label: "Undo",
+          onClick: () => {
+            const previous = before;
+            if (!previous) return;
+            // Only into a pad still empty: nothing typed since is overwritten.
+            updateScratchpad(id, (pad) =>
+              pad.content ? pad : editScratchpad(pad, previous.content),
+            );
+          },
+        },
+      });
+    },
+    [markDirty, updateScratchpad],
+  );
+
+  const deletePad = useCallback(
+    (id: string) => {
+      let removed: Scratchpad | undefined;
+      setScratchpads((prev) => {
+        removed = prev.find((pad) => pad.id === id);
+        return prev.filter((pad) => pad.id !== id);
+      });
+      const workspace = workspaceIdRef.current;
+      if (workspace) journal.discard(workspace, scratchpadDraftId(id));
+      markDirty();
+      toast("Scratchpad deleted", {
+        id: "rough-deleted",
+        action: {
+          label: "Undo",
+          onClick: () => {
+            const pad = removed;
+            if (!pad) return;
+            setScratchpads((prev) => (prev.some((p) => p.id === id) ? prev : [...prev, pad]));
+            setActivePadId(id);
+            markDirty();
+          },
+        },
+      });
+    },
+    [journal, markDirty],
+  );
+
+  const savePadAsNote = useCallback(
+    (id: string, markdown: string) => {
+      const pad = snapshotRef.current.scratchpads.find((p) => p.id === id);
+      if (!pad || !markdown.trim()) return;
+      const note = noteFromScratchpad(pad, markdown.slice(0, MAX_NOTE_CHARS));
+      setNotes((prev) => [...prev, note]);
+      setFreshNoteId(note.id);
+      markDirty();
+      toast.success("Saved to notes", {
+        id: "note-added",
+        description: "A copy: changing the scratchpad later won't change the note.",
+        action: { label: "Show notes", onClick: () => setNotesTab("notes") },
+      });
+    },
+    [markDirty],
+  );
+
+  const openPadDocument = useCallback(
+    async (fileId: string) => {
+      if (mobileNavigation) setNotesOpen(false);
+      if (showSettings) await openFromHome(fileId);
+      else handleSelect(fileId);
+    },
+    // handleSelect is redefined every render; calling the latest one is correct.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mobileNavigation, showSettings, openFromHome],
+  );
+
+  /** Where the document in the reader can take rough work, measured now. */
+  const roughInsertTarget = useCallback((): InsertTarget | null => {
+    const s = snapshotRef.current;
+    const file = s.files.find((f) => f.id === s.activeFileId);
+    if (!file || file.deletedAt != null) return null;
+    if (file.kind && file.kind !== "markdown" && file.kind !== "text") return null;
+    // Paged reading opens on the first page with no page id set.
+    const page =
+      readingModeRef.current === "single"
+        ? null
+        : (activeHeadingIdRef.current ?? fileSubtopics(file)[0]?.id ?? null);
+    return {
+      fileId: file.id,
+      name: file.name,
+      points: insertionPoints(file, page),
+      blocked: isEditorOpen(file.id)
+        ? `“${file.name}” is open in the editor. Choose Done or Cancel there first, then insert.`
+        : undefined,
+      base: hashText(file.content),
+    };
+  }, []);
+
+  /**
+   * The one way rough work reaches a document, after the reader confirmed it.
+   * Checked again here: the document may have changed, or opened in the
+   * editor, while the dialog was up. It is then an ordinary edit of the
+   * document, with an Undo for exactly this insertion.
+   */
+  const insertRoughWork = useCallback(
+    (request: InsertRequest) => {
+      const file = filesRef.current.find((f) => f.id === request.fileId);
+      const refuse = (message: string) =>
+        toast.error(message, { id: "rough-insert", description: "Nothing was inserted." });
+      if (!file || file.deletedAt != null) return refuse("That document is no longer open.");
+      if (isEditorOpen(file.id))
+        return refuse(`“${file.name}” is open in the editor. Choose Done or Cancel there first.`);
+      if (hashText(file.content) !== request.base)
+        return refuse(`“${file.name}” changed while the dialog was open. Try again.`);
+
+      const before = file.content;
+      const { content, span } = insertIntoDocument(before, request.markdown, request.point.offset);
+      handleContentChange(file.id, content);
+
+      // Show where it went.
+      if (mobileNavigation) setNotesOpen(false);
+      if (readingModeRef.current !== "single") {
+        const page = pageAt({ content, name: file.name }, span.start);
+        if (page && page !== activeHeadingIdRef.current) handleSelect(file.id, page);
+      }
+      setPendingSaved({ fileId: file.id, text: "", span });
+
+      toast.success(`Inserted into “${file.name}”`, {
+        id: "rough-insert",
+        action: {
+          label: "Undo",
+          onClick: () => {
+            const now = filesRef.current.find((f) => f.id === file.id);
+            // Undone only while the document is exactly as the insertion left it.
+            if (!now || now.content !== content || isEditorOpen(file.id)) {
+              toast.error("The document has changed since, so this can't be undone here.", {
+                id: "rough-insert",
+              });
+              return;
+            }
+            handleContentChange(file.id, before);
+          },
+        },
+      });
+    },
+    // handleSelect is redefined every render; calling the latest one is correct.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [handleContentChange, mobileNavigation],
+  );
+
+  const roughDirtyChange = useCallback(
+    (dirty: boolean) => {
+      roughDirtyRef.current = dirty;
+      syncEditorDirty();
+    },
+    [syncEditorDirty],
+  );
+
   // ---- recovered drafts ----
   //
   // Edits journalled by a tab that has since gone (closed, crashed, killed)
@@ -2340,10 +2633,12 @@ flowchart LR
     let alive = true;
     void liveSessions().then((live) => {
       if (!alive || workspaceIdRef.current !== id) return;
-      const { offer, stale } = recoverableDrafts(entries, snapshotRef.current.files, {
-        session: journal.session,
-        live,
-      });
+      // Scratchpads are journalled beside documents, under ids of their own.
+      const { offer, stale } = recoverableDrafts(
+        entries,
+        [...snapshotRef.current.files, ...scratchpadDrafts(snapshotRef.current.scratchpads)],
+        { session: journal.session, live },
+      );
       for (const entry of stale) journal.discard(id, entry.fileId);
       setRecovered(offer.map((entry) => ({ ...entry, asCopy: entry.changedSince })));
     });
@@ -2361,11 +2656,66 @@ flowchart LR
     [journal],
   );
 
+  /**
+   * Rough work typed but never stored. Restored into its pad when the pad
+   * still holds what the text was typed against; otherwise as a new pad, so a
+   * version saved since is never overwritten.
+   */
+  const restoreRecoveredScratchpad = useCallback(
+    (workspaceId: string, entry: DraftEntry, padId: string) => {
+      const current = snapshotRef.current.scratchpads.find((pad) => pad.id === padId);
+      const inPlace = !!current && hashText(current.content) === entry.base;
+      let target: Scratchpad;
+      if (inPlace) {
+        target = editScratchpad(current, entry.text);
+        setScratchpads((prev) => prev.map((pad) => (pad.id === padId ? target : pad)));
+      } else {
+        const title = entry.fileName.replace(/ \(rough work\)$/, "");
+        target = {
+          ...renameScratchpad(
+            createScratchpad(snapshotRef.current.scratchpads, null),
+            `${title} (recovered)`,
+          ),
+          content: entry.text,
+          fileId: current?.fileId ?? null,
+          ...(current?.fileName ? { fileName: current.fileName } : {}),
+        };
+        setScratchpads((prev) => [...prev, target]);
+      }
+      markDirty();
+      // Re-owned by this tab until the write holding it commits (`settle`).
+      journal.stage({
+        workspaceId,
+        fileId: scratchpadDraftId(target.id),
+        fileName: `${target.title} (rough work)`,
+        text: entry.text,
+        base: inPlace && current ? hashText(current.content) : hashText(""),
+      });
+      if (target.id !== padId) journal.discard(workspaceId, entry.fileId);
+      journal.flush();
+      setRecovered((list) => list.filter((e) => e.fileId !== entry.fileId));
+      setActivePadId(target.id);
+      setNotesTab("rough");
+      setNotesOpen(true);
+      toast.success(
+        inPlace
+          ? `Restored your rough work in “${target.title}”.`
+          : "Your rough work was restored as a new scratchpad.",
+      );
+    },
+    [journal, markDirty],
+  );
+
   const restoreRecovered = useCallback(
     (fileId: string) => {
       const id = workspaceIdRef.current;
       const entry = recovered.find((e) => e.fileId === fileId);
       if (!id || !entry) return;
+      const padId = scratchpadOfDraft(fileId);
+      if (padId) {
+        restoreRecoveredScratchpad(id, entry, padId);
+        return;
+      }
       const current = snapshotRef.current.files.find((f) => f.id === fileId);
       // Checked again now rather than trusted from when the offer was made:
       // restoring in place must never overwrite a version saved since.
@@ -2414,7 +2764,14 @@ flowchart LR
           : "Your edits were restored as a copy.",
       );
     },
-    [recovered, handleContentChange, journal, markDirty, setActiveFileId],
+    [
+      recovered,
+      handleContentChange,
+      journal,
+      markDirty,
+      setActiveFileId,
+      restoreRecoveredScratchpad,
+    ],
   );
 
   useEffect(() => {
@@ -2463,6 +2820,7 @@ flowchart LR
     () =>
       mutationRef.current !== savedMutationRef.current ||
       editorDirtyRef.current ||
+      roughDirtyRef.current ||
       officeDirtyPanes.current.size > 0,
     [],
   );
@@ -2486,7 +2844,7 @@ flowchart LR
         officeDirtyPanes.current.size > 0 ||
         !!saveErrorRef.current ||
         workspaceConflictRef.current ||
-        (editorDirtyRef.current && !journalled),
+        ((editorDirtyRef.current || roughDirtyRef.current) && !journalled),
     });
   }, [hasUnsavedWork, journal, persistNow]);
 
@@ -2594,6 +2952,7 @@ flowchart LR
       setFolders([]);
       setSaved([]);
       setNotes([]);
+      setScratchpads([]);
       setSaveStatus("idle");
     } finally {
       setResolvingConflict(false);
@@ -2705,6 +3064,9 @@ flowchart LR
         setSaved((prev) => prev.filter((item) => !plan.removeFileIds.has(item.fileId)));
         setHighlights((prev) => prev.filter((item) => !plan.removeFileIds.has(item.fileId)));
         setNotes((prev) => prev.filter((item) => !plan.removeFileIds.has(item.fileId)));
+        setScratchpads((prev) =>
+          prev.filter((pad) => pad.fileId === null || !plan.removeFileIds.has(pad.fileId)),
+        );
         // A moved document must not stay open in a pane pointing at a file this
         // workspace no longer has.
         setPaneLayout((prev) => closeFileEverywhere(prev, [...plan.removeFileIds]));
@@ -2812,7 +3174,7 @@ flowchart LR
         if (!finalName) return; // reader cancelled the rename — import nothing
         ws.name = finalName;
 
-        room = await reserveStorage(storedBytes(ws.files), openWorkspace);
+        room = await reserveStorage(storedRecordBytes(ws), openWorkspace);
         if (!(await persistNow(true))) return;
         await persistence.serial(() => persistence.putWorkspace(ws));
         room.release();
@@ -3316,6 +3678,20 @@ flowchart LR
    */
   const openNoteSource = useCallback(
     async (note: Note) => {
+      // A note saved from rough work links to its scratchpad, not a passage.
+      if (note.origin) {
+        const padId = note.origin.scratchpadId;
+        if (!snapshotRef.current.scratchpads.some((pad) => pad.id === padId)) {
+          toast.info("That scratchpad was deleted.", {
+            id: "note-source",
+            description: "The note keeps its own copy of the work.",
+          });
+          return;
+        }
+        setActivePadId(padId);
+        setNotesTab("rough");
+        return;
+      }
       const file = filesRef.current.find((f) => f.id === note.fileId);
       const status = resolveNoteSource(note, file);
       const name = file?.name ?? note.fileName;
@@ -3374,6 +3750,58 @@ flowchart LR
     [filesById],
   );
   const sortedNotes = useMemo(() => sortNotes(notes), [notes]);
+  const writing = useMemo(() => ({ notes, scratchpads }), [notes, scratchpads]);
+
+  const readerFileForPads = useMemo(
+    () =>
+      activeFile && activeFile.deletedAt == null
+        ? { id: activeFile.id, name: activeFile.name }
+        : null,
+    // Only its identity and name matter here, not every edit to its text.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeFile?.id, activeFile?.name, activeFile?.deletedAt],
+  );
+  const roughWork = useMemo<RoughWorkProps>(
+    () => ({
+      scratchpads: sortScratchpads(scratchpads, readerFileForPads?.id ?? null),
+      activeId: activePadId,
+      onSelect: setActivePadId,
+      currentFile: readerFileForPads,
+      fileName: noteFileName,
+      sourceState: noteSourceState,
+      onCreate: createPad,
+      onChange: changePad,
+      onRename: renamePad,
+      onDuplicate: duplicatePad,
+      onClear: clearPad,
+      onDelete: deletePad,
+      onLink: linkPad,
+      onOpenDocument: openPadDocument,
+      onSaveAsNote: savePadAsNote,
+      insertTarget: roughInsertTarget,
+      onInsert: insertRoughWork,
+      onDirtyChange: roughDirtyChange,
+    }),
+    [
+      scratchpads,
+      readerFileForPads,
+      activePadId,
+      noteFileName,
+      noteSourceState,
+      createPad,
+      changePad,
+      renamePad,
+      duplicatePad,
+      clearPad,
+      deletePad,
+      linkPad,
+      openPadDocument,
+      savePadAsNote,
+      roughInsertTarget,
+      insertRoughWork,
+      roughDirtyChange,
+    ],
+  );
 
   const goHome = useCallback(() => navigate({ to: "/" }), [navigate]);
   // An optional tab lands the dialog straight on a section — "All workspaces"
@@ -3745,6 +4173,7 @@ flowchart LR
         }}
         onNavigate={openFromHome}
         files={files}
+        writing={writing}
         onOpenWorkspace={openWorkspaceFromHome}
         theme={theme}
         onSetTheme={setTheme}
@@ -4424,6 +4853,9 @@ flowchart LR
                     onClose={closeNotes}
                     freshId={freshNoteId}
                     mathRenderer={mathPreferences.renderer}
+                    tab={notesTab}
+                    onTabChange={setNotesTab}
+                    roughWork={roughWork}
                   />
                 </LazyBoundary>
               </aside>
@@ -4444,6 +4876,9 @@ flowchart LR
                   onClose={closeNotes}
                   freshId={freshNoteId}
                   mathRenderer={mathPreferences.renderer}
+                  tab={notesTab}
+                  onTabChange={setNotesTab}
+                  roughWork={roughWork}
                 />
               </LazyBoundary>
             </BottomSheet>

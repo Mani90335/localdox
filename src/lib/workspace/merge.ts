@@ -112,6 +112,13 @@ export function mergeWorkspaces(
     // Notes outlive their source document, so unlike stars and highlights
     // they are not filtered to live files below.
     const notes = mergeKeyed(base.notes ?? [], mine.notes ?? [], theirs.notes ?? [], same);
+    // Rough work likewise belongs to the reader, not to a document.
+    const scratchpads = mergeKeyed(
+      base.scratchpads ?? [],
+      mine.scratchpads ?? [],
+      theirs.scratchpads ?? [],
+      same,
+    );
     const asKeyed = (list: string[]) => list.map((id) => ({ id }));
     const bookmarks = mergeKeyed(
       asKeyed(base.bookmarks),
@@ -140,6 +147,7 @@ export function mergeWorkspaces(
       saved: saved.filter((item) => live.has(item.fileId)),
       highlights: highlights.filter((item) => live.has(item.fileId)),
       notes,
+      scratchpads,
       bookmarks,
       // View state belongs to the tab showing it; only drop what no longer exists.
       ui: {

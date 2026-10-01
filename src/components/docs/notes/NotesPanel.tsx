@@ -1,8 +1,16 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import { Check, Copy, FileText, NotebookPen, Pencil, Search, Trash2, X } from "lucide-react";
+import {
+  Check,
+  Copy,
+  FileText,
+  NotebookPen,
+  Pencil,
+  PencilRuler,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { searchNotes, type Note } from "@/lib/workspace/notes";
 import { copyText } from "@/lib/workspace/share";
 import {
@@ -11,11 +19,14 @@ import {
   requestIdleCallbackSafe,
 } from "@/lib/platform/keyboard";
 import type { MathRendererType } from "@/services/math/types";
-import { NOTE_COMPONENTS } from "./note-components";
+import { NOTE_COMPONENTS, NOTE_PLUGINS } from "./note-components";
 import { NoteRenderContext, type NoteRenderSettings } from "./note-render-context";
+import { RoughWorkPanel, type RoughWorkProps } from "./RoughWorkPanel";
 
 /** Whether a note's source document can still be opened. */
 export type NoteSourceState = "live" | "binned" | "missing";
+
+export type NotesTab = "notes" | "rough";
 
 export interface NotesPanelProps {
   /** Newest first. */
@@ -36,6 +47,10 @@ export interface NotesPanelProps {
    * `sheet` sits inside a BottomSheet, which supplies both.
    */
   variant: "docked" | "sheet";
+  tab: NotesTab;
+  onTabChange: (tab: NotesTab) => void;
+  /** The Rough work tab (see RoughWorkPanel). */
+  roughWork: RoughWorkProps;
 }
 
 /**
@@ -57,6 +72,9 @@ export function NotesPanel({
   freshId,
   variant,
   mathRenderer = "auto",
+  tab,
+  onTabChange,
+  roughWork,
 }: NotesPanelProps) {
   const [query, setQuery] = useState("");
   // The notes themselves are first rendered in an idle period of their own.
@@ -69,11 +87,14 @@ export function NotesPanel({
     return () => cancelIdleCallbackSafe(handle);
   }, []);
   const visible = useMemo(() => searchNotes(notes, query, fileName), [notes, query, fileName]);
+  // A note saved from rough work links back to its pad, by the pad's current title.
+  const padTitles = useMemo(
+    () => new Map(roughWork.scratchpads.map((pad) => [pad.id, pad.title])),
+    [roughWork.scratchpads],
+  );
 
   const search = notes.length > 0 && (
-    <div
-      className={`relative ${variant === "sheet" ? "sticky top-0 z-10 bg-background pb-3" : "px-3 pb-3"}`}
-    >
+    <div className={`relative ${variant === "sheet" ? "mt-3" : "px-3 pb-3"}`}>
       <Search
         className={`pointer-events-none absolute top-2.5 h-3.5 w-3.5 text-muted-foreground ${variant === "sheet" ? "left-2.5" : "left-5.5"}`}
         aria-hidden
@@ -115,8 +136,18 @@ export function NotesPanel({
         <NoteCard
           key={note.id}
           note={note}
-          name={fileName(note.fileId) ?? note.fileName}
-          state={sourceState(note.fileId)}
+          name={
+            note.origin
+              ? (padTitles.get(note.origin.scratchpadId) ?? note.origin.title)
+              : (fileName(note.fileId) ?? note.fileName)
+          }
+          state={
+            note.origin
+              ? padTitles.has(note.origin.scratchpadId)
+                ? "live"
+                : "missing"
+              : sourceState(note.fileId)
+          }
           fresh={note.id === freshId}
           mathRenderer={mathRenderer}
           onOpenSource={onOpenSource}
@@ -127,22 +158,44 @@ export function NotesPanel({
     </ul>
   );
 
+  const tabs = <PanelTabs tab={tab} onTabChange={onTabChange} noteCount={notes.length} />;
+  const rough = ready && (
+    <RoughWorkPanel {...roughWork} mathRenderer={mathRenderer} variant={variant} />
+  );
+  const panel = (children: React.ReactNode) => (
+    <div id={`notes-tabpanel-${tab}`} role="tabpanel" aria-labelledby={`notes-tab-${tab}`}>
+      {children}
+    </div>
+  );
+
   if (variant === "sheet") {
+    // The sheet scrolls as a whole, so the tabs (and the search) stay pinned.
     return (
       <div>
-        {search}
-        {list}
+        <div className="sticky top-0 z-20 bg-background pb-3">
+          {tabs}
+          {tab === "notes" && search}
+        </div>
+        {panel(tab === "notes" ? list : rough)}
       </div>
     );
   }
 
+  const body = panel(
+    tab === "notes" ? (
+      <>
+        {search}
+        {list}
+      </>
+    ) : (
+      rough
+    ),
+  );
+
   return (
     <section aria-label="Notes panel" className="flex h-full min-h-0 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-2 px-4">
-        <h2 className="text-sm font-semibold text-foreground">Notes</h2>
-        {notes.length > 0 && (
-          <span className="text-xs tabular-nums text-muted-foreground">{notes.length}</span>
-        )}
+      <header className="flex h-14 shrink-0 items-center gap-2 px-3">
+        {tabs}
         <div className="flex-1" />
         <button
           onClick={onClose}
@@ -153,9 +206,65 @@ export function NotesPanel({
           <X className="h-4 w-4" />
         </button>
       </header>
-      {search}
-      <div className="min-h-0 flex-1 overflow-y-auto">{list}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
     </section>
+  );
+}
+
+const TAB_ORDER: NotesTab[] = ["notes", "rough"];
+
+/**
+ * Notes and Rough work: one panel, two kinds of the reader's own writing.
+ * Arrow keys move between the tabs, as in any tablist.
+ */
+function PanelTabs({
+  tab,
+  onTabChange,
+  noteCount,
+}: {
+  tab: NotesTab;
+  onTabChange: (tab: NotesTab) => void;
+  noteCount: number;
+}) {
+  const refs = useRef<Partial<Record<NotesTab, HTMLButtonElement | null>>>({});
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const next = TAB_ORDER[(TAB_ORDER.indexOf(tab) + 1) % TAB_ORDER.length];
+    onTabChange(next);
+    refs.current[next]?.focus();
+  };
+  const item = (id: NotesTab, label: string, count?: number) => (
+    <button
+      ref={(el) => {
+        refs.current[id] = el;
+      }}
+      id={`notes-tab-${id}`}
+      role="tab"
+      aria-selected={tab === id}
+      aria-controls={`notes-tabpanel-${id}`}
+      tabIndex={tab === id ? 0 : -1}
+      onClick={() => onTabChange(id)}
+      className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:h-10 coarse:px-3.5 coarse:text-sm ${
+        tab === id
+          ? "bg-background text-foreground shadow-sm"
+          : "text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {label}
+      {!!count && <span className="tabular-nums text-muted-foreground">{count}</span>}
+    </button>
+  );
+  return (
+    <div
+      role="tablist"
+      aria-label="Notes panel"
+      onKeyDown={onKeyDown}
+      className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5"
+    >
+      {item("notes", "Notes", noteCount)}
+      {item("rough", "Rough work")}
+    </div>
   );
 }
 
@@ -174,13 +283,6 @@ function when(at: number, now = Date.now()): string {
   if (Math.abs(days) < 7) return relative.format(days, "day");
   return dateFormat.format(at);
 }
-
-/**
- * GFM for tables and task lists; remark-math so `$…$` is parsed as math (and
- * drawn by note-blocks.tsx). Read as plain Markdown, `\,` and `_` inside an
- * equation would be eaten as escapes and emphasis.
- */
-const NOTE_PLUGINS = [remarkGfm, remarkMath];
 
 /** Taller than this and a note folds, so one long passage can't bury the rest. */
 const FOLDED_HEIGHT = 288;
@@ -279,13 +381,21 @@ const NoteCard = memo(function NoteCard({
     setDraft(null);
   };
 
-  const source = note.source.sectionTitle ? `${name} › ${note.source.sectionTitle}` : name;
-  const sourceHint =
-    state === "missing"
+  const source = note.origin
+    ? `Rough work › ${name}`
+    : note.source.sectionTitle
+      ? `${name} › ${note.source.sectionTitle}`
+      : name;
+  const sourceHint = note.origin
+    ? state === "live"
+      ? `Open the scratchpad “${name}”`
+      : "The scratchpad was deleted; this note keeps its own copy"
+    : state === "missing"
       ? "The source document is no longer in this workspace"
       : state === "binned"
         ? "The source document is in the Bin"
         : `Go to this passage in ${name}`;
+  const SourceIcon = note.origin ? PencilRuler : FileText;
 
   return (
     <li
@@ -299,7 +409,7 @@ const NoteCard = memo(function NoteCard({
         title={sourceHint}
         className="mb-2 flex w-full min-w-0 items-center gap-1.5 rounded text-left text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        <SourceIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
         <span className={`truncate ${state === "live" ? "" : "line-through decoration-1"}`}>
           {source}
         </span>

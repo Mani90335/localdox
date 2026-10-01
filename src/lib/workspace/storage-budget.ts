@@ -8,23 +8,28 @@ import type { FileData } from "./binary.ts";
 // pass; the browser's own quota (QuotaExceededError) is the backstop there.
 
 import { persistence } from "./persistence.ts";
-import { StorageLimitError, getMaxStorageBytes, storedBytes } from "./storage-limits.ts";
+import { StorageLimitError, getMaxStorageBytes, storedRecordBytes } from "./storage-limits.ts";
 
 type Stored = { content: string; data?: FileData };
 
 /**
  * The open workspace as this tab holds it, unsaved edits and all. It stands
  * in for that workspace's saved total, and is read after the saved totals so
- * it is never older than them.
+ * it is never older than them. Notes and rough work count too.
  */
-export type OpenWorkspace = () => { id: string | null; files: readonly Stored[] };
+export type OpenWorkspace = () => {
+  id: string | null;
+  files: readonly Stored[];
+  notes?: readonly { content: string }[];
+  scratchpads?: readonly { title: string; content: string }[];
+};
 
 /** Bytes every workspace holds, with `open` counted from memory. */
 export async function measureStoredBytes(open?: OpenWorkspace): Promise<number> {
   const totals = await persistence.storedBytesByWorkspace();
   const current = open?.();
   if (current?.id) totals.delete(current.id);
-  let used = current ? storedBytes(current.files) : 0;
+  let used = current ? storedRecordBytes(current) : 0;
   for (const bytes of totals.values()) used += bytes;
   return used;
 }

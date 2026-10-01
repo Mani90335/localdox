@@ -29,6 +29,11 @@ export interface SettingsPageProps {
   onClearHighlights: () => void;
   onNavigate: (fileId: string, subtopicId?: string) => void;
   files: MdFile[];
+  /** The open workspace's notes and rough work, for the storage total. */
+  writing?: {
+    notes: readonly { content: string }[];
+    scratchpads: readonly { title: string; content: string }[];
+  };
   onOpenWorkspace: (id: string) => void;
   theme: ThemePref;
   onSetTheme: (theme: ThemePref) => void;
@@ -106,6 +111,7 @@ export function SettingsPage({
   onClearHighlights,
   onNavigate,
   files,
+  writing,
   onOpenWorkspace,
   theme,
   onSetTheme,
@@ -342,6 +348,7 @@ export function SettingsPage({
                 onClearStorage={onClearStorage}
                 workspaceId={currentWorkspaceId}
                 files={files}
+                writing={writing}
                 binCount={files.filter((f) => typeof f.deletedAt === "number").length}
                 onEmptyBin={onEmptyBin}
               />
