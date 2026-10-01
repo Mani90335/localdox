@@ -52,7 +52,10 @@ export interface SavedItem {
 export type PassageTarget = Pick<
   SavedItem,
   "fileId" | "headingId" | "blockSrc" | "text" | "prefix" | "suffix" | "start"
->;
+> & {
+  /** The passage's file span, when known — landed on exactly (see source-address.ts). */
+  span?: { start: number; end: number };
+};
 
 /** Everything about a new star except the identity the store assigns it. */
 export type SavedDraft = Omit<SavedItem, "id" | "fileId" | "createdAt">;

@@ -11,7 +11,7 @@ export interface SourceSpan {
   end: number;
 }
 
-interface Projection {
+export interface Projection {
   /** Plain text as the reader sees it. */
   text: string;
   /** map[i] = index in the original source of text[i]. */
@@ -44,7 +44,14 @@ function matchBracket(line: string, open: number): number {
  * Strip markdown syntax from `src`, recording where every surviving character
  * came from. Inline code and fenced blocks keep their contents (they render as
  * text); images, link targets and emphasis markers are dropped.
+ *
+ * Exported for source addressing (source-address.ts), which projects one
+ * block's source at a time to line it up with that block's rendered text.
  */
+export function projectSource(src: string): Projection {
+  return project(src);
+}
+
 function project(src: string): Projection {
   const chars: string[] = [];
   const map: number[] = [];

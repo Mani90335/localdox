@@ -3356,6 +3356,8 @@ flowchart LR
         prefix: note.source.prefix,
         suffix: note.source.suffix,
         start: sameSpace ? note.source.start : undefined,
+        // The exact file span, when the note's source anchor still holds.
+        span: status.span,
       });
     },
     [mobileNavigation, showSettings, openFromHome, handleSelect],

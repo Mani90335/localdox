@@ -15,6 +15,22 @@ import {
   splitMarkdownSegments,
   type MarkdownSegments,
 } from "@/lib/markdown/markdown-segments";
+import {
+  rehypeSourceAddress,
+  renderSourceMap,
+  type RenderSourceMap,
+} from "@/lib/markdown/source-address";
+
+/**
+ * Where the rendered source sits in the file, so rendered blocks can carry
+ * their file spans (see source-address.ts). `rendered` must be the exact
+ * string rendered, and `base` the offset in `file` its first line came from.
+ */
+export interface SourceAddressing {
+  file: string;
+  rendered: string;
+  base: number;
+}
 
 type PluggableList = NonNullable<Options["rehypePlugins"]>;
 
@@ -38,6 +54,8 @@ interface Props {
    * (highlight anchoring, scrolling to a heading or a search hit) waits for it.
    */
   onRendered?: (source: string | null) => void;
+  /** Stamp rendered blocks with their file spans. */
+  addressing?: SourceAddressing;
 }
 
 /**
@@ -63,9 +81,27 @@ export function ProgressiveMarkdown({
   components,
   urlTransform,
   onRendered,
+  addressing,
 }: Props) {
   const renderedSource = useDeferredValue(source);
   const deferredRehype = useDeferredValue(rehypePlugins);
+  // Only when it describes the source actually being rendered: the source is
+  // deferred, and a map for the next one would stamp the previous one wrongly.
+  const deferredAddressing = useDeferredValue(addressing);
+  const sourceMap = useMemo(
+    () =>
+      deferredAddressing && deferredAddressing.rendered === renderedSource
+        ? renderSourceMap(deferredAddressing.file, renderedSource, deferredAddressing.base)
+        : null,
+    [deferredAddressing, renderedSource],
+  );
+  const wholeRehype = useMemo<PluggableList>(
+    () =>
+      sourceMap
+        ? [...deferredRehype, [rehypeSourceAddress, { toFile: sourceMap.toFile }]]
+        : deferredRehype,
+    [deferredRehype, sourceMap],
+  );
   const segments = useMemo(() => splitMarkdownSegments(renderedSource), [renderedSource]);
   const count = segments.sources.length;
 
@@ -105,7 +141,7 @@ export function ProgressiveMarkdown({
       <WholeDocument
         urlTransform={urlTransform}
         remarkPlugins={remarkPlugins}
-        rehypePlugins={deferredRehype}
+        rehypePlugins={wholeRehype}
         components={components}
       >
         {renderedSource}
@@ -121,6 +157,7 @@ export function ProgressiveMarkdown({
         index={index}
         remarkPlugins={remarkPlugins}
         rehypePlugins={deferredRehype}
+        sourceMap={sourceMap}
         components={components}
         urlTransform={urlTransform}
       />
@@ -143,24 +180,34 @@ const Segment = memo(function Segment({
   segments,
   index,
   rehypePlugins,
+  sourceMap,
   ...rest
 }: {
   segments: MarkdownSegments;
   index: number;
   remarkPlugins: PluggableList;
   rehypePlugins: PluggableList;
+  sourceMap: RenderSourceMap | null;
   components: Components;
   urlTransform: UrlTransform;
 }) {
   // rehype-slug de-duplicates ids within one tree; the segment slugger does it
   // across the document.
-  const plugins = useMemo<PluggableList>(
-    () => [
+  const plugins = useMemo<PluggableList>(() => {
+    const list: PluggableList = [
       [rehypeSegmentSlug, { segments, index }],
       ...rehypePlugins.filter((plugin) => plugin !== rehypeSlug),
-    ],
-    [segments, index, rehypePlugins],
-  );
+    ];
+    if (sourceMap) {
+      // Offsets in this segment's source, past the definitions copied to its
+      // front, are offsets from where the segment starts in the document.
+      const start = segments.starts[index];
+      const toFile = (offset: number) =>
+        sourceMap.toFile(start + Math.max(0, offset - segments.prefix));
+      list.push([rehypeSourceAddress, { toFile }]);
+    }
+    return list;
+  }, [segments, index, rehypePlugins, sourceMap]);
   return (
     <>
       <ReactMarkdown rehypePlugins={plugins} {...rest}>

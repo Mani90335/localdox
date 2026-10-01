@@ -124,6 +124,10 @@ const noteSchema = z
         subtopicId: optionalText.catch(undefined),
         headingId: optionalText.catch(undefined),
         sectionTitle: optionalText.catch(undefined),
+        anchor: z
+          .object({ start: count, end: count, head: z.string(), tail: z.string() })
+          .optional()
+          .catch(undefined),
       })
       .catch({ quote: "" }),
     createdAt: count.catch(0),

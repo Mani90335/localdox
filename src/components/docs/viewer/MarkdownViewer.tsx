@@ -83,6 +83,14 @@ import {
 import type { NoteDraft } from "@/lib/workspace/notes";
 import { locateInSource, sourceLinesForSelection } from "@/lib/markdown/source-locate";
 import { selectionToMarkdown } from "@/lib/markdown/selection-markdown";
+import {
+  anchorSpan,
+  lineSpan,
+  searchHitSpan,
+  type SourceSpan,
+} from "@/lib/markdown/source-address";
+import { addressOfRange, queryRangeWithin, rangeOfAddress } from "@/lib/markdown/dom-address";
+import type { SourceAddressing } from "./markdown-viewer/ProgressiveMarkdown";
 import { diagramSourceOf } from "@/lib/markdown/diagram-sources";
 import { copyText } from "@/lib/workspace/share";
 import {
@@ -214,6 +222,18 @@ interface Props {
 }
 
 const stripExt = (name: string) => name.replace(/\.(md|markdown|mdx|txt)$/i, "");
+
+/**
+ * The first element at or under `element` that has a box. Addressed
+ * equations and diagrams are wrapped in `display: contents` elements, which
+ * can't be scrolled to or outlined themselves.
+ */
+function boxOf(element: Element): HTMLElement {
+  let current = element as HTMLElement;
+  while (getComputedStyle(current).display === "contents" && current.firstElementChild)
+    current = current.firstElementChild as HTMLElement;
+  return current;
+}
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
@@ -401,7 +421,7 @@ function MarkdownViewerImpl({
   const nextChunk =
     chunkIndex >= 0 && chunkIndex < allChunks.length - 1 ? allChunks[chunkIndex + 1] : null;
 
-  const renderContent = useMemo(() => {
+  const renderPage = useMemo(() => {
     let content = activeChunk.content.replace(/^\s*(#{1,6})\s+[^\n]+(\n|$)/, "");
 
     // Strip leading horizontal rules (often left over when users separate sections with ---)
@@ -410,6 +430,9 @@ function MarkdownViewerImpl({
       if (next === content) break;
       content = next;
     }
+    // Characters stripped from the front: where the rendered page starts
+    // within the page's source, for source addressing.
+    const lead = activeChunk.content.length - content.length;
 
     // Strip trailing horizontal rules
     while (true) {
@@ -418,8 +441,9 @@ function MarkdownViewerImpl({
       content = next;
     }
 
-    return prepareWorkspaceEmbeds(content);
+    return { markdown: prepareWorkspaceEmbeds(content), lead };
   }, [activeChunk.content]);
+  const renderContent = renderPage.markdown;
 
   // Single-page mode renders the whole document at once. Content is left intact
   // so every heading keeps its anchor id for in-page section navigation.
@@ -436,6 +460,23 @@ function MarkdownViewerImpl({
   const markdownSource = singleMode
     ? fullRender
     : renderContent + (footnoteDefinitions ? "\n\n" + footnoteDefinitions : "");
+
+  // Where what is rendered sits in the file, so every rendered block carries
+  // its file span (lib/markdown/source-address.ts). A page's offset is found
+  // by walking the pages in order: an identical page earlier in the file must
+  // not be mistaken for this one.
+  const addressing = useMemo<SourceAddressing | undefined>(() => {
+    if (singleMode) return { file: file.content, rendered: markdownSource, base: 0 };
+    let cursor = 0;
+    for (const chunk of allChunks) {
+      const at = file.content.indexOf(chunk.content, cursor);
+      if (at === -1) return undefined;
+      if (chunk.id === activeChunk.id)
+        return { file: file.content, rendered: markdownSource, base: at + renderPage.lead };
+      cursor = at + chunk.content.length;
+    }
+    return undefined;
+  }, [singleMode, file.content, markdownSource, allChunks, activeChunk.id, renderPage.lead]);
 
   // Syntax highlighting and math typesetting are fetched only for documents
   // that contain code or math — see `useMarkdownPlugins`. Both plugin arrays
@@ -583,7 +624,16 @@ function MarkdownViewerImpl({
         : null;
 
       let range: Range | null = null;
-      if (!heading && !image && pendingSaved.text) {
+      let atomic: Element | null = null;
+      // An addressed passage (a note's link) lands on exactly its span.
+      if (pendingSaved.span) {
+        const addressed = rangeOfAddress(container, pendingSaved.span, file.content);
+        if (addressed) {
+          atomic = addressed.atomic;
+          range = atomic ? null : addressed.range;
+        }
+      }
+      if (!range && !atomic && !heading && !image && pendingSaved.text) {
         const anchor = findAnchor(
           container,
           pendingSaved.text,
@@ -596,6 +646,7 @@ function MarkdownViewerImpl({
       }
 
       const target =
+        (atomic && boxOf(atomic)) ??
         heading ??
         image ??
         (range
@@ -610,7 +661,7 @@ function MarkdownViewerImpl({
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [pendingSaved, settled, renderContent, fullRender, onSavedShown]);
+  }, [pendingSaved, settled, renderContent, fullRender, onSavedShown, file.content]);
 
   // "Inspect" — the reader's answer to DevTools' inspect element. Take the
   // rendered text under the pointer, find where it lives in the markdown
@@ -651,7 +702,37 @@ function MarkdownViewerImpl({
   const [pendingSelect, setPendingSelect] = useState<{ start: number; end: number } | null>(null);
   const [inspectMissed, setInspectMissed] = useState(false);
 
+  /**
+   * The page range the open menu acts on: the selection kept when it opened,
+   * rebuilt from its offsets if a re-render replaced its nodes — or, for a
+   * highlight being edited, the range it is painted over.
+   */
+  const menuRange = (): Range | null => {
+    const container = contentRef.current;
+    if (!container || !menu) return null;
+    if (
+      menu.mode === "create" &&
+      menu.range &&
+      !menu.range.collapsed &&
+      container.contains(menu.range.commonAncestorContainer)
+    )
+      return menu.range;
+    if (menu.mode === "create") return buildRange(container, menu.start, menu.end);
+    return paintedHighlights.current.find((painted) => painted.hl.id === menu.hl.id)?.range ?? null;
+  };
+
+  /** The file span of the menu's range (lib/markdown/source-address.ts). */
+  const menuAddress = (): SourceSpan | null => {
+    const container = contentRef.current;
+    const range = menuRange();
+    return container && range ? addressOfRange(container, range, file.content) : null;
+  };
+
   const inspect = (text: string) => {
+    // The selection's own address, read off the rendered blocks: exact, even
+    // for a phrase the document repeats. The text search below is only for
+    // content the renderer couldn't address (converted HTML).
+    const addressed = menuAddress();
     // Paged mode renders one section, so prefer a match inside that section —
     // a phrase repeated elsewhere shouldn't hijack the jump.
     const chunkStart = singleMode ? -1 : file.content.indexOf(activeChunk.content);
@@ -659,7 +740,7 @@ function MarkdownViewerImpl({
       chunkStart >= 0 && !singleMode
         ? { from: chunkStart, to: chunkStart + activeChunk.content.length }
         : undefined;
-    const span = locateInSource(file.content, text, prefer);
+    const span = addressed ?? locateInSource(file.content, text, prefer);
 
     setMenu(null);
     window.getSelection()?.removeAllRanges();
@@ -678,10 +759,8 @@ function MarkdownViewerImpl({
   const copyToNotes = () => {
     const container = contentRef.current;
     if (!onCopyToNotes || !container || menu?.mode !== "create") return;
-    const range =
-      menu.range && !menu.range.collapsed && container.contains(menu.range.commonAncestorContainer)
-        ? menu.range
-        : buildRange(container, menu.start, menu.end);
+    const range = menuRange();
+    const address = range ? addressOfRange(container, range, file.content) : null;
     const content =
       (range && selectionToMarkdown(range, container, diagramSourceOf)) || menu.text.trim();
 
@@ -716,6 +795,8 @@ function MarkdownViewerImpl({
         subtopicId: page?.id,
         headingId: heading?.id ?? page?.id,
         sectionTitle: heading?.textContent?.trim() || page?.title,
+        // Where in the file, which is what the link back follows first.
+        anchor: address ? anchorSpan(file.content, address) : undefined,
       },
     });
     window.getSelection()?.removeAllRanges();
@@ -723,14 +804,19 @@ function MarkdownViewerImpl({
   };
 
   const copySource = (text: string) => {
-    // Like Inspect, prefer the section currently on screen so repeated prose
-    // resolves to the source the reader actually highlighted.
+    // The selection's source lines, by address; failing that, like Inspect,
+    // by text, preferring the section on screen.
+    const addressed = menuAddress();
     const chunkStart = singleMode ? -1 : file.content.indexOf(activeChunk.content);
     const prefer =
       chunkStart >= 0 && !singleMode
         ? { from: chunkStart, to: chunkStart + activeChunk.content.length }
         : undefined;
-    const source = sourceLinesForSelection(file.content, text, prefer) ?? text;
+    const lines = addressed && lineSpan(file.content, addressed);
+    const source =
+      (lines && file.content.slice(lines.start, lines.end)) ??
+      sourceLinesForSelection(file.content, text, prefer) ??
+      text;
     void copyText(source);
     window.getSelection()?.removeAllRanges();
     setMenu(null);
@@ -1164,19 +1250,32 @@ function MarkdownViewerImpl({
       if (!container) return;
       const { query, text, occurrence, lineIndex } = pendingSearch;
       let range: Range | null = null;
-      if (query && lineIndex >= 0) {
+      let atomic: Element | null = null;
+      // The hit's own address: its line and occurrence, mapped to the file
+      // and then onto the page. Exact for a table cell or a repeated word; a
+      // hit in a diagram's source lands on the diagram, at the label that
+      // shows the word when there is one.
+      const span = searchHitSpan(file.content, lineIndex, text, query, occurrence);
+      const addressed = span && rangeOfAddress(container, span, file.content);
+      if (addressed) {
+        atomic = addressed.atomic;
+        range = atomic ? queryRangeWithin(atomic, query) : addressed.range;
+      }
+      // Unaddressed content (converted HTML): count occurrences as before.
+      if (!addressed && query && lineIndex >= 0) {
         const at = occurrenceOrdinal(searchRowsOnScreen(), query, lineIndex, occurrence);
         if (at) {
           const nth = nthQueryRange(container, query, at.ordinal);
           if (nth.count === at.total) range = nth.range;
         }
       }
-      range ??= text
-        ? firstQueryRangeInLine(container, text, query, occurrence)
-        : query
-          ? firstTextRange(container, query)
-          : null;
-      const target = elementOf(range);
+      if (!addressed)
+        range ??= text
+          ? firstQueryRangeInLine(container, text, query, occurrence)
+          : query
+            ? firstTextRange(container, query)
+            : null;
+      const target = range ? elementOf(range) : atomic && boxOf(atomic);
       const landed = range && rangeOffsets(container, range);
       const landedText = range?.toString();
       // The passage in the container's current DOM, should a re-render have
@@ -1186,6 +1285,7 @@ function MarkdownViewerImpl({
           ? buildRange(container, landed.start, landed.end)
           : null;
       if (range) scrollToPassage(range, () => (range.collapsed ? reanchor() : range));
+      else target?.scrollIntoView({ behavior: "smooth", block: "center" });
       // The same one-shot flash a saved item gets, for the same reason: on a
       // dense page, arriving is not the same as seeing where you arrived.
       flashPassage(range, target, landed ? { container, reanchor } : undefined);
@@ -1193,7 +1293,15 @@ function MarkdownViewerImpl({
       onSearchShown?.();
     });
     return () => cancelAnimationFrame(frame);
-  }, [pendingSearch, settled, renderContent, fullRender, onSearchShown, searchRowsOnScreen]);
+  }, [
+    pendingSearch,
+    settled,
+    renderContent,
+    fullRender,
+    onSearchShown,
+    searchRowsOnScreen,
+    file.content,
+  ]);
 
   // Reading progress now lives in <ReadingProgress>, which writes the
   // percentage straight to its own DOM node. It used to be state up here, and
@@ -1677,6 +1785,7 @@ function MarkdownViewerImpl({
                         navigateToEquation={navigateToEquation}
                       >
                         <ProgressiveMarkdown
+                          addressing={addressing}
                           source={markdownSource}
                           urlTransform={mediaUrlTransform}
                           remarkPlugins={remarkPlugins}

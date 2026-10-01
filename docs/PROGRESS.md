@@ -1,4 +1,41 @@
-Latest update — 2026-10-01 (Notes panel: copy a selection as clean Markdown, keep it as a snapshot, follow it back to its source)
+Latest update — 2026-10-01 (Source addressing: search hits, Inspect source and note links land on the exact occurrence; search in tables and diagrams fixed)
+
+Every rendered block now carries its span in the file's Markdown
+(`data-src="start:end"`, stamped by `rehypeSourceAddress` through segments and
+paged-mode stripping). Page ↔ file mapping is done per block by aligning its
+text with its projected source (`lib/markdown/source-address.ts`,
+`dom-address.ts`). Details: documentation/source-addressing.md.
+
+Bug, reproduced first: in a document with a table and a Mermaid diagram, all 4
+table and diagram search hits for "widget" flashed the intro paragraph's
+"widget". The diagram's SVG labels and stylesheet broke the occurrence count,
+and the line fallback couldn't find tab-joined table rows or diagram source.
+Now each hit maps line + occurrence → file span (`searchHitSpan`, counted as the
+index counts) → page range. A diagram hit lands on the label showing the word,
+or on the diagram.
+
+- Inspect source and Copy code use the selection's address: exact for
+  repeated phrases and table cells. Text search remains the fallback.
+- Notes store a source anchor (span + 32-char head/tail); `relocateAnchor`
+  survives edits elsewhere in the file. Older notes use the quote as before.
+- Equations and drawn fences are atomic, wrapped in `display: contents`
+  elements carrying their span.
+- Also fixed, in its own commit: the selection menu ran off the bottom of the window when
+  selecting near it (a document's last lines), hiding Save/Highlight/Copy to
+  notes. A layout effect now keeps it on screen.
+
+Measured, one page with about 2,300 stamped blocks: fully rendered at 391 ms
+with stamping vs 373 ms without (medians, within run-to-run noise of
+363–402 ms), same long frames.
+
+Tests: tests/source-address.test.ts (7), tests/e2e/addressing.spec.ts (3). Unit
+516 pass / 0 fail (518 total). E2E on a private-port production build: search,
+highlighting, editing, math, diagram ×3, long-markdown, viewers, persistence,
+durability 57/57; notes + addressing 6/6; test:bundles 10/10. tsc and eslint:
+nothing new (pre-existing __root.tsx, import-schema, CodeBlock, document-utils
+issues unchanged).
+
+Previous update — 2026-10-01 (Notes panel: copy a selection as clean Markdown, keep it as a snapshot, follow it back to its source)
 
 Select text in a Markdown document → **Copy selection to notes**. The passage
 is kept as Markdown in a Notes panel: docked right of the reading column at

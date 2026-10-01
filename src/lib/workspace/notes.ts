@@ -22,7 +22,8 @@
 // so it can name the page the passage lives on *now* before anything renders.
 
 import { fileSubtopics, headingChunkMap, type MdChunk } from "../markdown/markdown-utils.ts";
-import { locateInSource, type SourceSpan } from "../markdown/source-locate.ts";
+import { locateInSource } from "../markdown/source-locate.ts";
+import { relocateAnchor, type SourceAnchor, type SourceSpan } from "../markdown/source-address.ts";
 
 /** Where a note was copied from. */
 export interface NoteSource {
@@ -40,6 +41,13 @@ export interface NoteSource {
   headingId?: string;
   /** That heading's text, shown on the note's source link. */
   sectionTitle?: string;
+  /**
+   * The passage's span in the file's Markdown, with its own first and last
+   * characters to find it again by after edits (source-address.ts). Followed
+   * first; the rendered quote above is the fallback. Absent on notes taken
+   * before addressing existed.
+   */
+  anchor?: SourceAnchor;
 }
 
 export interface Note {
@@ -123,8 +131,11 @@ export function searchNotes(
 // ---- following a note back to its source -------------------------------------
 
 export type NoteSourceStatus =
-  /** The passage is in the document; `subtopicId` is the page it is on now. */
-  | { kind: "found"; subtopicId: string; moved: boolean }
+  /**
+   * The passage is in the document; `subtopicId` is the page it is on now,
+   * and `span` its exact file span when the note's source anchor still holds.
+   */
+  | { kind: "found"; subtopicId: string; moved: boolean; span?: SourceSpan }
   /**
    * The document exists but the passage is gone. `target` is where it was —
    * the heading above it, or its page — or null when neither survives.
@@ -206,6 +217,18 @@ export function resolveNoteSource(
     ranges.find((range) => offset >= range.from && offset <= range.to)?.id ??
     chunks[0]?.id ??
     "preamble";
+
+  // Exactly where it was copied from, or where the same source text moved to.
+  const anchored = note.source.anchor && relocateAnchor(file.content, note.source.anchor);
+  if (anchored) {
+    const page = pageOf(anchored.start);
+    return {
+      kind: "found",
+      subtopicId: page,
+      moved: !!note.source.subtopicId && page !== note.source.subtopicId,
+      span: anchored,
+    };
+  }
   // The page it was copied from is searched first, so a passage repeated on
   // another page doesn't pull the link away from the reader's own copy.
   const span = locateQuote(

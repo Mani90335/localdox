@@ -61,16 +61,42 @@ function JsonFigure({ value }: { value: unknown }) {
   );
 }
 
+/**
+ * A fence drawn as something other than its text, wrapped so it still carries
+ * its source span (see source-address.ts). Atomic: a point inside a diagram
+ * addresses the whole fence. `display: contents` keeps it out of layout.
+ */
+function Drawn({
+  span,
+  register,
+  children,
+}: {
+  span?: string;
+  register?: (element: HTMLDivElement | null) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div ref={register} data-src={span} data-src-atomic="" className="contents">
+      {children}
+    </div>
+  );
+}
+
 export function CodeBlock({ children, ...rest }: any) {
   const ref = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
+  const span: string | undefined = rest["data-src"];
 
   // Detect Mermaid
   const codeEl: any = Array.isArray(children) ? children[0] : children;
   const cls = codeEl?.props?.className ?? "";
   if (typeof cls === "string" && /language-mermaid/.test(cls)) {
     const raw = extractText(codeEl?.props?.children);
-    return <MermaidBlock code={raw} />;
+    return (
+      <Drawn span={span}>
+        <MermaidBlock code={raw} />
+      </Drawn>
+    );
   }
 
   const encodedLang = /language-([\w+-]+)/.exec(cls)?.[1];
@@ -88,19 +114,21 @@ export function CodeBlock({ children, ...rest }: any) {
     const source = extractText(codeEl?.props?.children);
     // Registered for copying, as MermaidBlock registers its diagrams.
     return (
-      <div ref={(el) => registerDiagramSource(el, "mindmap", source)} className="contents">
+      <Drawn span={span} register={(el) => registerDiagramSource(el, "mindmap", source)}>
         <MindMapBlock code={source} title={meta} />
-      </div>
+      </Drawn>
     );
   }
 
   if (lang === "interactive-html" || lang === "interactive-react") {
     return (
-      <InteractiveBlock
-        kind={lang === "interactive-html" ? "html" : "react"}
-        code={extractText(codeEl?.props?.children)}
-        meta={meta}
-      />
+      <Drawn span={span}>
+        <InteractiveBlock
+          kind={lang === "interactive-html" ? "html" : "react"}
+          code={extractText(codeEl?.props?.children)}
+          meta={meta}
+        />
+      </Drawn>
     );
   }
 
@@ -112,7 +140,11 @@ export function CodeBlock({ children, ...rest }: any) {
     try {
       const parsed = JSON.parse(raw);
       if (parsed !== null && typeof parsed === "object") {
-        return <JsonFigure value={parsed} />;
+        return (
+          <Drawn span={span}>
+            <JsonFigure value={parsed} />
+          </Drawn>
+        );
       }
     } catch {
       // Not valid JSON — fall through.

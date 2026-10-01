@@ -130,14 +130,25 @@ click "guide.md › Measurements" → DocsApp.openNoteSource(note)
   resolveNoteSource(note, file)       pure; reads Markdown, not the DOM
     no file            → toast "no longer in this workspace"
     file in Bin        → toast "is in the Bin" (restore from Settings ▸ Storage)
-    quote found        → handleSelect(file, page it is on now)
-                         + setPendingSaved({ quote, prefix, suffix, start? })
-                         → viewer scrolls to the passage and flashes it
+    anchor holds       → handleSelect(file, page the span is on now)
+                         + setPendingSaved({ span, quote, … })
+                         → rangeOfAddress(span): exactly that occurrence
+    quote found        → same, landing by quote (notes from before addressing,
+                         or a span whose own head/tail was edited)
     quote gone         → open the heading it sat under (or its page) + toast
 ```
 
-`resolveNoteSource` searches the document's Markdown with `locateInSource` in
-**exact mode**. Inspect's fuzzy fallbacks (a prefix, a rare word) are fine for
+**First, the source anchor.** A note copied after source addressing existed
+stores `source.anchor`: its file span plus that span's first and last 32
+source characters. `relocateAnchor` keeps the span if the file still has the
+same text there. If text was added or removed elsewhere, it finds the
+occurrence nearest the old position. Only when the passage's own edges were
+edited does it give up and fall through to the quote. This is what makes a link
+to the *second* of two identical sentences land on the second one. See
+`documentation/source-addressing.md`.
+
+**Then, the quote.** `resolveNoteSource` searches the document's Markdown with
+`locateInSource` in **exact mode**. Inspect's fuzzy fallbacks (a prefix, a rare word) are fine for
 placing a caret *near* lost text, but would make a link claim a deleted passage
 still exists. It tries the whole quote first, then each line of the quote that
 is at least 20 characters long. A selection that crossed an equation carries
