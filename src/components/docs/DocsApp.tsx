@@ -3639,6 +3639,20 @@ flowchart LR
     },
     [switchWorkspace, showSettings, openFromHome, handleSelect, searchQuery],
   );
+  // Search markers belong to the open search: they mark the query whose hit
+  // was opened, for as long as the panel is open and still holds that query.
+  // They used to outlive both — closing search, clearing it or typing another
+  // word left the old word marked all over every document opened after.
+  // Closing drops the opened query outright, so reopening search (or going
+  // Back to an entry that recorded it) never brings stale markers back.
+  useEffect(() => {
+    if (!searchOpen) setHighlightQuery(null);
+  }, [searchOpen]);
+  const markerQuery =
+    searchOpen && highlightQuery && highlightQuery.trim() === searchQuery.trim()
+      ? highlightQuery
+      : null;
+
   const searchPanelState: SearchPanelState | null = searchOpen
     ? {
         query: searchQuery,
@@ -4282,7 +4296,7 @@ flowchart LR
                                           paneFile.id === activeFileId ? activeHeadingId : null
                                         }
                                         highlightQuery={
-                                          paneFile.id === activeFileId ? highlightQuery : null
+                                          paneFile.id === activeFileId ? markerQuery : null
                                         }
                                         pendingSearch={
                                           pendingSearch?.fileId === paneFile.id
@@ -4323,7 +4337,7 @@ flowchart LR
                         nextFile={nextFile}
                         onNav={navFromViewer}
                         activeSubtopicId={activeHeadingId}
-                        highlightQuery={highlightQuery}
+                        highlightQuery={markerQuery}
                         onContentChange={handleContentChange}
                         onEditorDirtyChange={(dirty) => {
                           editorDirtyRef.current = dirty;

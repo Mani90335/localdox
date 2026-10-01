@@ -530,3 +530,62 @@ test("search lists exactly the occurrences of the query and lands on the one cli
   // And back, into the fenced code.
   expect(await jumpTo(page, result(3))).toEqual({ text: "needle", after: " = 1;" });
 });
+
+test("search markers leave the page once the search is cleared, changed or closed", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .locator('input[type="file"]')
+    .first()
+    .setInputFiles({
+      name: "markers.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from("# Topic\n\nalpha beta gamma alpha\n\nMore alpha here, and beta.\n"),
+    });
+  await expect(page.getByRole("heading", { name: "Topic", exact: true })).toBeVisible();
+  const markers = () =>
+    page.evaluate(
+      () => [...((CSS as unknown as HighlightRegistry).highlights.get("dc-query") ?? [])].length,
+    );
+  const field = page.getByPlaceholder("Search all documents...");
+  const firstHit = page.locator("aside button[title]:has(mark)").first();
+
+  // Opening a hit marks every occurrence of the query.
+  await openSearch(page, "alpha");
+  await firstHit.click();
+  await expect.poll(markers).toBe(3);
+
+  // Clearing the query takes them off the page.
+  await field.fill("");
+  await expect.poll(markers).toBe(0);
+
+  // So does searching for something else, until one of its hits is opened.
+  await field.fill("alpha");
+  await firstHit.click();
+  await expect.poll(markers).toBe(3);
+  await field.fill("beta");
+  await expect.poll(markers).toBe(0);
+  await firstHit.click();
+  await expect.poll(markers).toBe(2);
+
+  // Closing the search clears them, and reopening it doesn't bring them back.
+  await page.getByRole("button", { name: "Close search" }).click();
+  await expect.poll(markers).toBe(0);
+  await page
+    .locator("button:visible")
+    .filter({ has: page.locator("svg.lucide-search") })
+    .first()
+    .click();
+  await expect(field).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(await markers()).toBe(0);
+
+  // Escape closes the search the same way.
+  await field.fill("alpha");
+  await firstHit.click();
+  await expect.poll(markers).toBe(3);
+  await field.focus();
+  await page.keyboard.press("Escape");
+  await expect.poll(markers).toBe(0);
+});
