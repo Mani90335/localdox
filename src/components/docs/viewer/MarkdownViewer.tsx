@@ -54,6 +54,7 @@ import { ReadingProgress } from "../navigation/ReadingProgress";
 import { MarkdownEditor, type MarkdownEditorHandle } from "../editor/MarkdownEditorLazy";
 import { isVideoUrl, VideoPlayer } from "@/lib/markdown/media-embeds";
 import { Lightbox } from "./Lightbox";
+import { cn } from "@/lib/utils";
 import { HL_COLORS, hlGroup, type Highlight } from "@/lib/markdown/dom-highlighter";
 import {
   getSelectionOffsets,
@@ -1048,8 +1049,8 @@ function MarkdownViewerImpl({
 
   // Keep the whole menu on screen. It opens at the selection and grows down,
   // so a selection near the bottom of the window (the last lines of a
-  // document, which can't scroll any higher) pushed its lower rows — Save,
-  // Highlight, Copy selection to notes — past the edge, out of reach. Measured
+  // document, which can't scroll any higher) pushed its lower row — the label
+  // field — past the edge, out of reach. Measured
   // before paint, so it never appears in the wrong place first.
   useLayoutEffect(() => {
     const element = menuRef.current;
@@ -1068,7 +1069,9 @@ function MarkdownViewerImpl({
     const onDown = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenu(null);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenu(null);
+    // An Escape one of its dropdowns already handled (Radix marks it
+    // defaultPrevented) closes only that dropdown.
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && setMenu(null);
     window.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
     return () => {
@@ -1459,69 +1462,21 @@ function MarkdownViewerImpl({
           createPortal(
             <div
               ref={menuRef}
-              className="fixed z-(--z-dropdown) w-64 -translate-x-1/2 rounded-lg border border-border bg-popover p-2 shadow-xl"
+              className="fixed z-(--z-dropdown) -translate-x-1/2 flex flex-col gap-1 rounded-xl border border-border bg-popover p-1.5 shadow-xl animate-in fade-in zoom-in-95 duration-100"
               style={{
-                top: Math.min(Math.max(56, menu.y - 12), window.innerHeight - 24),
-                left: Math.min(Math.max(132, menu.x), window.innerWidth - 132),
+                top: Math.min(Math.max(56, menu.y - 12), window.innerHeight - 50),
+                left: Math.min(Math.max(160, menu.x), window.innerWidth - 160),
               }}
               onMouseDown={(e) => e.stopPropagation()}
             >
-              <div className="mb-2 flex items-center justify-between px-1">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  {menu.mode === "create" ? "Highlight" : "Edit highlight"}
-                </span>
-                <button
-                  onClick={() => setMenu(null)}
-                  className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-                  aria-label="Close"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-
-              {menu.mode === "create" && onAskAi && (
-                <div className="mb-2 border-b border-border pb-2">
-                  <div className="mb-1.5 flex items-center gap-1 px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    <Sparkles className="h-3 w-3" /> Ask AI
-                  </div>
-                  <div className="flex flex-wrap gap-1 px-1">
-                    {[
-                      { label: "Ask AI", action: undefined },
-                      { label: "Summarize", action: "summary" },
-                      { label: "Explain", action: "explain" },
-                      { label: "Notes", action: "notes" },
-                      { label: "Mermaid", action: "mermaid" },
-                      { label: "Rewrite", action: "rewrite" },
-                    ].map((item) => (
-                      <button
-                        key={item.label}
-                        onClick={() => {
-                          onAskAi({ selection: menu.text, actionId: item.action });
-                          window.getSelection()?.removeAllRanges();
-                          setMenu(null);
-                        }}
-                        className="rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="mb-2 flex items-center gap-1.5 px-1">
+              <div className="flex items-center gap-1">
+                {/* Colors */}
                 {HL_COLORS.map((color) => {
-                  const active = menu.mode === "edit" && menu.hl.color === color;
+                  const active = menu.mode === "edit" ? menu.hl.color === color : false;
                   return (
                     <button
                       key={color}
                       aria-label={`Highlight ${color}`}
-                      className={`h-6 w-6 rounded-full transition-transform hover:scale-110 ${
-                        active
-                          ? "ring-2 ring-foreground ring-offset-1 ring-offset-popover"
-                          : "border border-border/60"
-                      }`}
-                      style={{ backgroundColor: color }}
                       onClick={() => {
                         if (menu.mode === "create") {
                           onAddHighlight({
@@ -1540,15 +1495,169 @@ function MarkdownViewerImpl({
                         }
                         setMenu(null);
                       }}
+                      className={cn(
+                        "h-5 w-5 rounded-full border-2 border-transparent transition-transform hover:scale-110",
+                        active && "border-foreground",
+                      )}
+                      style={{ backgroundColor: color }}
                     />
                   );
                 })}
+
+                <div className="mx-1 h-4 w-px bg-border" />
+
+                {/* Actions */}
+                {menu.mode === "create" && onAskAi && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        aria-label="AI actions"
+                        className="flex h-7 items-center gap-1 rounded px-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        <Sparkles className="h-3.5 w-3.5" /> AI
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="z-(--z-menu)">
+                      {[
+                        { label: "Ask AI", action: undefined },
+                        { label: "Summarize", action: "summary" },
+                        { label: "Explain", action: "explain" },
+                        { label: "Rewrite", action: "rewrite" },
+                        { label: "Notes", action: "notes" },
+                        { label: "Mermaid", action: "mermaid" },
+                      ].map((item) => (
+                        <DropdownMenuItem
+                          key={item.label}
+                          onClick={() => {
+                            onAskAi({ selection: menu.text, actionId: item.action });
+                            window.getSelection()?.removeAllRanges();
+                            setMenu(null);
+                          }}
+                        >
+                          {item.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(
+                      menu.mode === "create" ? menu.text : menu.hl.text,
+                    );
+                    setMenu(null);
+                  }}
+                  className="flex h-7 items-center justify-center rounded px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  title="Copy"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+
+                {/* Saving lives here rather than on a star pinned to every
+                    block: a selection can be any range — a paragraph, part of a
+                    table, a whole section — where a block star could only ever
+                    offer the block it sat on. */}
+                {savedCtx.enabled && menu.mode === "create" && (
+                  <button
+                    onClick={() => {
+                      savedCtx.toggle({
+                        kind: "block",
+                        blockType: "text",
+                        title: savedExcerpt(menu.text, 90),
+                        text: menu.text,
+                        subtopicId: savedCtx.subtopicId,
+                        start: menu.start,
+                        end: menu.end,
+                        prefix: menu.prefix,
+                        suffix: menu.suffix,
+                      });
+                      window.getSelection()?.removeAllRanges();
+                      setMenu(null);
+                    }}
+                    className="flex h-7 items-center justify-center rounded px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    title="Save this selection"
+                  >
+                    <Star className="h-3.5 w-3.5" />
+                  </button>
+                )}
+
+                {menu.mode === "create" && onCopyToNotes && (
+                  <button
+                    onClick={copyToNotes}
+                    className="flex h-7 items-center justify-center rounded px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    title="Copy selection to notes"
+                  >
+                    <NotebookPen className="h-3.5 w-3.5" />
+                  </button>
+                )}
+
+                {menu.mode === "edit" && (
+                  <button
+                    onClick={() => {
+                      onRemoveHighlight(menu.hl.id);
+                      setMenu(null);
+                    }}
+                    className="flex h-7 items-center justify-center rounded px-1.5 text-destructive/80 hover:bg-destructive/10 hover:text-destructive"
+                    title="Remove highlight"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      aria-label="More highlight actions"
+                      className="flex h-7 items-center justify-center rounded px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  {/* Portalled to <body>, so it needs --z-menu to sit above this
+                      --z-dropdown popover; opening to the side keeps it from
+                      covering the highlight controls. */}
+                  <DropdownMenuContent
+                    side="right"
+                    align="start"
+                    sideOffset={8}
+                    className="z-(--z-menu)"
+                  >
+                    <DropdownMenuItem
+                      onClick={() => {
+                        inspect(menu.mode === "create" ? menu.text : menu.hl.text);
+                        setMenu(null);
+                      }}
+                    >
+                      <Crosshair className="mr-2 h-4 w-4" /> Inspect source
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        copySource(menu.mode === "create" ? menu.text : menu.hl.text);
+                        setMenu(null);
+                      }}
+                    >
+                      <Code2 className="mr-2 h-4 w-4" /> Copy code
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {menu.mode === "edit" && (
+                  <button
+                    onClick={() => setMenu(null)}
+                    className="flex h-7 items-center justify-center rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground ml-auto"
+                    aria-label="Close"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
               </div>
 
-              <div className="mb-2 flex items-center gap-1.5 rounded-md border border-border bg-background px-2">
-                <Tag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              {/* Optional Label Input if they want to add one quickly */}
+              <div className="flex items-center gap-1.5 rounded bg-muted/30 px-2 py-0.5 border border-transparent focus-within:border-border transition-colors">
+                <Tag className="h-3 w-3 text-muted-foreground" />
                 <input
-                  value={menu.label}
+                  value={menu.label || ""}
                   onChange={(e) => setMenu((m) => (m ? { ...m, label: e.target.value } : m))}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -1570,110 +1679,9 @@ function MarkdownViewerImpl({
                       setMenu(null);
                     }
                   }}
-                  placeholder="Add a label (optional)"
-                  className="w-full bg-transparent py-1.5 text-xs outline-none placeholder:text-muted-foreground"
+                  placeholder="Add a label..."
+                  className="w-full bg-transparent py-1 text-xs outline-none placeholder:text-muted-foreground/60"
                 />
-              </div>
-
-              <div className="mb-2 grid grid-cols-2 gap-1">
-                <button
-                  onClick={() => inspect(menu.mode === "create" ? menu.text : menu.hl.text)}
-                  title="Open the editor with this text selected"
-                  className="flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-                >
-                  <Crosshair className="h-3.5 w-3.5" /> Inspect source
-                </button>
-                <button
-                  onClick={() => copySource(menu.mode === "create" ? menu.text : menu.hl.text)}
-                  title="Copy the source code behind this text"
-                  className="flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-                >
-                  <Code2 className="h-3.5 w-3.5" /> Copy code
-                </button>
-              </div>
-
-              {menu.mode === "create" && onCopyToNotes && (
-                <button
-                  onClick={copyToNotes}
-                  title="Keep this passage in the Notes panel. The document is not changed."
-                  className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-                >
-                  <NotebookPen className="h-3.5 w-3.5" /> Copy selection to notes
-                </button>
-              )}
-
-              <div className="flex items-center gap-1">
-                {/* Saving lives here rather than on a star pinned to every
-                    block: the reader has already told us what they care about
-                    by selecting it, and a selection can be any range — a
-                    paragraph, part of a table, a whole section — where a block
-                    star could only ever offer the block it sat on. */}
-                {savedCtx.enabled && menu.mode === "create" && (
-                  <button
-                    onClick={() => {
-                      savedCtx.toggle({
-                        kind: "block",
-                        blockType: "text",
-                        title: savedExcerpt(menu.text, 90),
-                        text: menu.text,
-                        subtopicId: savedCtx.subtopicId,
-                        start: menu.start,
-                        end: menu.end,
-                        prefix: menu.prefix,
-                        suffix: menu.suffix,
-                      });
-                      window.getSelection()?.removeAllRanges();
-                      setMenu(null);
-                    }}
-                    title="Save this selection"
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    <Star className="h-3.5 w-3.5" /> Save
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(
-                      menu.mode === "create" ? menu.text : menu.hl.text,
-                    );
-                    setMenu(null);
-                  }}
-                  className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </button>
-                {menu.mode === "edit" && (
-                  <button
-                    onClick={() => {
-                      onRemoveHighlight(menu.hl.id);
-                      setMenu(null);
-                    }}
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" /> Remove
-                  </button>
-                )}
-                {menu.mode === "create" && (
-                  <button
-                    onClick={() => {
-                      onAddHighlight({
-                        text: menu.text,
-                        color: HL_COLORS[0],
-                        label: menu.label.trim() || undefined,
-                        subtopicId: singleMode ? undefined : activeChunk.id,
-                        start: menu.start,
-                        end: menu.end,
-                        prefix: menu.prefix,
-                        suffix: menu.suffix,
-                      });
-                      window.getSelection()?.removeAllRanges();
-                      setMenu(null);
-                    }}
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-foreground px-2 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90"
-                  >
-                    Highlight
-                  </button>
-                )}
               </div>
             </div>,
             menuContainer ?? document.body,

@@ -117,7 +117,17 @@ test("application search preserves the article DOM and saved highlights repaint 
     sel.addRange(range);
     el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
   });
-  await expect(page.getByRole("button", { name: "Highlight", exact: true })).toBeVisible();
+  // Measured before the dropdown opens: an open Radix menu hides the rest of
+  // the page from the accessibility tree.
+  const highlightLayer = await page
+    .getByRole("button", { name: "Highlight #fde047", exact: true })
+    .evaluate((button) => Number(getComputedStyle(button.closest(".fixed")!).zIndex));
+  await page.getByRole("button", { name: "More highlight actions" }).click();
+  const actionsLayer = await page
+    .getByRole("menu")
+    .evaluate((menu) => Number(getComputedStyle(menu).zIndex));
+  expect(actionsLayer).toBeGreaterThan(highlightLayer);
+  await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Highlight #fde047", exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => (CSS as any).highlights.get("dc-hl-0")?.size ?? 0))
@@ -153,7 +163,7 @@ test("application search preserves the article DOM and saved highlights repaint 
       return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
     }, group);
     await page.mouse.click(point.x, point.y);
-    await expect(page.getByText("Edit highlight", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Remove highlight" })).toBeVisible();
   };
   await clickHighlight("dc-hl-0");
   await page.getByRole("button", { name: "Highlight #86efac", exact: true }).click();
@@ -161,7 +171,7 @@ test("application search preserves the article DOM and saved highlights repaint 
     .poll(() => page.evaluate(() => (CSS as any).highlights.get("dc-hl-1")?.size ?? 0))
     .toBe(1);
   await clickHighlight("dc-hl-1");
-  await page.getByRole("button", { name: "Remove", exact: true }).click();
+  await page.getByRole("button", { name: "Remove highlight" }).click();
   await expect
     .poll(() => page.evaluate(() => (CSS as any).highlights.get("dc-hl-1")?.size ?? 0))
     .toBe(0);

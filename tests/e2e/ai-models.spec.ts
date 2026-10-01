@@ -213,7 +213,8 @@ test("a retired model is reported as a model problem, not a bad key", async ({ p
       getSelection()!.addRange(range);
       el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
-  await page.getByRole("button", { name: "Ask AI", exact: true }).click();
+  await page.getByRole("button", { name: "AI actions" }).click();
+  await page.getByRole("menuitem", { name: "Ask AI", exact: true }).click();
   const box = page.getByPlaceholder("Ask anything about the content…");
   await box.fill("What is this?");
   await box.press("Enter");

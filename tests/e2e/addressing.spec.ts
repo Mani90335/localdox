@@ -144,7 +144,8 @@ test("Inspect source selects exactly the occurrence that was selected", async ({
   // The second of two identical sentences.
   const sentence = "The same sentence appears twice.";
   await select(page, sentence, 1);
-  await page.getByRole("button", { name: "Inspect source" }).click();
+  await page.getByRole("button", { name: "More highlight actions" }).click();
+  await page.getByRole("menuitem", { name: "Inspect source" }).click();
   await expect(page.locator("textarea")).toBeVisible();
   const second = DOC.lastIndexOf(sentence);
   await expect.poll(editorSelection).toEqual([second, second + sentence.length]);
@@ -154,7 +155,8 @@ test("Inspect source selects exactly the occurrence that was selected", async ({
   // A word in the second table cell, not the identical word in the first.
   await page.locator("article svg[id^='mermaid']").waitFor();
   await select(page, "widget", 1);
-  await page.getByRole("button", { name: "Inspect source" }).click();
+  await page.getByRole("button", { name: "More highlight actions" }).click();
+  await page.getByRole("menuitem", { name: "Inspect source" }).click();
   const cell = DOC.indexOf("widget cell");
   await expect.poll(editorSelection).toEqual([cell, cell + "widget".length]);
 });

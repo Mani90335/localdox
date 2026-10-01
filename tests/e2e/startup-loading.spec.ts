@@ -134,7 +134,8 @@ test("Inspect source selects the passage in an editor that wasn't loaded yet", a
     selection.addRange(range);
     el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
   });
-  await page.getByRole("button", { name: "Inspect source", exact: true }).click();
+  await page.getByRole("button", { name: "More highlight actions" }).click();
+  await page.getByRole("menuitem", { name: "Inspect source", exact: true }).click();
 
   // The selection is applied once the editor has arrived, not dropped because
   // it wasn't there when edit mode began.
