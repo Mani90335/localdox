@@ -10,6 +10,98 @@ export const OPERATION_LABELS: Readonly<Record<ComputeOperation, string>> = {
   approximate: "Numeric value",
 };
 
+/**
+ * Operations only the advanced engine (SymPy, see advanced/) performs. The
+ * four basic operations above run there too when the basic engine can't.
+ */
+export type AdvancedOperation =
+  | "differentiate"
+  | "integrate"
+  | "limit"
+  | "series"
+  | "gradient"
+  | "hessian"
+  | "jacobian"
+  | "laplace"
+  | "inverse-laplace"
+  | "fourier"
+  | "residue"
+  | "determinant"
+  | "inverse"
+  | "transpose"
+  | "trace"
+  | "rank"
+  | "rref"
+  | "nullspace"
+  | "columnspace"
+  | "eigenvalues"
+  | "eigenvectors"
+  | "charpoly"
+  | "diagonalize"
+  | "statistics";
+
+export type AnyOperation = ComputeOperation | AdvancedOperation;
+
+export const ADVANCED_LABELS: Readonly<Record<AdvancedOperation, string>> = {
+  differentiate: "Derivative",
+  integrate: "Integral",
+  limit: "Limit",
+  series: "Series",
+  gradient: "Gradient",
+  hessian: "Hessian",
+  jacobian: "Jacobian",
+  laplace: "Laplace transform",
+  "inverse-laplace": "Inverse Laplace",
+  fourier: "Fourier transform",
+  residue: "Residue",
+  determinant: "Determinant",
+  inverse: "Inverse",
+  transpose: "Transpose",
+  trace: "Trace",
+  rank: "Rank",
+  rref: "Row reduction",
+  nullspace: "Null space",
+  columnspace: "Column space",
+  eigenvalues: "Eigenvalues",
+  eigenvectors: "Eigenvectors",
+  charpoly: "Characteristic polynomial",
+  diagonalize: "Diagonalize",
+  statistics: "Statistics",
+};
+
+export function operationLabel(op: AnyOperation): string {
+  return (
+    (OPERATION_LABELS as Record<string, string>)[op] ?? ADVANCED_LABELS[op as AdvancedOperation]
+  );
+}
+
+/** The settings an advanced operation takes, as typed (LaTeX or plain text). */
+export interface AdvancedParams {
+  /** With respect to, the limit's or series' variable, a transform's input variable. */
+  variable?: string;
+  /** Several variables: mixed partials, gradient, Hessian, Jacobian ("x, y"). */
+  variables?: string;
+  /** Derivative or series order. */
+  order?: number;
+  /** Definite integral bounds; both or neither. */
+  lower?: string;
+  upper?: string;
+  /** Limit point, series centre, residue point. */
+  point?: string;
+  direction?: "+-" | "+" | "-";
+  /** A transform's output variable (s, t, k). */
+  target?: string;
+  /** Solve over the real (default) or complex numbers. */
+  domain?: "real" | "complex";
+}
+
+export interface AdvancedRequest {
+  op: AnyOperation;
+  /** One or more statements (see advanced/statements.ts). */
+  input: string;
+  params?: AdvancedParams;
+}
+
 export interface ComputeRequest {
   op: ComputeOperation;
   /** LaTeX or plain text, as typed. */
@@ -37,9 +129,18 @@ export interface AlternativeForm {
 
 export interface ComputeAnswer {
   ok: true;
-  op: ComputeOperation;
+  op: AnyOperation;
   /** The input as the engine read it, as LaTeX. */
   input: string;
+  /** Which engine answered: "advanced" for SymPy, absent for the basic one. */
+  engine?: "advanced";
+  /**
+   * What the result equals, when it isn't the input itself: \det(A),
+   * \frac{d}{dx}(…), \int … dx, "x \in" before a solution set.
+   */
+  lhs?: string;
+  /** Definitions, distributions and assumptions the result depends on, as LaTeX. */
+  given?: string[];
   /** The exact result, as LaTeX, when there is one. */
   exact?: string;
   /** A decimal approximation, as LaTeX, when it says something `exact` doesn't. */
@@ -77,7 +178,7 @@ export type ComputeFailureKind =
 
 export interface ComputeFailure {
   ok: false;
-  op: ComputeOperation;
+  op: AnyOperation;
   kind: ComputeFailureKind;
   message: string;
   hint?: string;

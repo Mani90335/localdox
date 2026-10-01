@@ -160,11 +160,20 @@ test("unsupported and invalid input is labelled; a choice of unknown is asked fo
   await openGuide(page);
   await openCompute(page);
 
+  // Outside the basic engine: labelled, with the advanced engine offered.
+  await field(page).fill("5 \\mod 3");
+  await button(page, "Evaluate").click();
+  const unsupported = panel(page).getByRole("region", { name: "Evaluate: Not supported yet" });
+  await expect(unsupported).toContainText("Remainders (mod) aren't supported yet");
+  await expect(unsupported.getByRole("button", { name: "Use the advanced engine" })).toBeVisible();
+
+  // An integral goes to the advanced engine, which asks before downloading.
   await field(page).fill("\\int_0^1 x\\,dx");
   await button(page, "Evaluate").click();
-  await expect(
-    panel(page).getByRole("region", { name: "Evaluate: Not supported yet" }),
-  ).toContainText("Integrals aren't supported yet");
+  await expect(panel(page).getByRole("region", { name: "Advanced engine" })).toContainText(
+    "Evaluate needs the advanced engine",
+  );
+  await panel(page).getByRole("button", { name: "Not now" }).click();
 
   await field(page).fill("x +");
   await button(page, "Simplify").click();
@@ -180,7 +189,7 @@ test("unsupported and invalid input is labelled; a choice of unknown is asked fo
 
   await field(page).fill("a x + b = 0");
   await button(page, "Solve").click();
-  const choose = panel(page).getByRole("region", { name: "Solve: Choose an unknown" });
+  const choose = panel(page).getByRole("region", { name: "Solve: Choose a variable" });
   await choose.getByRole("button", { name: "Solve for x" }).click();
   const result = panel(page).getByRole("region", { name: "Solve result" });
   await expect(result).toContainText("Treats");

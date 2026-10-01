@@ -11,6 +11,17 @@ import type { ComputeFailureKind } from "./protocol.ts";
 
 /** Longer input is refused before it reaches the engine. */
 export const MAX_INPUT_CHARS = 1000;
+/** The advanced engine takes matrices and several statements, so more. */
+export const MAX_ADVANCED_CHARS = 4000;
+
+export interface PrepareOptions {
+  /**
+   * For the advanced engine (SymPy): relations, matrices and lists, commas,
+   * primes, Greek names and named functions such as Var(X) or det(A) are
+   * accepted, and LaTeX environments pass through.
+   */
+  advanced?: boolean;
+}
 /** Deeper bracket nesting is refused (the engine parses recursively). */
 export const MAX_NESTING = 32;
 
@@ -83,13 +94,17 @@ const BARE_NAMES =
 const INEQUALITY = /<|>|≤|≥|≠|!=|\\(?:le|ge|leq|geq|lt|gt|ne|neq|leqslant|geqslant)(?![a-zA-Z])/;
 
 /** Prepares input for the engine. Pure; cheap enough to run per keystroke. */
-export function prepareInput(raw: string): PreparedInput {
+export function prepareInput(
+  raw: string,
+  { advanced = false }: PrepareOptions = {},
+): PreparedInput {
   let text = raw.trim();
   if (!text) return fail("empty", "Type an expression or an equation.");
-  if (text.length > MAX_INPUT_CHARS) {
+  const limit = advanced ? MAX_ADVANCED_CHARS : MAX_INPUT_CHARS;
+  if (text.length > limit) {
     return fail(
       "too-complex",
-      `That's ${text.length.toLocaleString("en-US")} characters; the limit is ${MAX_INPUT_CHARS.toLocaleString("en-US")}.`,
+      `That's ${text.length.toLocaleString("en-US")} characters; the limit is ${limit.toLocaleString("en-US")}.`,
       "Compute one expression at a time.",
     );
   }
@@ -99,14 +114,14 @@ export function prepareInput(raw: string): PreparedInput {
   if (nesting(text) > MAX_NESTING) {
     return fail("too-complex", `Brackets are nested more than ${MAX_NESTING} deep.`);
   }
-  if (/\\begin\{|\\\\|&/.test(text)) {
+  if (!advanced && /\\begin\{|\\\\|&/.test(text)) {
     return fail(
       "unsupported",
       "Multi-line environments, matrices and alignments aren't supported.",
       "Compute one expression or equation at a time.",
     );
   }
-  if (INEQUALITY.test(text)) {
+  if (!advanced && INEQUALITY.test(text)) {
     return fail(
       "unsupported",
       "Inequalities aren't supported yet.",
@@ -134,7 +149,7 @@ export function prepareInput(raw: string): PreparedInput {
     return { ok: true, latex: text, plain: false };
   }
   try {
-    return { ok: true, latex: new PlainText(text).convert(), plain: true };
+    return { ok: true, latex: new PlainText(text, advanced).convert(), plain: true };
   } catch (error) {
     if (error instanceof PlainTextError) return fail(error.kind, error.message, error.hint);
     throw error;
@@ -180,7 +195,10 @@ class PlainTextError extends Error {
 type Token =
   { type: "number"; text: string } | { type: "name"; text: string } | { type: "op"; text: string };
 
-function tokenize(source: string): Token[] {
+/** Relations in advanced plain text, longest first. */
+const RELATIONS = ["<=", ">=", "!=", "<", ">", "≤", "≥", "≠"];
+
+function tokenize(source: string, advanced: boolean): Token[] {
   const tokens: Token[] = [];
   let i = 0;
   while (i < source.length) {
@@ -220,6 +238,17 @@ function tokenize(source: string): Token[] {
       i += 2;
       continue;
     }
+    const relation = advanced && RELATIONS.find((r) => source.startsWith(r, i));
+    if (relation) {
+      tokens.push({ type: "op", text: relation });
+      i += relation.length;
+      continue;
+    }
+    if (advanced && "[]'".includes(ch)) {
+      tokens.push({ type: "op", text: ch });
+      i++;
+      continue;
+    }
     if ("+-*/^=()[]!|,".includes(ch)) {
       tokens.push({ type: "op", text: ch === "[" ? "(" : ch === "]" ? ")" : ch });
       i++;
@@ -237,10 +266,12 @@ function tokenize(source: string): Token[] {
  */
 class PlainText {
   private readonly tokens: Token[];
+  private readonly advanced: boolean;
   private at = 0;
 
-  constructor(source: string) {
-    this.tokens = tokenize(source);
+  constructor(source: string, advanced = false) {
+    this.advanced = advanced;
+    this.tokens = tokenize(source, advanced);
   }
 
   convert(): string {
@@ -266,7 +297,22 @@ class PlainText {
         return out;
       }
       // The caller steps over a group's ")"; a stray one ends the input early.
-      if (token.type === "op" && token.text === ")") return out;
+      if (token.type === "op" && (token.text === ")" || token.text === "]")) return out;
+      if (this.advanced && token.type === "op" && (token.text === "," || token.text === "'")) {
+        this.at++;
+        out += token.text;
+        continue;
+      }
+      if (this.advanced && token.type === "op" && RELATIONS.includes(token.text)) {
+        this.at++;
+        out += RELATION_LATEX[token.text] ?? token.text;
+        continue;
+      }
+      if (this.advanced && token.type === "name" && token.text.toLowerCase() === "given") {
+        this.at++;
+        out += "\\mid ";
+        continue;
+      }
       if (token.type === "op" && token.text === ",") {
         throw new PlainTextError(
           "unsupported",
@@ -316,6 +362,8 @@ class PlainText {
         if (!inner.trim()) throw new PlainTextError("syntax", "There's an empty “()”.");
         return `\\left(${inner}\\right)`;
       }
+      // [1, 2, 3] is a list; [[1, 2], [3, 4]] a matrix (advanced only).
+      if (token.text === "[") return listOrMatrix(this.group("]"));
       throw new PlainTextError("syntax", `Something is missing before “${token.text}”.`);
     }
     const name = token.text;
@@ -324,6 +372,10 @@ class PlainText {
     if (name === "√") {
       if (!this.peek()) throw new PlainTextError("syntax", "“√” needs something after it.");
       return `\\sqrt{${this.atom().replace(/^\\left\(([\s\S]*)\\right\)$/, "$1")}}`;
+    }
+    if (this.advanced) {
+      const special = this.advancedName(name);
+      if (special !== null) return special;
     }
     const fn = FUNCTIONS[name.toLowerCase()];
     if (fn) {
@@ -346,10 +398,191 @@ class PlainText {
     const constant = CONSTANTS[name.toLowerCase()];
     if (constant) return `${constant} `;
     if (name.length === 1) return `${name} `;
+    if (this.advanced && GREEK.has(name.toLowerCase())) return `\\${name} `;
     throw new PlainTextError(
       "unsupported",
       `“${name}” isn't a function or constant the engine knows.`,
       `Variables are single letters. For a product, write ${name.split("").join("*")}.`,
     );
   }
+
+  /** The tokens up to `closer`, which is then stepped over. */
+  private group(closer: string): string {
+    const inner = this.sequence(true);
+    const end = this.tokens[this.at++];
+    if (!(end?.type === "op" && end.text === closer)) {
+      throw new PlainTextError("syntax", `A “${closer === "]" ? "[" : "("}” isn't closed.`);
+    }
+    return inner;
+  }
+
+  /** Names the advanced engine reads differently, or null for the usual reading. */
+  private advancedName(name: string): string | null {
+    const lower = name.toLowerCase();
+    const next = this.peek();
+    const call = next?.type === "op" && next.text === "(";
+    const bracket = next?.type === "op" && next.text === "[";
+    if (lower === "oo") return "\\infty ";
+    // E[X], E(X): an expectation; P(…): a probability.
+    if ((name === "E" && (call || bracket)) || (name === "P" && call)) {
+      this.at++;
+      const inner = this.group(bracket ? "]" : ")");
+      return name === "E" ? `E[${inner}]` : `P(${inner})`;
+    }
+    if (call && lower === "log") {
+      this.at++;
+      const args = this.group(")");
+      const comma = args.lastIndexOf(",");
+      return comma < 0
+        ? `\\log\\left(${args}\\right)`
+        : `\\log_{${args.slice(comma + 1)}}\\left(${args.slice(0, comma)}\\right)`;
+    }
+    if (
+      call &&
+      (lower === "binomial" || lower === "binom" || lower === "choose" || lower === "ncr")
+    ) {
+      this.at++;
+      const args = this.group(")");
+      const comma = args.indexOf(",");
+      if (comma < 0)
+        throw new PlainTextError("syntax", `“${name}” takes two arguments: ${name}(n, k).`);
+      return `\\binom{${args.slice(0, comma)}}{${args.slice(comma + 1)}}`;
+    }
+    if (call && lower === "gamma") {
+      this.at++;
+      return `\\Gamma\\left(${this.group(")")}\\right)`;
+    }
+    if (call && lower === "zeta") {
+      this.at++;
+      return `\\zeta\\left(${this.group(")")}\\right)`;
+    }
+    if (call && OPERATOR_NAMES.has(lower)) {
+      this.at++;
+      return `\\operatorname{${name}}\\left(${this.group(")")}\\right)`;
+    }
+    return null;
+  }
+}
+
+const RELATION_LATEX: Readonly<Record<string, string>> = {
+  "<=": "\\le ",
+  ">=": "\\ge ",
+  "!=": "\\ne ",
+  "≤": "\\le ",
+  "≥": "\\ge ",
+  "≠": "\\ne ",
+};
+
+/** Functions written \\operatorname{…}(…) for the advanced engine (normalize.ts reads them). */
+const OPERATOR_NAMES = new Set([
+  "beta",
+  "erf",
+  "erfc",
+  "var",
+  "variance",
+  "cov",
+  "covariance",
+  "corr",
+  "correlation",
+  "sd",
+  "std",
+  "stdev",
+  "pdf",
+  "density",
+  "cdf",
+  "mgf",
+  "median",
+  "mean",
+  "avg",
+  "skewness",
+  "skew",
+  "kurtosis",
+  "entropy",
+  "det",
+  "inv",
+  "inverse",
+  "tr",
+  "trace",
+  "transpose",
+  "grad",
+  "gradient",
+  "re",
+  "im",
+  "conj",
+  "arg",
+  "floor",
+  "ceil",
+  "sign",
+  "sgn",
+  "max",
+  "min",
+  "gcd",
+  "lcm",
+  "mod",
+  "diff",
+  "derivative",
+  "integrate",
+  "int",
+  "limit",
+  "lim",
+  "sum",
+  "product",
+  "prod",
+]);
+
+const GREEK = new Set([
+  "alpha",
+  "beta",
+  "gamma",
+  "delta",
+  "epsilon",
+  "varepsilon",
+  "zeta",
+  "eta",
+  "theta",
+  "vartheta",
+  "iota",
+  "kappa",
+  "lambda",
+  "mu",
+  "nu",
+  "xi",
+  "rho",
+  "sigma",
+  "tau",
+  "upsilon",
+  "phi",
+  "varphi",
+  "chi",
+  "psi",
+  "omega",
+]);
+
+/** Splits on commas outside brackets and braces. */
+function topLevel(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of text) {
+    if ("([{".includes(ch)) depth++;
+    else if (")]}".includes(ch)) depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+    } else current += ch;
+  }
+  parts.push(current);
+  return parts;
+}
+
+/** [[1,2],[3,4]] is written as a matrix, so it reads (and shows) as one. */
+function listOrMatrix(inner: string): string {
+  const items = topLevel(inner);
+  const rows = items.every((item) => /^\[.*\]$/.test(item))
+    ? items.map((item) => topLevel(item.slice(1, -1)))
+    : null;
+  if (rows && rows.length > 0 && rows.every((row) => row.length === rows[0].length)) {
+    return `\\begin{pmatrix}${rows.map((row) => row.join("&")).join("\\\\")}\\end{pmatrix}`;
+  }
+  return `[${inner}]`;
 }

@@ -7,11 +7,8 @@ import {
   requestKey,
 } from "../src/services/compute/compute-client.ts";
 import { compute, configureEngine } from "../src/services/compute/engine.ts";
-import type {
-  ComputeRequest,
-  WorkerReply,
-  WorkerRequest,
-} from "../src/services/compute/protocol.ts";
+import type { Reply } from "../src/services/compute/compute-client.ts";
+import type { ComputeRequest, WorkerRequest } from "../src/services/compute/protocol.ts";
 
 // The Compute tab's worker client: one request at a time, results cached,
 // and every way the worker can fail (too slow, crashed, never started, no
@@ -21,7 +18,8 @@ import type {
 const ce = new ComputeEngine();
 configureEngine(ce);
 
-type Mode = "ok" | "boot-fails" | "hangs" | "crashes" | "slow-boot";
+type Mode =
+  "ok" | "boot-fails" | "hangs" | "crashes" | "slow-boot" | "stages" | "reports-failure" | "stalls";
 
 /** Answers like compute.worker.ts, with the real engine, as tasks. `mode` scripts a failure. */
 class FakeWorker extends EventTarget {
@@ -36,6 +34,13 @@ class FakeWorker extends EventTarget {
       () => {
         if (this.terminated) return;
         if (mode === "boot-fails") return this.dispatchEvent(new Event("error"));
+        // Like the advanced worker: loading stages, a reported failure, or a stall.
+        if (mode === "reports-failure") return this.reply({ type: "failed", message: "No wasm." });
+        if (mode === "stalls") return;
+        if (mode === "stages") {
+          this.reply({ type: "progress", stage: "runtime" });
+          this.reply({ type: "progress", stage: "sympy" });
+        }
         this.reply({ type: "ready" });
         // Like a module worker: messages wait until the module has evaluated.
         this.booted = true;
@@ -62,7 +67,7 @@ class FakeWorker extends EventTarget {
   terminate() {
     this.terminated = true;
   }
-  private reply(data: WorkerReply) {
+  private reply(data: Reply<unknown>) {
     this.dispatchEvent(new MessageEvent("message", { data }));
   }
   override addEventListener(...args: Parameters<EventTarget["addEventListener"]>) {
@@ -272,5 +277,68 @@ test("the cache is bounded, least recently used out", async () => {
   assert.equal(workers[0].posted.length, 4, "the newest is still cached");
   await client.run(evaluate("1+1"));
   assert.equal(workers[0].posted.length, 5, "the oldest was evicted");
+  client.close();
+});
+
+test("loading stages reach the request waiting for them", async () => {
+  const { client } = harness(["stages"]);
+  const stages: string[] = [];
+  await client.run(evaluate("1+1"), { onProgress: (stage) => stages.push(stage) });
+  assert.deepEqual(stages, ["runtime", "sympy"]);
+  client.close();
+});
+
+test("a worker that reports a failed load fails what's waiting, once, with its reason", async () => {
+  const { client, workers } = harness(["reports-failure", "ok"]);
+  const settled = await Promise.allSettled([
+    client.run(evaluate("1+1")),
+    client.run(evaluate("2+2")),
+  ]);
+  for (const result of settled) {
+    assert.equal(result.status, "rejected");
+    assert.ok(result.status === "rejected" && result.reason instanceof ComputeError);
+    assert.equal(result.status === "rejected" && result.reason.kind, "load-failed");
+    assert.equal(result.status === "rejected" && result.reason.message, "No wasm.");
+  }
+  assert.equal(workers[0].terminated, true);
+  // The next request starts a new worker.
+  assert.equal((await client.run(evaluate("1+1"))).ok, true);
+  client.close();
+});
+
+test("a load that stalls past its limit fails instead of spinning", async () => {
+  const workers: FakeWorker[] = [];
+  const client = createComputeClient({
+    createWorker: () => {
+      const worker = new FakeWorker(workers.length ? "ok" : "stalls");
+      workers.push(worker);
+      return worker;
+    },
+    loadTimeoutMs: 40,
+    name: "advanced math engine",
+  });
+  await assert.rejects(
+    client.run(evaluate("1+1")),
+    isComputeError("load-failed", /Loading the advanced math engine took over 0 s/),
+  );
+  assert.equal(workers[0].terminated, true);
+  assert.equal((await client.run(evaluate("1+1"))).ok, true, "a fresh worker loads in time");
+  client.close();
+});
+
+test("a custom cache key decides what counts as the same request", async () => {
+  const workers: FakeWorker[] = [];
+  const client = createComputeClient<ComputeRequest & { tag: string }>({
+    createWorker: () => {
+      const worker = new FakeWorker("ok");
+      workers.push(worker);
+      return worker;
+    },
+    key: (request) => `${request.op}|${request.input}|${request.tag}`,
+  });
+  await client.run({ ...evaluate("1+1"), tag: "a" });
+  await client.run({ ...evaluate("1+1"), tag: "a" });
+  await client.run({ ...evaluate("1+1"), tag: "b" });
+  assert.equal(workers[0].posted.length, 2);
   client.close();
 });

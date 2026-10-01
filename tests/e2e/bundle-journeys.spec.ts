@@ -23,10 +23,11 @@ const budgets = {
   interactive: 840,
   keyboard: 240,
   compute: 320,
+  advanced: 12000,
 } as const;
 type Journey = keyof typeof budgets;
 const optional =
-  /(?:compiler\.worker|compute\.worker|mathlive\.min|spreadsheet\.worker|pdf(?:\.worker)?-|anydoc_wasm|conversion\.worker|mermaid\.core|media-bundle|react-dom-server|katex-[^.]+\.js)/;
+  /(?:compiler\.worker|compute\.worker|advanced\.worker|\/pyodide\/|mathlive\.min|spreadsheet\.worker|pdf(?:\.worker)?-|anydoc_wasm|conversion\.worker|mermaid\.core|media-bundle|react-dom-server|katex-[^.]+\.js)/;
 type ReportFile = { file: string; modules?: string[] };
 const capabilityModules =
   /node_modules\/(?:@babel\/standalone|@cortex-js\/compute-engine|mathlive|xlsx|pdfjs-dist|mermaid|katex)\//;
@@ -56,7 +57,7 @@ function track(context: BrowserContext) {
   const rows: { phase: string; file: string; bytes: number; gzip: number }[] = [];
   context.on("response", (response) => {
     const file = new URL(response.url()).pathname;
-    if (!/\.(?:js|mjs|wasm|css|woff2?|ttf)$/.test(file)) return;
+    if (!/\.(?:js|mjs|wasm|zip|whl|css|woff2?|ttf)$/.test(file)) return;
     const requestedPhase = phases.get(response.request()) ?? phase;
     pending.push(
       (async () => {
@@ -118,12 +119,12 @@ for (const journey of Object.keys(budgets) as Journey[]) {
       ).toEqual([]);
     }
 
-    if (["edit", "export", "keyboard", "compute"].includes(journey)) {
+    if (["edit", "export", "keyboard", "compute", "advanced"].includes(journey)) {
       await upload(page, "budget.md", "# Budget note\n\nA **complete** note with $E=mc^2$.\n");
       await expect(page.locator("article .katex")).toHaveCount(1);
       if (journey === "keyboard") await edit(page);
       // The Notes panel itself is a prerequisite; the engine is the feature.
-      if (journey === "compute") {
+      if (journey === "compute" || journey === "advanced") {
         await page.getByRole("button", { name: "Notes", exact: true }).click();
         await expect(page.getByRole("tab", { name: "Compute" })).toBeVisible();
       }
@@ -210,6 +211,18 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         await page.getByRole("button", { name: "Insert equation", exact: true }).click();
         await expect(page.locator("math-field")).toBeVisible();
         break;
+      case "advanced":
+        await page.getByRole("tab", { name: "Compute" }).click();
+        await page
+          .getByRole("textbox", { name: /^Expression or equation/ })
+          .fill("\\int_0^1 x^2\\,dx");
+        await page.getByRole("button", { name: "Evaluate", exact: true }).click();
+        await page.getByRole("button", { name: "Download and compute" }).click();
+        await expect(page.getByRole("region", { name: "Evaluate result" })).toContainText(
+          "0.333333333333",
+          { timeout: 120_000 },
+        );
+        break;
       case "compute":
         await page.getByRole("tab", { name: "Compute" }).click();
         await page.getByRole("textbox", { name: /^Expression or equation/ }).fill("1/2 + 1/3");
@@ -222,7 +235,8 @@ for (const journey of Object.keys(budgets) as Journey[]) {
     await page.waitForLoadState("networkidle");
     const rows = await traffic.finish();
     const feature = rows.filter((row) => row.phase === "feature");
-    const executable = feature.filter((row) => /\.(?:js|mjs|wasm)$/.test(row.file));
+    // Python wheels and the standard library are code too.
+    const executable = feature.filter((row) => /\.(?:js|mjs|wasm|zip|whl)$/.test(row.file));
     const totals = {
       raw: executable.reduce((n, row) => n + row.bytes, 0),
       gzip: executable.reduce((n, row) => n + row.gzip, 0),
@@ -259,6 +273,7 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         interactive: /compiler\.worker/,
         keyboard: /mathlive\.min/,
         compute: /compute\.worker/,
+        advanced: /sympy-[\d.]+-py3-none-any\.whl$/,
         diagram: /katex-[^.]+\.js$/,
       };
       if (required[journey])

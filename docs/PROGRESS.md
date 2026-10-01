@@ -1,4 +1,38 @@
-Latest update — 2026-10-01 (Math Compute: an on-device math engine in the Notes panel)
+Latest update — 2026-10-02 (Math Compute: graduate-level math with an on-device SymPy engine)
+
+The Compute tab gets a second engine for calculus, linear algebra,
+probability and random variables, statistics, transforms and ODEs: SymPy 1.14
+on Pyodide 314.0.7, in a Web Worker, downloaded (10.9 MB) only after the reader
+agrees, then offline. The basic engine still answers what it can; anything
+else is routed to SymPy. Details: documentation/math-compute-advanced.md.
+
+- Why: probing the basic engine at this level gave wrong answers (d²/dx² x⁴ =
+  "dx²", Σk = 50015001, Σ1/n² off in the 4th digit, Monte Carlo integrals, 3×3
+  inverse crash), not just gaps.
+- Notation: several statements (`X ~ N(0, 4)`, `let A = …`, `assume x > 0`,
+  ODE conditions `y(0) = 1`), LaTeX or extended plain text; every
+  distribution's parameter convention is stated in the result.
+- Advanced tools (Calculus, Matrices, Probability, Statistics, Transforms) for
+  operations with settings; results carry `lhs` statements, Given rows and a
+  SymPy badge into Copy, rough work and insertion.
+- Security: input is parsed in JavaScript to allow-listed MathJSON and built
+  into SymPy objects in Python; nothing typed is ever evaluated as Python
+  (tested on both sides). Supply chain: wheels verified against the pinned
+  package's lock-file SHA-256; published lock trimmed to sympy + mpmath.
+- Robustness found while testing: Pyodide hangs (no rejection) on a
+  WebAssembly response without `application/wasm` (Vite preview): the worker
+  now compiles from bytes, and the client fails a load after 180 s instead of
+  spinning; a 30 s compute limit terminates the worker.
+
+Tests: tests/compute-advanced.test.ts (13, real SymPy in Node),
+compute-client (13), tests/e2e/compute-advanced.spec.ts (5; 10/10 with
+--repeat-each=2), bundle journey `advanced` (11,034 KiB gzip incl. the basic
+engine; ceiling 12,000). Unit 574 pass / 0 fail (576, 2 skipped). E2E on a
+private-port production build: compute-advanced, compute, rough-work, notes,
+addressing, bundle-journeys 37/37. tsc: only the pre-existing __root.tsx
+error. eslint: no errors.
+
+Previous update — 2026-10-01 (Math Compute: an on-device math engine in the Notes panel)
 
 The Notes panel has a third tab, **Compute**: Evaluate, Simplify, Numeric
 value and Solve for an unknown, on LaTeX or plain text, in a Web Worker, and

@@ -2,7 +2,10 @@
 
 The Notes panel's third tab, **Compute**, works things out: evaluate an
 expression, simplify it, solve an equation, or get a decimal value. It runs on
-the device, in a background thread, and works offline once used. What the
+the device, in a background thread, and works offline once used. Graduate-level
+work (calculus, linear algebra, probability, statistics, transforms, ODEs) goes
+to a second engine, SymPy, downloaded only after the reader agrees; see
+math-compute-advanced.md. What the
 reader wrote and what the engine computed never mix: a result goes to rough
 work or into a document only when the reader asks, and an insertion only after
 its confirmation dialog.
@@ -45,7 +48,7 @@ permissive license, a bundle that can stay optional.
 | **@cortex-js/compute-engine 0.58** (MIT) | **Chosen.** Parses LaTeX directly, exact rationals and radicals, `simplify`/`evaluate`/`N`/`solve`, arbitrary precision, a cooperative time limit. Already installed as MathLive's dependency, at the same pinned version, so no new package was downloaded or audited and there is a single copy. |
 | math.js (Apache-2.0)                     | No LaTeX input; no general equation solver.                                                                                                                                                                                                                                                        |
 | nerdamer, Algebrite (MIT)                | No LaTeX input; less active.                                                                                                                                                                                                                                                                       |
-| Giac/Xcas (WASM), SymPy (Pyodide)        | Strong CAS, but GPL (Giac) or a multi-megabyte runtime (Pyodide).                                                                                                                                                                                                                                  |
+| Giac/Xcas (WASM), SymPy (Pyodide)        | Strong CAS, but GPL (Giac) or a ~11 MB runtime (Pyodide): SymPy is now the optional second tier (math-compute-advanced.md), not the default.                                                                                                                                                       |
 
 It is now a direct dependency pinned to `0.58.0`, the exact version MathLive
 pins. When MathLive is upgraded, upgrade this to match, or the build will ship
@@ -200,7 +203,7 @@ $$
 | What happens                              | Shown as                                              | Cached |
 | ----------------------------------------- | ----------------------------------------------------- | ------ |
 | Unreadable input (`x+`, `\frac{1}{`)      | "Can't read this" + where                             | yes    |
-| Out of scope (integrals, sums, mod…)      | "Not supported yet" + what is                         | yes    |
+| Out of scope (mod, max…)                  | "Not supported yet" + Use the advanced engine         | yes    |
 | 1/0, 0/0                                  | "Undefined"                                           | yes    |
 | Engine's 4 s limit (`ce.timeLimit`)       | "Too complex", worker kept                            | yes    |
 | Worker busy past 8 s (non-cooperative)    | "Took too long"; worker terminated, a fresh one next  | no     |
@@ -256,7 +259,8 @@ checks that the observer records it, so a zero means none happened.
 ## Known limits
 
 - Equations in one unknown. Systems, inequalities, integrals, derivatives,
-  limits, sums and matrices are labelled unsupported.
+  limits, sums and matrices go to the advanced engine (routing in
+  math-compute-advanced.md).
 - Non-polynomial equations may have solutions the engine doesn't find
   (`|x| = 3` gives only 3; `2^x = 8` gives none). The result says so.
 - Trigonometric solutions are listed for one period only.
@@ -281,12 +285,15 @@ checks that the observer records it, so a zero means none happened.
   polynomial/rational solving; engine solving with checks and caveats; the root
   finder (multiplicity, Wilkinson degree 10); every result rendered by KaTeX;
   the Markdown carried by Copy, Add and Insert.
-- `tests/compute-client.test.ts` (9): worker protocol, caching and keys,
+- `tests/compute-client.test.ts` (13): worker protocol, caching and keys,
   ordering, timeout, the time limit not covering load, crash, failed start and
-  no-Worker, cancellation (queued and running), warm-up, bounded cache.
+  no-Worker, cancellation (queued and running), warm-up, bounded cache; and for
+  the advanced engine, loading stages, a reported failed load, a stalled load,
+  custom keys.
 - `tests/e2e/compute.spec.ts` (5): evaluate → copy → add to rough work →
   insert (Cancel leaves the document byte-identical), direct insert from
-  Compute, labelled failures and the choice of unknown, no long task while
+  Compute, labelled failures (and the advanced engine offered or asked for)
+  and the choice of variable, no long task while
   computing plus cancellation, and offline after first use (production only).
 - `tests/e2e/bundle-journeys.spec.ts`: the `compute` journey (ceiling 320 KiB
   gzip, the worker must be fetched) and "the math engine ships only inside its
