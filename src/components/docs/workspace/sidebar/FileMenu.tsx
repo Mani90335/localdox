@@ -1,13 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronRight,
-  Check,
-  CheckSquare,
   Columns2,
   FileText,
   Folder,
   FolderInput,
-  GripVertical,
   MoreVertical,
   Pencil,
   Share2,
@@ -37,9 +34,6 @@ export function FileMenu({
   onDownload,
   formats = ["original"],
   onShare,
-  reordering,
-  onToggleReorder,
-  onSelectMode,
 }: {
   /** Show this document in a column of its own, beside what is being read. */
   onAddToSplit?: () => void;
@@ -80,9 +74,6 @@ export function FileMenu({
   onDownload?: (format: ExportFormat) => void;
   formats?: ExportFormat[];
   onShare?: () => void;
-  reordering?: boolean;
-  onToggleReorder?: () => void;
-  onSelectMode?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   // Which flyout is open beside the menu, and the row it hangs off.
@@ -198,32 +189,6 @@ export function FileMenu({
                 trailing={<ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
               />
             </>
-          )}
-
-          {/* How the list behaves — not about this document at all, so it sits
-              apart from the rows that are. */}
-          {(onToggleReorder || onSelectMode) && <MenuSeparator />}
-          {onToggleReorder && (
-            <MenuItem
-              icon={reordering ? Check : GripVertical}
-              label={reordering ? "Done reordering" : "Reorder"}
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onToggleReorder();
-              }}
-            />
-          )}
-          {onSelectMode && (
-            <MenuItem
-              icon={CheckSquare}
-              label="Select"
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onSelectMode();
-              }}
-            />
           )}
 
           <MenuSeparator />

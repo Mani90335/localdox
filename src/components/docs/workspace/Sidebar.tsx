@@ -1014,9 +1014,6 @@ function SidebarImpl({
               onDownload={onDownloadFile ? (format) => onDownloadFile(file.id, format) : undefined}
               formats={availableFormats(file)}
               onShare={onShareFile ? () => onShareFile(file.id) : undefined}
-              reordering={reordering}
-              onToggleReorder={canReorder ? toggleReorder : undefined}
-              onSelectMode={() => startSelecting({ fileId: file.id })}
             />
           ) : selectedIds.has(file.id) ? (
             groupMenu()

@@ -71,10 +71,10 @@ export function AddMenu({
               list that implies an order of importance. */}
           {creates.length > 0 && (
             <>
-              <p className="px-1.5 pb-1.5 pt-0.5 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <p className="px-2 pb-2 pt-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Create
               </p>
-              <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Create">
+              <div className="grid grid-cols-3 gap-2" role="group" aria-label="Create">
                 {creates.map(({ label, icon: Icon, run }) => (
                   <button
                     key={label}
@@ -84,10 +84,10 @@ export function AddMenu({
                       run();
                     }}
                     aria-label={`New ${label.toLowerCase()}`}
-                    className="flex flex-col items-center gap-1.5 rounded-lg border border-border/70 px-1 py-2.5 text-xs font-medium text-foreground transition-colors hover:border-border hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="flex flex-col items-center gap-2 rounded-lg border border-border/70 p-3 text-xs font-medium text-foreground transition-colors hover:border-border hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <Icon
-                      className="h-4.5 w-4.5 text-muted-foreground"
+                      className="h-5 w-5 text-muted-foreground"
                       strokeWidth={1.5}
                       aria-hidden
                     />
@@ -95,9 +95,9 @@ export function AddMenu({
                   </button>
                 ))}
               </div>
-              <div className="my-2 flex items-center gap-2 px-1" aria-hidden>
+              <div className="my-3 flex items-center gap-2 px-1" aria-hidden>
                 <span className="h-px flex-1 bg-border" />
-                <span className="text-3xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   or
                 </span>
                 <span className="h-px flex-1 bg-border" />

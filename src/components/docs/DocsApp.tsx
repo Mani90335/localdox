@@ -1585,7 +1585,7 @@ export function DocsApp() {
   const requestBin = useCallback(
     (fileIds: string[], folderIds: string[] = []) => {
       if (!fileIds.length && !folderIds.length) return;
-      const { files: current, paneLayout: layout } = snapshotRef.current;
+      const { files: current, folders, paneLayout: layout } = snapshotRef.current;
       const onScreen = new Set(layout.panes.map((pane) => pane.activeTabId));
       const binning = new Set(fileIds);
       const openNames = current
@@ -1602,7 +1602,9 @@ export function DocsApp() {
         singleName:
           fileIds.length === 1 && !folderIds.length
             ? current.find((f) => f.id === fileIds[0])?.name
-            : undefined,
+            : folderIds.length === 1 && !fileIds.length
+              ? folders.find((f) => f.id === folderIds[0])?.name
+              : undefined,
       });
     },
     [binNow],

@@ -38,11 +38,12 @@ export function MoveToBinDialog({
   const folders = request?.folderIds.length ?? 0;
   const openNames = request?.openNames ?? [];
 
-  const what = request?.singleName
-    ? `“${request.singleName}”`
-    : [files ? plural(files, "document") : null, folders ? plural(folders, "folder") : null]
-        .filter(Boolean)
-        .join(" and ");
+  const what = [
+    files ? plural(files, "document") : null,
+    folders ? plural(folders, "folder") : null,
+  ]
+    .filter(Boolean)
+    .join(" and ");
 
   return (
     <Modal
@@ -92,11 +93,21 @@ export function MoveToBinDialog({
         )}
         {folders > 0 && (
           <p>
-            {folders === 1 ? "The folder is" : "The folders are"} removed, and the documents inside
-            go to the Bin with the rest.
+            {folders === 1 ? (
+              request?.singleName && !files ? (
+                <>
+                  The folder{" "}
+                  <span className="font-medium text-foreground">“{request.singleName}”</span> is
+                  removed, and the documents inside go to the Bin with the rest.
+                </>
+              ) : (
+                "The folder is removed, and the documents inside go to the Bin with the rest."
+              )
+            ) : (
+              "The folders are removed, and the documents inside go to the Bin with the rest."
+            )}
           </p>
         )}
-        <p>Documents stay in the Bin for 30 days — restore them from Settings ▸ Storage.</p>
       </div>
     </Modal>
   );
