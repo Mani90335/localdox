@@ -4407,6 +4407,7 @@ flowchart LR
                     onRemove={removeNote}
                     onClose={closeNotes}
                     freshId={freshNoteId}
+                    mathRenderer={mathPreferences.renderer}
                   />
                 </LazyBoundary>
               </aside>
@@ -4426,6 +4427,7 @@ flowchart LR
                   onRemove={removeNote}
                   onClose={closeNotes}
                   freshId={freshNoteId}
+                  mathRenderer={mathPreferences.renderer}
                 />
               </LazyBoundary>
             </BottomSheet>

@@ -45,9 +45,16 @@ export interface SelectionBounds {
   commonAncestorContainer: DomNodeLike;
 }
 
+/**
+ * The fenced source of a diagram drawn at `node`, if one is — supplied by the
+ * caller (the reader registers its diagrams; see diagram-sources.ts).
+ */
+export type DiagramLookup = (node: DomNodeLike) => { lang: string; source: string } | undefined;
+
 type Piece =
   | { kind: "text"; text: string }
   | { kind: "math"; latex: string; display: boolean }
+  | { kind: "fence"; lang: string; text: string }
   | { kind: "el"; tag: string; attrs: Record<string, string>; children: Piece[] };
 
 type Element = Extract<Piece, { kind: "el" }>;
@@ -167,7 +174,11 @@ const VOID_TAGS = new Set(["img", "br", "hr", "input"]);
  * from the DOM beyond children and parents. Without `bounds`, all of `root` is
  * captured.
  */
-function capture(root: DomNodeLike, bounds?: SelectionBounds): Piece | null {
+function capture(
+  root: DomNodeLike,
+  bounds?: SelectionBounds,
+  diagramOf?: DiagramLookup,
+): Piece | null {
   let state: "before" | "inside" | "after" = bounds ? "before" : "inside";
 
   const visit = (node: DomNodeLike): Piece | null => {
@@ -201,6 +212,13 @@ function capture(root: DomNodeLike, bounds?: SelectionBounds): Piece | null {
       if (piece) children.push(piece);
     }
 
+    // Likewise a diagram: its SVG text is node labels and Mermaid's stylesheet,
+    // so any part of it copies as the source it was drawn from.
+    const diagram = diagramOf?.(node);
+    if (diagram) {
+      const touched = entry === "inside" || children.length > 0 || state !== entry;
+      return touched ? { kind: "fence", lang: diagram.lang, text: diagram.source } : null;
+    }
     // Selecting any part of an equation selects the equation: half of a KaTeX
     // span tree is not math anyone can use.
     if (isMath(node)) {
@@ -273,7 +291,8 @@ const BLOCK_TAGS = new Set([
 ]);
 
 const isBlock = (piece: Piece) =>
-  piece.kind === "math" ? piece.display : piece.kind === "el" && BLOCK_TAGS.has(piece.tag);
+  piece.kind === "fence" ||
+  (piece.kind === "math" ? piece.display : piece.kind === "el" && BLOCK_TAGS.has(piece.tag));
 
 const isElement = (piece: Piece | undefined, ...tags: string[]): piece is Element =>
   piece?.kind === "el" && (tags.length === 0 || tags.includes(piece.tag));
@@ -282,6 +301,7 @@ const isElement = (piece: Piece | undefined, ...tags: string[]): piece is Elemen
 function rawText(piece: Piece): string {
   if (piece.kind === "text") return piece.text;
   if (piece.kind === "math") return piece.latex;
+  if (piece.kind === "fence") return piece.text;
   if (piece.tag === "br") return "\n";
   return piece.children.map(rawText).join("");
 }
@@ -306,6 +326,7 @@ function inline(pieces: Piece[]): string {
 function inlinePiece(piece: Piece): string {
   if (piece.kind === "text") return piece.text.replace(/\s+/g, " ");
   if (piece.kind === "math") return piece.display ? ` $$${piece.latex}$$ ` : `$${piece.latex}$`;
+  if (piece.kind === "fence") return ` ${piece.text.replace(/\s+/g, " ")} `;
   const inner = () => inline(piece.children);
   switch (piece.tag) {
     case "strong":
@@ -451,19 +472,23 @@ function table(el: Element): string {
   return [line(cells[0]), line(Array(width).fill("---")), ...cells.slice(1).map(line)].join("\n");
 }
 
+function fence(language: string, text: string): string {
+  const marks = fenceFor(text, "`", 3);
+  return `${marks}${language}\n${text}\n${marks}`;
+}
+
 function codeBlock(el: Element): string {
   const code = el.children.find((child) => isElement(child, "code"));
   const language = isElement(code)
     ? (/(?:^|\s)language-([\w+#.-]+)/.exec(code.attrs.class ?? "")?.[1]?.split("--")[0] ?? "")
     : "";
-  const text = rawText(el).replace(/\n$/, "");
-  const fence = fenceFor(text, "`", 3);
-  return `${fence}${language}\n${text}\n${fence}`;
+  return fence(language, rawText(el).replace(/\n$/, ""));
 }
 
 function render(piece: Piece): string {
   if (piece.kind === "text") return tidy(inlinePiece(piece));
   if (piece.kind === "math") return piece.display ? `$$\n${piece.latex}\n$$` : `$${piece.latex}$`;
+  if (piece.kind === "fence") return fence(piece.lang, piece.text.replace(/\n$/, ""));
   const tag = piece.tag;
   if (/^h[1-6]$/.test(tag)) {
     const text = tidy(inline(piece.children)).replace(/\n+/g, " ");
@@ -505,23 +530,32 @@ const TEXT_BLOCKS = new Set(["p", "li", "td", "th", "dt", "dd", "figcaption", "s
 
 /**
  * The selected content as Markdown, or "" when nothing convertible was
- * selected (a diagram, an image with no alt text).
+ * selected (an embed, an image with no alt text).
  *
  * `boundary` is the rendered document's container: context is never looked
- * for above it.
+ * for above it. `diagramOf` recovers a diagram's source; without it, diagrams
+ * copy as nothing.
  */
-export function selectionToMarkdown(bounds: SelectionBounds, boundary?: DomNodeLike): string {
+export function selectionToMarkdown(
+  bounds: SelectionBounds,
+  boundary?: DomNodeLike,
+  diagramOf?: DiagramLookup,
+): string {
   let root: DomNodeLike | null = bounds.commonAncestorContainer;
   if (root.nodeType === TEXT_NODE) root = root.parentNode;
   if (!root) return "";
 
   // Some structure has to come with the selection for the result to mean
   // anything: a code block is a fence even when a single token is selected,
-  // and any part of an equation is the equation. Climb to the outermost such
-  // ancestor inside the document.
+  // and any part of an equation or diagram is the whole of it. Climb to the
+  // outermost such ancestor inside the document.
   let target = root;
   for (let node: DomNodeLike | null = root; node && node !== boundary; node = node.parentNode) {
-    if (node.nodeType === ELEMENT_NODE && (isMath(node) || tagOf(node) === "pre")) target = node;
+    if (
+      node.nodeType === ELEMENT_NODE &&
+      (isMath(node) || tagOf(node) === "pre" || diagramOf?.(node))
+    )
+      target = node;
   }
   // Cells from more than one row, or a whole row, are a table — and a table
   // reads with its header, even when the selection started below it.
@@ -536,7 +570,7 @@ export function selectionToMarkdown(bounds: SelectionBounds, boundary?: DomNodeL
     }
   }
 
-  const piece = capture(target, bounds);
+  const piece = capture(target, bounds, diagramOf);
   if (!piece) return "";
   if (piece.kind !== "el") return render(piece).trim();
   if (header && piece.tag === "table" && !piece.children.some((c) => isElement(c, "thead")))

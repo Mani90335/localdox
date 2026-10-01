@@ -5,6 +5,7 @@ import { MindMapBlock } from "@/services/mindmap";
 import { JsonTree } from "../JsonTree";
 import { InteractiveBlock } from "../InteractiveBlock";
 import { extractText } from "./extract-text";
+import { registerDiagramSource } from "@/lib/markdown/diagram-sources";
 
 /**
  * A ```json fence, rendered as a browsable tree with a full-screen control.
@@ -84,7 +85,13 @@ export function CodeBlock({ children, ...rest }: any) {
   // ```mermaid fences hold diagram source. Any fence meta becomes the root's
   // name when the JSON does not carry one.
   if (lang === "mindmap") {
-    return <MindMapBlock code={extractText(codeEl?.props?.children)} title={meta} />;
+    const source = extractText(codeEl?.props?.children);
+    // Registered for copying, as MermaidBlock registers its diagrams.
+    return (
+      <div ref={(el) => registerDiagramSource(el, "mindmap", source)} className="contents">
+        <MindMapBlock code={source} title={meta} />
+      </div>
+    );
   }
 
   if (lang === "interactive-html" || lang === "interactive-react") {

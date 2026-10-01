@@ -173,3 +173,81 @@ test("on a narrow screen the panel is a sheet", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(sheet).toBeHidden();
 });
+
+const FIGURES = [
+  "# Figures",
+  "",
+  "Energy obeys $E = mc^2$ here.",
+  "",
+  "```mermaid",
+  "graph TD",
+  "  A[Start] --> B[End]",
+  "```",
+  "",
+  "After the diagram.",
+].join("\n");
+
+test("a note draws its equations and diagrams, from cache and again after a reload", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "localdox:prefs",
+      JSON.stringify({ name: "Reader", namePrompted: true, aiEnabled: false }),
+    ),
+  );
+  await page.goto("/");
+  await page
+    .locator('input[type="file"]')
+    .first()
+    .setInputFiles({ name: "figures.md", mimeType: "text/markdown", buffer: Buffer.from(FIGURES) });
+  // The document's own equation and diagram are drawn first.
+  await expect(page.locator("article .docs-math-inline .katex")).toHaveCount(1);
+  await expect(page.locator("article svg[id^='mermaid']")).toHaveCount(1);
+
+  await page.locator("article").evaluate((article) => {
+    const paragraphs = [...article.querySelectorAll("p")];
+    const first = paragraphs.find((p) => p.textContent?.startsWith("Energy obeys"))!;
+    const last = paragraphs.find((p) => p.textContent === "After the diagram.")!;
+    const range = document.createRange();
+    range.setStart(first.firstChild!, 0);
+    range.setEnd(last.firstChild!, last.firstChild!.textContent!.length);
+    getSelection()!.removeAllRanges();
+    getSelection()!.addRange(range);
+    first.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  await page.getByRole("button", { name: "Copy selection to notes" }).click();
+  await page.getByRole("button", { name: "Notes", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Notes panel" });
+  const card = panel.getByRole("listitem").first();
+
+  // Stored as source: the LaTeX and a mermaid fence, never the SVG's text.
+  await card.getByRole("button", { name: "Edit note" }).click();
+  await expect(panel.getByRole("textbox", { name: "Note text (Markdown)" })).toHaveValue(
+    "Energy obeys $E = mc^2$ here.\n\n```mermaid\ngraph TD\n  A[Start] --> B[End]\n```\n\nAfter the diagram.",
+  );
+  await panel.getByRole("button", { name: "Cancel" }).click();
+
+  // Drawn in the panel: the equation (a cache hit — the document drew it) and
+  // the diagram (the document's SVG, with ids of its own).
+  await expect(card.locator(".docs-note-math .katex")).toHaveCount(1);
+  await expect(card.locator(".docs-note-diagram svg")).toHaveCount(1);
+  const ids = await page.evaluate(() =>
+    [...document.querySelectorAll("svg[id^='mermaid']")].map((svg) => svg.id),
+  );
+  expect(ids).toHaveLength(2);
+  expect(new Set(ids).size).toBe(2);
+
+  // After a reload every cache is cold: the note's equation is typeset in
+  // idle time and its diagram drawn again.
+  await expect.poll(() => storedNoteCount(page)).toBe(1);
+  await page.reload();
+  const reloaded = page.getByRole("region", { name: "Notes panel" }).getByRole("listitem").first();
+  await expect(reloaded.locator(".docs-note-math .katex")).toHaveCount(1);
+  await expect(reloaded.locator(".docs-note-diagram svg")).toHaveCount(1);
+  await expect(reloaded.locator(".docs-note-math")).toContainText("E");
+  expect(errors).toEqual([]);
+});

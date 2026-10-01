@@ -179,9 +179,8 @@ Panel open/closed is a per-device convenience in `localStorage`
 - **Narrower:** the app's `BottomSheet`. Opening a source link closes the sheet,
   since it would cover the passage.
 - Open with the notebook button in the viewer header (`aria-pressed`). Each
-  note shows its source link, its rendered Markdown (folded past 288px; GFM
-  plus `remark-math` with no typesetter, so equations show as LaTeX source and
-  `\,` or `_` aren't eaten as Markdown escapes or emphasis), when
+  note shows its source link, its rendered Markdown (folded past 288px, with
+  equations and diagrams drawn; see below), when
   it was taken or edited, and Copy / Edit / Delete. Edit opens a Markdown
   textarea: ⌘/Ctrl+Enter saves, Esc cancels. Delete is immediate, with **Undo**
   in the toast. Search matches every word across content, the source's current
@@ -190,6 +189,76 @@ Panel open/closed is a per-device convenience in `localStorage`
   a reload with the panel open doesn't pay React's 300 ms Suspense reveal
   throttle). Cards are memoized, so autosave re-renders don't re-parse every
   note.
+
+## Equations and diagrams in notes
+
+A note stores **source**: `$…$` / `$$…$$` LaTeX, and ```` ```mermaid ```` /
+```` ```mindmap ```` fences. The panel draws them (`note-blocks.tsx`), under one
+rule: it must cost the document nothing. That means no slice of the reader's
+12 ms-per-task math budget, no long frames, no new bundle, and no stored HTML.
+
+**Copying a diagram.** On the page, a diagram is an SVG of node labels plus
+Mermaid's injected stylesheet, which carries a per-render id. Neither is what
+the author wrote. `MermaidBlock` and the mind-map block register their element
+in `lib/markdown/diagram-sources.ts`, a `WeakMap` from element to
+`{ lang, source }`. A `data-` attribute would put a second copy of a
+multi-megabyte source into the DOM. The registering wrapper is
+`display: contents`, so layout is unchanged. `selectionToMarkdown` takes the
+lookup as `diagramOf`. Like an equation, touching any part of a diagram copies
+the whole fence.
+
+**Drawing an equation** (`NoteMath`):
+
+```
+on screen?  (useOnScreen: layout-effect check, then one shared IntersectionObserver)
+  no  → LaTeX source in <code>
+  yes → peekRenderedMath(latex, mode, renderer)   the reader's render cache
+          hit  → markup, in the same commit (no flash of source)
+          miss → idleTypesetter.typeset(…)        services/math/idle-typeset.ts
+                   requestIdleCallback; one KaTeX render at a time while
+                   timeRemaining() > 4 ms (one per timed-out callback)
+                   → renderMathIdle → shared cache → markup
+```
+
+`renderMathIdle` (renderer.ts) is `renderMathSync` without the per-task
+budget. It is never charged to that budget and never refused by it, because
+idle callbacks only run when the browser has nothing else to do. It fills the
+same cache, so the document's own copy of an equation becomes free too. It is
+KaTeX only: an expression KaTeX can't draw stays as source rather than pulling
+in MathJax (~1 MB) for a side panel, unless the document already drew it, in
+which case the cache has it. The cache key includes the reader's renderer
+preference, which DocsApp passes as `mathRenderer`.
+
+**Drawing a diagram** (`NoteDiagram`): only when on screen, in an idle callback,
+through the reader's `renderMermaid` cache. A diagram copied from a document is
+the SVG the document already made. The SVG's id is suffixed per instance,
+because Mermaid scopes its styles and arrowhead markers by that id, and two
+copies on one page would otherwise share or steal them. A diagram the reader
+itself would hand to its GPU engine, flatten to an image, or hold back as too
+heavy (`decideDiagramRender(...) !== "svg"`, or `isRenderedDiagramTooLarge`) is
+shown as source. Mind maps use the reader's `MindMapBlock`, lazily, when on
+screen.
+
+**First render waits for idle.** When the panel is open across a reload, it
+mounts together with the document. The note list renders in an idle callback
+of its own, not in the document's first React task.
+
+### Measured
+
+Production build, 300-equation note copied from a 300-equation document,
+docked panel. Long animation frames ≥30 ms, 3 runs each:
+
+| Step | Before | After |
+| --- | --- | --- |
+| Open the panel (cache hits) | 130 + 69 + 72 ms | none (9 equations drawn: those on screen) |
+| Expand, then scroll all 300 into view | — | none (all 300 drawn) |
+| Reload with panel open (cold caches) | 53–60 ms | none, same as panel closed |
+
+Attribution (Long Animation Frames API): "before" was inserting 300 equations'
+KaTeX markup, mostly hidden behind the fold. The same note shown as source had
+no long frames. On reload, the panel's Markdown parse ran in the same React task
+as the document's first render. After reload, the note's equations appear
+≈665 ms in, once the document has typeset its own.
 
 ## Debugging
 
@@ -200,14 +269,26 @@ Panel open/closed is a per-device convenience in `localStorage`
   the DOM match didn't. Compare `note.source.quote` with the page's rendered
   text (`textBetween`). A different math renderer since copy time changes the
   glyph text.
+- **An equation stays as source.** Off screen (by design); KaTeX can't parse
+  it, or the renderer preference isn't KaTeX and the document hasn't drawn it
+  (`renderMathIdle` returns `undefined`); or KaTeX failed to download.
+  `mathRenderStats()` and `idleTypesetter.pending` show the cache and queue.
+- **A diagram shows "could not be drawn".** `renderMermaid` threw. The same
+  source fails in the reader too. A diagram shown as "Large diagram" was
+  routed away from SVG by `decideDiagramRender`.
 - **Copied Markdown contains UI text.** A component draws chrome without a
   button, `aria-hidden` or `data-viewer-ui`. Mark it, and add a case to
   `tests/notes.test.ts`.
 
 ## Known limits
 
-- Mermaid diagrams, embeds and media copy as nothing. A selection of only those
-  falls back to the plain selected text.
+- Embeds and media copy as nothing. A selection of only those falls back to
+  the plain selected text. Diagrams copy as their fenced source.
+- The panel draws diagrams in Mermaid's own theme. The reader's semantic node
+  colouring is applied by its interactive stage after render, and isn't
+  repeated here.
+- Equations that need MathJax are drawn in a note only if the document has
+  drawn them this session; otherwise they show as LaTeX.
 - Local images (blob URLs) copy as their alt text. The URL dies with the page.
 - With no documents left in the workspace, the empty-workspace screen has no
   viewer, so the Notes panel can't be opened until a document is added.
@@ -221,4 +302,11 @@ Panel open/closed is a per-device convenience in `localStorage`
   two-tab merge, cross-workspace move).
 - `tests/e2e/notes.spec.ts`: select a paragraph and a list on page 2 → copy →
   verify the stored Markdown → reload → search → follow the link from page 1
-  back to the flashed passage. Plus the narrow-screen sheet.
+  back to the flashed passage. Plus the narrow-screen sheet, and a note with an
+  equation and a Mermaid diagram: stored as `$…$` plus a fence, drawn from the
+  cache, drawn again after a reload, with unique SVG ids.
+- `tests/notes-rendering.test.ts` (8 cases): the idle typesetter (nothing
+  outside idle time, deadline respected, guaranteed progress on timeout, one
+  job per equation, KaTeX downloaded first), `renderMathIdle` never spending
+  the reader's budget (a mutation that charges it fails the test), and diagram
+  and mind-map fences in the clean copy.

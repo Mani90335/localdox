@@ -43,9 +43,24 @@ Tests:
   highlighting, persistence, durability, editing, math, long-markdown,
   storage-persistence, search, bundle-journeys all passed; `test:bundles` 10/10.
 
-Known limits: Mermaid/embeds/media copy as nothing; local images copy as alt
-text; MathJax equations copy their MathML text; an empty workspace has no
-viewer to open the panel from.
+Follow-up, same day: equations and diagrams drawn in the panel at no cost to
+the document. Notes read the reader's render caches first; misses typeset in
+`requestIdleCallback` (`services/math/idle-typeset.ts`, `renderMathIdle`),
+never charged to the 12 ms per-task budget. Only equations and diagrams on
+screen are drawn (one shared IntersectionObserver), and the panel's first
+render waits for idle. Diagrams copy as `mermaid`/`mindmap` fences through a
+WeakMap registry (`lib/markdown/diagram-sources.ts`) and draw from the
+`renderMermaid` cache with per-instance SVG ids. Measured, 300-equation note,
+production build: opening the panel went from 130/69/72 ms frames to none;
+expanding and scrolling all 300: none; reload with the panel open: none (as
+with it closed, down from 53–60 ms). +8 unit tests
+(tests/notes-rendering.test.ts), +1 e2e; reader math/diagram/editing/long
+document e2e 39/39; `test:bundles` 10/10.
+
+Known limits: embeds/media copy as nothing; local images copy as alt text;
+MathJax-only equations draw in a note only if the document drew them this
+session; panel diagrams use Mermaid's theme, not the reader's semantic
+colours; an empty workspace has no viewer to open the panel from.
 
 Previous update — 2026-09-29 (D01 part 1 merged with upstream D02/B03/B05: other workspaces are read without bodies and without resetting the open workspace's save cache)
 

@@ -74,6 +74,7 @@ import {
 import type { NoteDraft } from "@/lib/workspace/notes";
 import { locateInSource, sourceLinesForSelection } from "@/lib/markdown/source-locate";
 import { selectionToMarkdown } from "@/lib/markdown/selection-markdown";
+import { diagramSourceOf } from "@/lib/markdown/diagram-sources";
 import { copyText } from "@/lib/workspace/share";
 import {
   fileSubtopics,
@@ -672,7 +673,8 @@ function MarkdownViewerImpl({
       menu.range && !menu.range.collapsed && container.contains(menu.range.commonAncestorContainer)
         ? menu.range
         : buildRange(container, menu.start, menu.end);
-    const content = (range && selectionToMarkdown(range, container)) || menu.text.trim();
+    const content =
+      (range && selectionToMarkdown(range, container, diagramSourceOf)) || menu.text.trim();
 
     // The heading the passage sits under. Paged mode strips each page's own
     // title from the render (it is the masthead), so the page stands in for it.

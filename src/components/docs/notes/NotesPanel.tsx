@@ -5,7 +5,14 @@ import remarkMath from "remark-math";
 import { Check, Copy, FileText, NotebookPen, Pencil, Search, Trash2, X } from "lucide-react";
 import { searchNotes, type Note } from "@/lib/workspace/notes";
 import { copyText } from "@/lib/workspace/share";
-import { hasModKey } from "@/lib/platform/keyboard";
+import {
+  cancelIdleCallbackSafe,
+  hasModKey,
+  requestIdleCallbackSafe,
+} from "@/lib/platform/keyboard";
+import type { MathRendererType } from "@/services/math/types";
+import { NOTE_COMPONENTS } from "./note-components";
+import { NoteRenderContext, type NoteRenderSettings } from "./note-render-context";
 
 /** Whether a note's source document can still be opened. */
 export type NoteSourceState = "live" | "binned" | "missing";
@@ -22,6 +29,8 @@ export interface NotesPanelProps {
   onClose: () => void;
   /** A note just added: scrolled to and marked briefly. */
   freshId?: string | null;
+  /** The reader's math preference, so notes hit the same render cache. */
+  mathRenderer?: MathRendererType;
   /**
    * `docked` is the desktop column, with its own title bar and scroller;
    * `sheet` sits inside a BottomSheet, which supplies both.
@@ -47,8 +56,18 @@ export function NotesPanel({
   onClose,
   freshId,
   variant,
+  mathRenderer = "auto",
 }: NotesPanelProps) {
   const [query, setQuery] = useState("");
+  // The notes themselves are first rendered in an idle period of their own.
+  // When the panel is open across a reload it mounts alongside the document,
+  // and parsing its notes in the same task added a ~45 ms frame to the
+  // document's first render (measured: none with the panel closed).
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const handle = requestIdleCallbackSafe(() => setReady(true), 500);
+    return () => cancelIdleCallbackSafe(handle);
+  }, []);
   const visible = useMemo(() => searchNotes(notes, query, fileName), [notes, query, fileName]);
 
   const search = notes.length > 0 && (
@@ -76,37 +95,37 @@ export function NotesPanel({
     </div>
   );
 
-  const list =
-    notes.length === 0 ? (
-      <div className="flex flex-col items-center px-6 py-14 text-center">
-        <NotebookPen className="mb-3 h-5 w-5 text-muted-foreground" aria-hidden />
-        <p className="text-sm font-medium text-foreground">No notes yet</p>
-        <p className="mt-1.5 max-w-64 text-xs leading-relaxed text-muted-foreground">
-          Select text in a document and choose{" "}
-          <span className="font-medium text-foreground">Copy selection to notes</span>. A note is a
-          copy — editing the document never changes it.
-        </p>
-      </div>
-    ) : visible.length === 0 ? (
-      <p className="px-6 py-10 text-center text-sm text-muted-foreground">
-        No notes match “{query.trim()}”.
+  const list = !ready ? null : notes.length === 0 ? (
+    <div className="flex flex-col items-center px-6 py-14 text-center">
+      <NotebookPen className="mb-3 h-5 w-5 text-muted-foreground" aria-hidden />
+      <p className="text-sm font-medium text-foreground">No notes yet</p>
+      <p className="mt-1.5 max-w-64 text-xs leading-relaxed text-muted-foreground">
+        Select text in a document and choose{" "}
+        <span className="font-medium text-foreground">Copy selection to notes</span>. A note is a
+        copy — editing the document never changes it.
       </p>
-    ) : (
-      <ul className={`space-y-2 ${variant === "docked" ? "px-3 pb-6" : "pb-2"}`} aria-label="Notes">
-        {visible.map((note) => (
-          <NoteCard
-            key={note.id}
-            note={note}
-            name={fileName(note.fileId) ?? note.fileName}
-            state={sourceState(note.fileId)}
-            fresh={note.id === freshId}
-            onOpenSource={onOpenSource}
-            onUpdate={onUpdate}
-            onRemove={onRemove}
-          />
-        ))}
-      </ul>
-    );
+    </div>
+  ) : visible.length === 0 ? (
+    <p className="px-6 py-10 text-center text-sm text-muted-foreground">
+      No notes match “{query.trim()}”.
+    </p>
+  ) : (
+    <ul className={`space-y-2 ${variant === "docked" ? "px-3 pb-6" : "pb-2"}`} aria-label="Notes">
+      {visible.map((note) => (
+        <NoteCard
+          key={note.id}
+          note={note}
+          name={fileName(note.fileId) ?? note.fileName}
+          state={sourceState(note.fileId)}
+          fresh={note.id === freshId}
+          mathRenderer={mathRenderer}
+          onOpenSource={onOpenSource}
+          onUpdate={onUpdate}
+          onRemove={onRemove}
+        />
+      ))}
+    </ul>
+  );
 
   if (variant === "sheet") {
     return (
@@ -157,9 +176,9 @@ function when(at: number, now = Date.now()): string {
 }
 
 /**
- * GFM for tables and task lists; remark-math so `$…$` is parsed as math and
- * shown as its LaTeX source in a code span. Rendered as plain Markdown, `\,`
- * and `_` inside an equation would be eaten as escapes and emphasis.
+ * GFM for tables and task lists; remark-math so `$…$` is parsed as math (and
+ * drawn by note-blocks.tsx). Read as plain Markdown, `\,` and `_` inside an
+ * equation would be eaten as escapes and emphasis.
  */
 const NOTE_PLUGINS = [remarkGfm, remarkMath];
 
@@ -176,6 +195,7 @@ const NoteCard = memo(function NoteCard({
   name,
   state,
   fresh,
+  mathRenderer,
   onOpenSource,
   onUpdate,
   onRemove,
@@ -184,6 +204,7 @@ const NoteCard = memo(function NoteCard({
   name: string;
   state: NoteSourceState;
   fresh: boolean;
+  mathRenderer: MathRendererType;
   onOpenSource: (note: Note) => void;
   onUpdate: (id: string, content: string) => void;
   onRemove: (id: string) => void;
@@ -200,11 +221,43 @@ const NoteCard = memo(function NoteCard({
     if (fresh) cardRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [fresh]);
 
+  // Equations and diagrams are drawn only for notes on (or near) screen, so a
+  // long list costs what is visible. Once drawn, a note stays drawn.
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!card || typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        setVisible(true);
+        observer.disconnect();
+      },
+      { rootMargin: "300px 0px" },
+    );
+    observer.observe(card);
+    return () => observer.disconnect();
+  }, []);
+  const render = useMemo<NoteRenderSettings>(
+    () => ({ renderer: mathRenderer, visible }),
+    [mathRenderer, visible],
+  );
+
   // Measured rather than guessed from the text: a short note with a table or
-  // an image can be taller than a long paragraph.
+  // an image can be taller than a long paragraph — and an equation or diagram
+  // changes its height when it is drawn, so it is watched, not measured once.
   useLayoutEffect(() => {
     const body = bodyRef.current;
-    if (body) setOverflows(body.scrollHeight > FOLDED_HEIGHT + 24);
+    if (!body) return;
+    const measure = () => setOverflows(body.scrollHeight > FOLDED_HEIGHT + 24);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    for (const child of body.children) observer.observe(child);
+    return () => observer.disconnect();
   }, [note.content, draft]);
 
   useEffect(() => {
@@ -300,7 +353,11 @@ const NoteCard = memo(function NoteCard({
             className="docs-note relative overflow-hidden"
             style={!expanded && overflows ? { maxHeight: FOLDED_HEIGHT } : undefined}
           >
-            <ReactMarkdown remarkPlugins={NOTE_PLUGINS}>{note.content}</ReactMarkdown>
+            <NoteRenderContext.Provider value={render}>
+              <ReactMarkdown remarkPlugins={NOTE_PLUGINS} components={NOTE_COMPONENTS}>
+                {note.content}
+              </ReactMarkdown>
+            </NoteRenderContext.Provider>
             {!expanded && overflows && (
               <div
                 aria-hidden
