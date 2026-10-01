@@ -6,7 +6,16 @@ import {
   convertedAnchorMap,
   convertedFootnotes,
 } from "@/services/doc-conversion";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { createPortal } from "react-dom";
 import { ProgressiveMarkdown } from "./markdown-viewer/ProgressiveMarkdown";
 import { markdownComponents } from "./markdown-viewer/markdown-components";
@@ -950,6 +959,21 @@ function MarkdownViewerImpl({
     });
     if (hit) openEditMenu(hit.hl, e.clientX, e.clientY);
   };
+
+  // Keep the whole menu on screen. It opens at the selection and grows down,
+  // so a selection near the bottom of the window (the last lines of a
+  // document, which can't scroll any higher) pushed its lower rows — Save,
+  // Highlight, Copy selection to notes — past the edge, out of reach. Measured
+  // before paint, so it never appears in the wrong place first.
+  useLayoutEffect(() => {
+    const element = menuRef.current;
+    if (!menu || !element) return;
+    const margin = 8;
+    const { height } = element.getBoundingClientRect();
+    const top = parseFloat(element.style.top) || 0;
+    const fits = Math.max(margin, Math.min(top, window.innerHeight - height - margin));
+    if (fits !== top) element.style.top = `${fits}px`;
+  }, [menu]);
 
   // Close the menu on outside click / Escape (but keep it open while the reader
   // interacts with the popover itself).
