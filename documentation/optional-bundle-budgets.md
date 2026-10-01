@@ -27,6 +27,7 @@ contains a math label. These prerequisites matter when interpreting the totals.
 | First XLSX | 156.6 | 156.6 | 180 |
 | First interactive React example | 764.7 | 764.7 | 840 |
 | First math keyboard | 215.0 | 215.0 | 240 |
+| First Compute result (added 2026-10-01; macOS, Chromium) | — | 292.3 | 320 |
 
 The gate sums decoded JS/MJS/WASM responses recompressed independently with
 Node's default `gzipSync`. It includes dedicated-worker requests through the

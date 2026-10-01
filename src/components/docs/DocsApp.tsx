@@ -75,6 +75,7 @@ import { MoveToBinDialog, type BinRequest } from "./workspace/MoveToBinDialog";
 import { NothingHere } from "./docs-app/NothingHere";
 import {
   NotesPanel,
+  type ComputeProps,
   type InsertRequest,
   type InsertTarget,
   type NoteSourceState,
@@ -196,6 +197,7 @@ import {
   insertIntoDocument,
   insertionPoints,
   linkScratchpad,
+  MAX_SCRATCHPAD_CHARS,
   newScratchpadId,
   noteFromScratchpad,
   pageAt,
@@ -2385,7 +2387,7 @@ flowchart LR
   useEffect(() => {
     try {
       const tab = localStorage.getItem(NOTES_TAB_KEY);
-      if (tab === "notes" || tab === "rough") setNotesTab(tab);
+      if (tab === "notes" || tab === "rough" || tab === "compute") setNotesTab(tab);
       setActivePadId(localStorage.getItem(ROUGH_PAD_KEY));
     } catch {
       // Storage blocked: Notes, and the most recent pad.
@@ -2523,6 +2525,45 @@ flowchart LR
       });
     },
     [markDirty],
+  );
+
+  /**
+   * A computed result, added to the end of the scratchpad Rough work shows
+   * (or to a new one, linked to the open document). A copy: the result stays
+   * in Compute, and no document changes.
+   */
+  const appendToRoughWork = useCallback(
+    (markdown: string) => {
+      const pads = sortScratchpads(snapshotRef.current.scratchpads, readerFile()?.id ?? null);
+      const target = pads.find((p) => p.id === activePadId) ?? pads[0];
+      const append = (content: string) =>
+        insertIntoDocument(content, markdown, content.length).content;
+      let title: string;
+      if (target) {
+        if (append(target.content).length > MAX_SCRATCHPAD_CHARS) {
+          toast.error(`“${target.title}” is full`, {
+            id: "compute-rough",
+            description: "Nothing was added. Start a new scratchpad for more.",
+          });
+          return;
+        }
+        updateScratchpad(target.id, (pad) => editScratchpad(pad, append(pad.content)));
+        setActivePadId(target.id);
+        title = target.title;
+      } else {
+        const pad = createScratchpad([], readerFile());
+        setScratchpads((prev) => [...prev, { ...pad, content: append("") }]);
+        setActivePadId(pad.id);
+        markDirty();
+        title = pad.title;
+      }
+      toast.success(`Added to “${title}”`, {
+        id: "compute-rough",
+        description: "A copy: the result stays in Compute.",
+        action: { label: "Show", onClick: () => setNotesTab("rough") },
+      });
+    },
+    [activePadId, markDirty, readerFile, updateScratchpad],
   );
 
   const openPadDocument = useCallback(
@@ -3761,6 +3802,15 @@ flowchart LR
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeFile?.id, activeFile?.name, activeFile?.deletedAt],
   );
+  const compute = useMemo<ComputeProps>(
+    () => ({
+      onAddToRoughWork: appendToRoughWork,
+      insertTarget: roughInsertTarget,
+      onInsert: insertRoughWork,
+    }),
+    [appendToRoughWork, roughInsertTarget, insertRoughWork],
+  );
+
   const roughWork = useMemo<RoughWorkProps>(
     () => ({
       scratchpads: sortScratchpads(scratchpads, readerFileForPads?.id ?? null),
@@ -4856,6 +4906,7 @@ flowchart LR
                     tab={notesTab}
                     onTabChange={setNotesTab}
                     roughWork={roughWork}
+                    compute={compute}
                   />
                 </LazyBoundary>
               </aside>
@@ -4879,6 +4930,7 @@ flowchart LR
                   tab={notesTab}
                   onTabChange={setNotesTab}
                   roughWork={roughWork}
+                  compute={compute}
                 />
               </LazyBoundary>
             </BottomSheet>

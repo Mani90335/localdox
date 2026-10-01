@@ -157,7 +157,9 @@ Storage all agree.
 
 ## UI
 
-- Tabs at the top of the panel (`role="tablist"`, ← → to switch). The tab
+- Tabs at the top of the panel (`role="tablist"`, ← → to switch; the third,
+  **Compute**, can append a computed result to the open pad with **Add to rough
+  work**, see math-compute.md). The tab
   and the open pad are per-device conveniences in `localStorage`
   (`localdox:notes-tab`, `localdox:rough-pad`), like the panel's open state.
 - Pad picker (the title, with a chevron), **+** for a new pad, **⋯** for

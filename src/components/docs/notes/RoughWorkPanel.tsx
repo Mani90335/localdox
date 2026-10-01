@@ -50,7 +50,8 @@ export interface InsertTarget {
 }
 
 export interface InsertRequest {
-  padId: string;
+  /** The scratchpad it came from; none for a computed result. */
+  padId?: string;
   markdown: string;
   fileId: string;
   point: InsertionPoint;
@@ -526,10 +527,10 @@ const PreviewSegment = memo(function PreviewSegment({ source }: { source: string
 });
 
 /**
- * The one place rough work reaches a document: shown exactly what goes in and
- * where, and inserted only on an explicit Insert.
+ * The one place rough work (and a computed result) reaches a document: shown
+ * exactly what goes in and where, and inserted only on an explicit Insert.
  */
-function InsertDialog({
+export function InsertDialog({
   request,
   mathRenderer,
   onCancel,

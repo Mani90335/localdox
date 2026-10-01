@@ -3,6 +3,7 @@ import type { NotesPanelProps } from "./NotesPanel";
 
 export type { NoteSourceState, NotesTab } from "./NotesPanel";
 export type { InsertRequest, InsertTarget, RoughWorkProps } from "./RoughWorkPanel";
+export type { ComputeProps } from "./ComputePanel";
 
 /**
  * The Notes panel, downloaded the first time it opens. It renders Markdown,

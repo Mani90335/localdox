@@ -1,4 +1,40 @@
-Latest update — 2026-10-01 (Rough work: math scratchpads in the Notes panel)
+Latest update — 2026-10-01 (Math Compute: an on-device math engine in the Notes panel)
+
+The Notes panel has a third tab, **Compute**: Evaluate, Simplify, Numeric
+value and Solve for an unknown, on LaTeX or plain text, in a Web Worker, and
+offline once used. Results show their input, operation, exact value, decimal
+and conditions, and reach rough work or a document only through explicit
+actions (Copy, Add to rough work, Insert into document… with the Rough work
+insert dialog). Details: documentation/math-compute.md.
+
+- Engine: @cortex-js/compute-engine 0.58.0 (MIT), already installed as
+  MathLive's pinned dependency, now a direct dependency at the same version.
+  It is bundled only into `compute.worker` (291.0 KiB gzip). The compute
+  journey costs 292.3 KiB (ceiling 320), and the Notes panel chunk grows
+  6.2 KiB gzip. A build check asserts the engine is in no page chunk.
+- `services/compute/`: `input.ts` (strict plain-text → LaTeX; ambiguous names,
+  inequalities, environments refused with reasons), `engine.ts` (routing,
+  exact-vs-decimal rules, verified factored forms, domain notes, checked
+  solutions), `polynomial.ts` (rational form + Aberth roots + verified
+  multiplicity: polynomial and rational equations solved completely, poles
+  excluded), `compute-client.ts` (queue, LRU cache, 8 s hard limit over the
+  engine's 4 s one, cancellation by terminating the worker, failed-load and
+  no-Worker states), `result-markdown.ts`.
+- Engine gaps found and covered by our own layer, each a unit test: its
+  `solve` returns nothing for x³+x+1=0 and (x²−1)/(x−1)=0, ∞ for 1/x=0, and
+  only 3 for |x|=3; its `Together` gets 1/x + 1/(x−1) wrong; its `Factor`
+  gives (x√x−1)(x√x+1) for x³−1; and it reads `sqrt(8)` as 8·q·r·s·t.
+
+Tests: tests/compute-engine.test.ts (14, real engine; every result rendered by
+KaTeX), tests/compute-client.test.ts (9), tests/e2e/compute.spec.ts (5;
+15/15 with --repeat-each=3), and the bundle journey plus a worker-only check. Unit
+557 pass / 0 fail (559 total, 2 skipped). E2E on a private-port production
+build: compute, rough-work, notes, addressing, bundle-journeys 31/31. While
+the engine computes 100000! (~1 s), the page records no long task; the test
+proves its observer works with a 120 ms block first. tsc: only the pre-existing
+__root.tsx error. eslint: no errors (12 existing warnings in DocsApp).
+
+Previous update — 2026-10-01 (Rough work: math scratchpads in the Notes panel)
 
 The Notes panel has two tabs, **Notes** and **Rough work**. A scratchpad is
 private working space for equations and intermediate steps: Markdown with

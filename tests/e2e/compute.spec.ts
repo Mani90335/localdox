@@ -1,0 +1,292 @@
+import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+
+// The Compute tab end to end: a result computed in a worker is shown beside
+// its input, copied, added to rough work and inserted into a document, each
+// only when asked (an insertion only after its confirmation). Plus solving,
+// labelled failures, cancellation, a responsive page while the engine works,
+// and (production build) computing offline once the engine has loaded.
+
+const GUIDE = "# Field guide\n\nOpening words of the guide.\n";
+
+test.beforeEach(async ({ context }) => {
+  await context.addInitScript(() => {
+    localStorage.setItem(
+      "localdox:prefs",
+      JSON.stringify({ name: "Reader", namePrompted: true, aiEnabled: false }),
+    );
+  });
+});
+
+async function openGuide(page: Page) {
+  await page.goto("/");
+  await page
+    .locator('input[type="file"]')
+    .first()
+    .setInputFiles({ name: "guide.md", mimeType: "text/markdown", buffer: Buffer.from(GUIDE) });
+  await expect(page.locator("article h1").first()).toBeVisible();
+}
+
+interface Stored {
+  files: Array<{ name: string; content: string }>;
+  scratchpads: Array<{ title: string; content: string }>;
+}
+
+/** What IndexedDB holds for the (only) workspace right now. */
+function stored(page: Page) {
+  return page.evaluate(
+    () =>
+      new Promise<Stored>((resolve, reject) => {
+        const open = indexedDB.open("localdox");
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction(["workspaces", "files"], "readonly");
+          const workspaces = tx.objectStore("workspaces").getAll();
+          const files = tx.objectStore("files").getAll();
+          tx.oncomplete = () => {
+            db.close();
+            resolve({ files: files.result, scratchpads: workspaces.result[0]?.scratchpads ?? [] });
+          };
+        };
+      }),
+  );
+}
+
+const panel = (page: Page) => page.getByRole("region", { name: "Notes panel" });
+const field = (page: Page) => panel(page).getByRole("textbox", { name: /^Expression or equation/ });
+const button = (page: Page, name: string) => panel(page).getByRole("button", { name, exact: true });
+
+async function openCompute(page: Page) {
+  await page.getByRole("button", { name: "Notes", exact: true }).click();
+  await page.getByRole("tab", { name: "Compute" }).click();
+  await expect(field(page)).toBeVisible();
+}
+
+test("evaluate, copy, add to rough work, then insert into the document only when confirmed", async ({
+  page,
+  context,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openGuide(page);
+  await openCompute(page);
+
+  await field(page).fill("1/2 + 1/3");
+  // How the input reads, drawn, before anything is computed.
+  await expect(panel(page).locator("#compute-reading .katex")).toBeVisible();
+  await button(page, "Evaluate").click();
+
+  const result = panel(page).getByRole("region", { name: "Evaluate result" });
+  await expect(result).toBeVisible();
+  // Input, exact result and decimal, each drawn by the app's math renderer.
+  await expect(result.locator(".katex")).toHaveCount(3);
+  await expect(result).toContainText("0.833333333333");
+  // What was typed is untouched by the result.
+  await expect(field(page)).toHaveValue("1/2 + 1/3");
+
+  const markdown = "$$\n1/2+1/3 = \\frac{5}{6} \\approx 0.833333333333\n$$";
+  await result.getByRole("button", { name: "Copy" }).click();
+  await expect(result.getByRole("button", { name: "Copied" })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(markdown);
+
+  // Computing, copying: no document or scratchpad changed.
+  expect((await stored(page)).files.map((f) => f.content)).toEqual([GUIDE]);
+  expect((await stored(page)).scratchpads).toEqual([]);
+
+  await result.getByRole("button", { name: "Add to rough work" }).click();
+  await expect(page.getByText("Added to “Scratchpad”")).toBeVisible();
+  await expect
+    .poll(async () => (await stored(page)).scratchpads.map((p) => p.content))
+    .toEqual([`${markdown}\n`]);
+  // Still only rough work: the document is as it was.
+  expect((await stored(page)).files.map((f) => f.content)).toEqual([GUIDE]);
+
+  await page.getByRole("tab", { name: "Rough work" }).click();
+  const pad = panel(page).locator("textarea[id^='scratchpad-']");
+  await expect(pad).toHaveValue(`${markdown}\n`);
+  await expect(panel(page).getByRole("region", { name: "Preview" }).locator(".katex")).toHaveCount(
+    1,
+  );
+
+  // The insertion shows what goes in, and Cancel changes nothing.
+  await panel(page).getByRole("button", { name: "Insert into document…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Insert into “guide.md”?" });
+  await expect(dialog.locator(".katex")).toHaveCount(1);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+  expect((await stored(page)).files.map((f) => f.content)).toEqual([GUIDE]);
+
+  await panel(page).getByRole("button", { name: "Insert into document…" }).click();
+  await dialog.getByRole("button", { name: "Insert", exact: true }).click();
+  await expect
+    .poll(async () => (await stored(page)).files.map((f) => f.content))
+    .toEqual([`${GUIDE}\n${markdown}\n`]);
+  await expect(page.locator("article .katex-display")).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
+test("a result goes straight into the document too, but only after its confirmation", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openGuide(page);
+  await openCompute(page);
+  await field(page).fill("x^2 - 5x + 6 = 0");
+  await button(page, "Solve").click();
+  const result = panel(page).getByRole("region", { name: "Solve result" });
+  await expect(result.getByRole("listitem")).toHaveCount(2);
+  await expect(result).toContainText("Solutions");
+
+  await result.getByRole("button", { name: "Insert into document…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Insert into “guide.md”?" });
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  expect((await stored(page)).files.map((f) => f.content)).toEqual([GUIDE]);
+
+  await result.getByRole("button", { name: "Insert into document…" }).click();
+  await dialog.getByRole("button", { name: "Insert", exact: true }).click();
+  await expect
+    .poll(async () => (await stored(page)).files[0].content)
+    .toBe(`${GUIDE}\n$$\nx^{2}-5x+6=0 \\quad\\Longrightarrow\\quad x = 3,\\quad x = 2\n$$\n`);
+  // Inserting from Compute makes no scratchpad.
+  expect((await stored(page)).scratchpads).toEqual([]);
+});
+
+test("unsupported and invalid input is labelled; a choice of unknown is asked for", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openGuide(page);
+  await openCompute(page);
+
+  await field(page).fill("\\int_0^1 x\\,dx");
+  await button(page, "Evaluate").click();
+  await expect(
+    panel(page).getByRole("region", { name: "Evaluate: Not supported yet" }),
+  ).toContainText("Integrals aren't supported yet");
+
+  await field(page).fill("x +");
+  await button(page, "Simplify").click();
+  await expect(
+    panel(page).getByRole("region", { name: "Simplify: Can't read this" }),
+  ).toBeVisible();
+
+  // An equation asked to evaluate offers Solve instead.
+  await field(page).fill("2x + 3 = 7");
+  await button(page, "Evaluate").click();
+  await panel(page).getByRole("button", { name: "Solve instead" }).click();
+  await expect(panel(page).getByRole("region", { name: "Solve result" })).toContainText("x=2");
+
+  await field(page).fill("a x + b = 0");
+  await button(page, "Solve").click();
+  const choose = panel(page).getByRole("region", { name: "Solve: Choose an unknown" });
+  await choose.getByRole("button", { name: "Solve for x" }).click();
+  const result = panel(page).getByRole("region", { name: "Solve result" });
+  await expect(result).toContainText("Treats");
+  await expect(result).toContainText("Assumes");
+  await expect(panel(page).getByRole("textbox", { name: /^Unknown to solve for/ })).toHaveValue(
+    "x",
+  );
+
+  // Escape clears the result, and the panel stays open.
+  await field(page).press("Escape");
+  await expect(result).toBeHidden();
+  await expect(field(page)).toBeVisible();
+});
+
+test("the engine works in a worker: the page stays responsive, and a long computation can be cancelled", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const tasks: number[] = [];
+    (window as unknown as { __longTasks: number[] }).__longTasks = tasks;
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) tasks.push(Math.round(entry.duration));
+    }).observe({ type: "longtask", buffered: true });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openGuide(page);
+  await openCompute(page);
+  // Load the engine first, so what follows measures computing alone.
+  await field(page).fill("2 + 2");
+  await button(page, "Evaluate").click();
+  await expect(panel(page).getByRole("region", { name: "Evaluate result" })).toBeVisible();
+
+  const longest = () =>
+    page.evaluate(() =>
+      Math.max(0, ...(window as unknown as { __longTasks: number[] }).__longTasks),
+    );
+  // The observer sees a task the page blocks itself, so a small number below means none.
+  await page.evaluate(() => {
+    setTimeout(() => {
+      const end = performance.now() + 120;
+      while (performance.now() < end);
+    });
+  });
+  await expect.poll(longest).toBeGreaterThanOrEqual(100);
+  await page.evaluate(
+    () => ((window as unknown as { __longTasks: number[] }).__longTasks.length = 0),
+  );
+
+  // About a second of work for the engine (exact 100000!, then its decimal).
+  await field(page).fill("100000!");
+  await button(page, "Evaluate").click();
+  await expect(panel(page).getByText("Computing…")).toBeVisible();
+  // Typing goes on while it computes.
+  await panel(page)
+    .getByRole("textbox", { name: /^Unknown to solve for/ })
+    .pressSequentially("x");
+  // Too long to show exactly (456,574 digits), so its decimal alone.
+  await expect(panel(page).getByRole("region", { name: "Evaluate result" })).toContainText(
+    "2.82422940796",
+    { timeout: 30_000 },
+  );
+  // On the page's own thread this would be one task of a second or more.
+  expect(await longest()).toBeLessThan(250);
+
+  await field(page).fill("400000!");
+  await button(page, "Evaluate").click();
+  await expect(panel(page).getByText("Computing…")).toBeVisible();
+  await panel(page).getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(panel(page).getByRole("region", { name: "Evaluate: Cancelled" })).toBeVisible();
+  // A fresh engine serves the next request.
+  await field(page).fill("6 * 7");
+  await button(page, "Evaluate").click();
+  await expect(panel(page).getByRole("region", { name: "Evaluate result" })).toContainText("42");
+});
+
+/** No network, as offline.spec.ts does it: offline, HTTP cache off, every request aborted. */
+async function goOffline(context: BrowserContext, page: Page) {
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Network.enable");
+  await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+  await context.setOffline(true);
+  await context.route("**/*", (route) => route.abort("internetdisconnected"));
+}
+
+test("once loaded, Compute works offline after a reload", async ({ page, context }) => {
+  test.skip(!process.env.PLAYWRIGHT_PRODUCTION, "The service worker exists only in the build");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openGuide(page);
+  await page.waitForFunction(() => !!navigator.serviceWorker?.controller, null, {
+    timeout: 30_000,
+  });
+  await openCompute(page);
+  await field(page).fill("1/2 + 1/3");
+  await button(page, "Evaluate").click();
+  await expect(panel(page).getByRole("region", { name: "Evaluate result" })).toBeVisible();
+  // Let the service worker store what this first use fetched.
+  await page.waitForTimeout(500);
+
+  await goOffline(context, page);
+  await page.reload();
+  await expect(page.locator("article h1").first()).toBeVisible();
+  // The panel and its tab come back; the engine starts from the cache.
+  await expect(page.getByRole("tab", { name: "Compute" })).toHaveAttribute("aria-selected", "true");
+  await field(page).fill("x^2 = 2");
+  await button(page, "Solve").click();
+  const result = panel(page).getByRole("region", { name: "Solve result" });
+  await expect(result.getByRole("listitem")).toHaveCount(2);
+  await expect(result).toContainText("1.41421356237");
+});

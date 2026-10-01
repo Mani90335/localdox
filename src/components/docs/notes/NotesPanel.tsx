@@ -22,11 +22,12 @@ import type { MathRendererType } from "@/services/math/types";
 import { NOTE_COMPONENTS, NOTE_PLUGINS } from "./note-components";
 import { NoteRenderContext, type NoteRenderSettings } from "./note-render-context";
 import { RoughWorkPanel, type RoughWorkProps } from "./RoughWorkPanel";
+import { ComputePanel, type ComputeProps } from "./ComputePanel";
 
 /** Whether a note's source document can still be opened. */
 export type NoteSourceState = "live" | "binned" | "missing";
 
-export type NotesTab = "notes" | "rough";
+export type NotesTab = "notes" | "rough" | "compute";
 
 export interface NotesPanelProps {
   /** Newest first. */
@@ -51,6 +52,8 @@ export interface NotesPanelProps {
   onTabChange: (tab: NotesTab) => void;
   /** The Rough work tab (see RoughWorkPanel). */
   roughWork: RoughWorkProps;
+  /** The Compute tab (see ComputePanel). */
+  compute: ComputeProps;
 }
 
 /**
@@ -75,6 +78,7 @@ export function NotesPanel({
   tab,
   onTabChange,
   roughWork,
+  compute,
 }: NotesPanelProps) {
   const [query, setQuery] = useState("");
   // The notes themselves are first rendered in an idle period of their own.
@@ -162,6 +166,10 @@ export function NotesPanel({
   const rough = ready && (
     <RoughWorkPanel {...roughWork} mathRenderer={mathRenderer} variant={variant} />
   );
+  const computeTab = ready && (
+    <ComputePanel {...compute} mathRenderer={mathRenderer} variant={variant} />
+  );
+  const other = tab === "rough" ? rough : computeTab;
   const panel = (children: React.ReactNode) => (
     <div id={`notes-tabpanel-${tab}`} role="tabpanel" aria-labelledby={`notes-tab-${tab}`}>
       {children}
@@ -176,7 +184,7 @@ export function NotesPanel({
           {tabs}
           {tab === "notes" && search}
         </div>
-        {panel(tab === "notes" ? list : rough)}
+        {panel(tab === "notes" ? list : other)}
       </div>
     );
   }
@@ -188,7 +196,7 @@ export function NotesPanel({
         {list}
       </>
     ) : (
-      rough
+      other
     ),
   );
 
@@ -211,11 +219,11 @@ export function NotesPanel({
   );
 }
 
-const TAB_ORDER: NotesTab[] = ["notes", "rough"];
+const TAB_ORDER: NotesTab[] = ["notes", "rough", "compute"];
 
 /**
- * Notes and Rough work: one panel, two kinds of the reader's own writing.
- * Arrow keys move between the tabs, as in any tablist.
+ * Notes, Rough work and Compute: one panel for the reader's own working.
+ * Arrow keys move between the tabs (wrapping), as in any tablist.
  */
 function PanelTabs({
   tab,
@@ -230,7 +238,8 @@ function PanelTabs({
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
-    const next = TAB_ORDER[(TAB_ORDER.indexOf(tab) + 1) % TAB_ORDER.length];
+    const step = event.key === "ArrowRight" ? 1 : TAB_ORDER.length - 1;
+    const next = TAB_ORDER[(TAB_ORDER.indexOf(tab) + step) % TAB_ORDER.length];
     onTabChange(next);
     refs.current[next]?.focus();
   };
@@ -264,6 +273,7 @@ function PanelTabs({
     >
       {item("notes", "Notes", noteCount)}
       {item("rough", "Rough work")}
+      {item("compute", "Compute")}
     </div>
   );
 }

@@ -185,8 +185,9 @@ Panel open/closed is a per-device convenience in `localStorage`
 
 ## UI
 
-The panel has two tabs: **Notes** and **Rough work** (scratchpads; see
-rough-work.md). A note saved from rough work carries `origin` instead of a
+The panel has three tabs: **Notes**, **Rough work** (scratchpads; see
+rough-work.md) and **Compute** (an on-device math engine; see
+math-compute.md). A note saved from rough work carries `origin` instead of a
 source passage, and its link opens the scratchpad.
 
 - **Desktop (≥1024px):** a docked column (`w-80`, `xl:w-88`) right of the

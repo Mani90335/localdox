@@ -22,13 +22,14 @@ const budgets = {
   spreadsheet: 180,
   interactive: 840,
   keyboard: 240,
+  compute: 320,
 } as const;
 type Journey = keyof typeof budgets;
 const optional =
-  /(?:compiler\.worker|mathlive\.min|spreadsheet\.worker|pdf(?:\.worker)?-|anydoc_wasm|conversion\.worker|mermaid\.core|media-bundle|react-dom-server|katex-[^.]+\.js)/;
+  /(?:compiler\.worker|compute\.worker|mathlive\.min|spreadsheet\.worker|pdf(?:\.worker)?-|anydoc_wasm|conversion\.worker|mermaid\.core|media-bundle|react-dom-server|katex-[^.]+\.js)/;
 type ReportFile = { file: string; modules?: string[] };
 const capabilityModules =
-  /node_modules\/(?:@babel\/standalone|mathlive|xlsx|pdfjs-dist|mermaid|katex)\//;
+  /node_modules\/(?:@babel\/standalone|@cortex-js\/compute-engine|mathlive|xlsx|pdfjs-dist|mermaid|katex)\//;
 
 async function upload(page: Page, name: string, source: string) {
   await page
@@ -117,10 +118,15 @@ for (const journey of Object.keys(budgets) as Journey[]) {
       ).toEqual([]);
     }
 
-    if (["edit", "export", "keyboard"].includes(journey)) {
+    if (["edit", "export", "keyboard", "compute"].includes(journey)) {
       await upload(page, "budget.md", "# Budget note\n\nA **complete** note with $E=mc^2$.\n");
       await expect(page.locator("article .katex")).toHaveCount(1);
       if (journey === "keyboard") await edit(page);
+      // The Notes panel itself is a prerequisite; the engine is the feature.
+      if (journey === "compute") {
+        await page.getByRole("button", { name: "Notes", exact: true }).click();
+        await expect(page.getByRole("tab", { name: "Compute" })).toBeVisible();
+      }
       await page.waitForLoadState("networkidle");
       await traffic.finish();
     }
@@ -204,6 +210,14 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         await page.getByRole("button", { name: "Insert equation", exact: true }).click();
         await expect(page.locator("math-field")).toBeVisible();
         break;
+      case "compute":
+        await page.getByRole("tab", { name: "Compute" }).click();
+        await page.getByRole("textbox", { name: /^Expression or equation/ }).fill("1/2 + 1/3");
+        await page.getByRole("button", { name: "Evaluate", exact: true }).click();
+        await expect(page.getByRole("region", { name: "Evaluate result" })).toContainText(
+          "0.833333333333",
+        );
+        break;
     }
     await page.waitForLoadState("networkidle");
     const rows = await traffic.finish();
@@ -244,6 +258,7 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         spreadsheet: /spreadsheet\.worker/,
         interactive: /compiler\.worker/,
         keyboard: /mathlive\.min/,
+        compute: /compute\.worker/,
         diagram: /katex-[^.]+\.js$/,
       };
       if (required[journey])
@@ -266,4 +281,19 @@ test("build contains one shared KaTeX implementation", async () => {
   expect(implementations).toHaveLength(1);
   const sw = await readFile(".output/public/sw.js", "utf8");
   expect(sw).not.toContain("bundle-report.json");
+});
+
+test("the math engine ships only inside its worker", async () => {
+  const report = JSON.parse(await readFile(".output/public/bundle-report.json", "utf8"));
+  // Page chunks list their modules; the engine must be in none of them.
+  const onPage = report.files.filter((file: ReportFile) =>
+    (file.modules ?? []).some((id) => id.includes("/@cortex-js/compute-engine/")),
+  );
+  expect(onPage.map((file: ReportFile) => file.file)).toEqual([]);
+  const worker = report.files.filter((file: ReportFile) => /compute\.worker/.test(file.file));
+  expect(worker).toHaveLength(1);
+  // Precached only once used (or downloaded on request), like other optional engines.
+  const sw = await readFile(".output/public/sw.js", "utf8");
+  const manifest = JSON.parse(sw.slice(sw.indexOf("=") + 1, sw.indexOf(";\n")));
+  expect(manifest.shell.filter((url: string) => /compute\.worker/.test(url))).toEqual([]);
 });
