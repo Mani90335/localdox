@@ -10,6 +10,7 @@ import {
 import { flushSync } from "react-dom";
 import ReactMarkdown, { type Components, type Options, type UrlTransform } from "react-markdown";
 import rehypeSlug from "rehype-slug";
+import { SegmentLineContext } from "./contexts";
 import {
   rehypeSegmentSlug,
   splitMarkdownSegments,
@@ -163,9 +164,11 @@ const Segment = memo(function Segment({
   );
   return (
     <>
-      <ReactMarkdown rehypePlugins={plugins} {...rest}>
-        {segments.sources[index]}
-      </ReactMarkdown>
+      <SegmentLineContext.Provider value={segments.lineOffsets?.[index] ?? 0}>
+        <ReactMarkdown rehypePlugins={plugins} {...rest}>
+          {segments.sources[index]}
+        </ReactMarkdown>
+      </SegmentLineContext.Provider>
       {/* A single render puts a newline text node between blocks; this is the
           one the cut removed. Text offsets (highlights, saved passages) count
           it, so they match either way. */}

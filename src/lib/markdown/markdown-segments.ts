@@ -49,6 +49,8 @@ export interface MarkdownSegments {
   sources: string[];
   /** Characters of the original document in each segment (excludes shared definitions). */
   sizes: number[];
+  /** Zero-based source line adjustment, excluding prepended definitions. */
+  lineOffsets?: number[];
   /**
    * The base slugs each segment's headings claimed, in order, written by
    * `rehypeSegmentSlug` as the segment renders.
@@ -207,7 +209,8 @@ export function splitMarkdownSegments(source: string): MarkdownSegments {
     sizes.push(body.length);
   }
 
-  return { sources, sizes, slugs: [] };
+  const sharedLines = shared ? shared.split("\n").length - 1 : 0;
+  return { sources, sizes, slugs: [], lineOffsets: cuts.map((line) => line - sharedLines) };
 }
 
 interface HastNode {

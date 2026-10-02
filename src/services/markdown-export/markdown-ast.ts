@@ -291,10 +291,10 @@ function parseList(state: ParseState, ordered: boolean): ExportBlock {
 
     let content = active[3];
     let checked: boolean | undefined;
-    const task = /^\[([ xX])\]\s+(.*)$/.exec(content);
+    const task = /^\[([ yYxX]?)\](?:\s+(.*)|$)/.exec(content);
     if (task) {
-      checked = task[1].toLowerCase() === "x";
-      content = task[2];
+      checked = /[yx]/i.test(task[1]);
+      content = task[2] ?? "";
     }
 
     // Continuation lines: an unmarked, indented line belongs to the item above.

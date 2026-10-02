@@ -71,3 +71,9 @@ export interface MarkdownRenderContextValue {
   openLightbox: (image: { src: string; alt?: string }) => void;
 }
 export const MarkdownRenderContext = createContext<MarkdownRenderContextValue | null>(null);
+
+export const TaskContext = createContext<{
+  lineOffset: number;
+  toggle: (line: number, checked: boolean) => void;
+} | null>(null);
+export const SegmentLineContext = createContext(0);

@@ -15,6 +15,7 @@ import { MathProvider } from "@/services/math/MathContext";
 import { DEFAULT_MATH_PREFERENCES } from "@/services/math/types";
 import { slugLabel } from "@/services/math/equation-registry";
 import { useMarkdownPlugins } from "@/lib/markdown/markdown-plugins";
+import { setMarkdownTask } from "@/lib/markdown/markdown-tasks";
 import {
   Copy,
   Link2,
@@ -84,6 +85,7 @@ import {
   CollapseContext,
   MarkdownRenderContext,
   SavedContext,
+  TaskContext,
   type CollapseContextValue,
   type MarkdownRenderContextValue,
   type SavedContextValue,
@@ -398,7 +400,7 @@ function MarkdownViewerImpl({
   const nextChunk =
     chunkIndex >= 0 && chunkIndex < allChunks.length - 1 ? allChunks[chunkIndex + 1] : null;
 
-  const renderContent = useMemo(() => {
+  const renderPage = useMemo(() => {
     let content = activeChunk.content.replace(/^\s*(#{1,6})\s+[^\n]+(\n|$)/, "");
 
     // Strip leading horizontal rules (often left over when users separate sections with ---)
@@ -408,6 +410,9 @@ function MarkdownViewerImpl({
       content = next;
     }
 
+    const prefixLength = activeChunk.content.length - content.length;
+    const lineOffset = activeChunk.content.slice(0, prefixLength).split("\n").length - 1;
+
     // Strip trailing horizontal rules
     while (true) {
       const next = content.replace(/(?:\r?\n|^)\s*(?:[-*_][ \t]*){3,}\s*$/, "");
@@ -415,8 +420,9 @@ function MarkdownViewerImpl({
       content = next;
     }
 
-    return prepareWorkspaceEmbeds(content);
+    return { content: prepareWorkspaceEmbeds(content), lineOffset };
   }, [activeChunk.content]);
+  const renderContent = renderPage.content;
 
   // Single-page mode renders the whole document at once. Content is left intact
   // so every heading keeps its anchor id for in-page section navigation.
@@ -432,7 +438,31 @@ function MarkdownViewerImpl({
   );
   const markdownSource = singleMode
     ? fullRender
-    : renderContent + (footnoteDefinitions ? "\n\n" + footnoteDefinitions : "");
+    : renderPage.content + (footnoteDefinitions ? "\n\n" + footnoteDefinitions : "");
+
+  // Embeds preserve line breaks. Paging removes only a prefix/suffix, so line
+  // addresses survive embeds, repeated task labels and progressive rendering.
+  const taskLineOffset = useMemo(() => {
+    if (singleMode) return 0;
+    const chunkStart = allChunks
+      .slice(0, Math.max(0, chunkIndex))
+      .reduce((from, chunk) => file.content.indexOf(chunk.content, from) + chunk.content.length, 0);
+    const start = file.content.indexOf(activeChunk.content, chunkStart);
+    return file.content.slice(0, Math.max(0, start)).split("\n").length - 1 + renderPage.lineOffset;
+  }, [singleMode, allChunks, chunkIndex, file.content, activeChunk.content, renderPage.lineOffset]);
+  const toggleTask = useCallback(
+    (line: number, checked: boolean) => {
+      const content = setMarkdownTask(liveContentRef.current, line, checked);
+      if (content === liveContentRef.current) return;
+      liveContentRef.current = content;
+      onContentChange(file.id, content);
+    },
+    [file.id, onContentChange],
+  );
+  const taskContext = useMemo(
+    () => ({ lineOffset: taskLineOffset, toggle: toggleTask }),
+    [taskLineOffset, toggleTask],
+  );
 
   // Syntax highlighting and math typesetting are fetched only for documents
   // that contain code or math — see `useMarkdownPlugins`. Both plugin arrays
@@ -1581,14 +1611,16 @@ function MarkdownViewerImpl({
                         preferences={mathPreferences}
                         navigateToEquation={navigateToEquation}
                       >
-                        <ProgressiveMarkdown
-                          source={markdownSource}
-                          urlTransform={mediaUrlTransform}
-                          remarkPlugins={remarkPlugins}
-                          rehypePlugins={rehypePlugins}
-                          components={markdownComponents}
-                          onRendered={setRenderedSource}
-                        />
+                        <TaskContext.Provider value={taskContext}>
+                          <ProgressiveMarkdown
+                            source={markdownSource}
+                            urlTransform={mediaUrlTransform}
+                            remarkPlugins={remarkPlugins}
+                            rehypePlugins={rehypePlugins}
+                            components={markdownComponents}
+                            onRendered={setRenderedSource}
+                          />
+                        </TaskContext.Provider>
                       </MathProvider>
                     </CollapseContext.Provider>
                   </SavedContext.Provider>
