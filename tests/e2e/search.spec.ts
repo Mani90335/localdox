@@ -67,9 +67,9 @@ for (const fallback of [false, true]) {
 
     await page.getByPlaceholder("Search all documents...").fill("constant");
     await expect(results.getByRole("button", { name: /^renamed\.md/ })).toBeVisible();
-    await page.locator("textarea").fill("# Topic\n\nreplacement text\n");
+    await page.locator("#markdown-source").fill("# Topic\n\nreplacement text\n");
     await expect(results).toContainText('No results for "constant"');
-    await page.locator("textarea").fill("# Topic\n\nconstant restored\n");
+    await page.locator("#markdown-source").fill("# Topic\n\nconstant restored\n");
     await expect(
       results.getByRole("button", { name: "constant restored", exact: true }),
     ).toBeVisible();
@@ -437,7 +437,7 @@ test("a search worker that crashes mid-search falls back and still answers", asy
   await expect(results.getByText("Searching…")).toHaveCount(0);
 
   // The main-thread index keeps following edits.
-  await page.locator("textarea").fill("# Topic\n\nfreshly typed\n");
+  await page.locator("#markdown-source").fill("# Topic\n\nfreshly typed\n");
   await page.getByPlaceholder("Search all documents...").fill("freshly");
   await expect(results.getByRole("button", { name: "freshly typed", exact: true })).toBeVisible();
 });

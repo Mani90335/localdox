@@ -137,18 +137,24 @@ test("search hits land on their own occurrence, in table cells and in diagrams",
 test("Inspect source selects exactly the occurrence that was selected", async ({ page }) => {
   await open(page);
   const editorSelection = () =>
-    page
-      .locator("textarea")
-      .evaluate((field: HTMLTextAreaElement) => [field.selectionStart, field.selectionEnd]);
+    page.locator("#markdown-source").evaluate(() => {
+      const selection = window.getSelection();
+      const anchor = selection?.anchorNode;
+      const line = (anchor instanceof Element ? anchor : anchor?.parentElement)?.closest(
+        ".cm-line",
+      );
+      return { text: selection?.toString(), line: line?.textContent };
+    });
 
   // The second of two identical sentences.
   const sentence = "The same sentence appears twice.";
   await select(page, sentence, 1);
   await page.getByRole("button", { name: "More highlight actions" }).click();
   await page.getByRole("menuitem", { name: "Inspect source" }).click();
-  await expect(page.locator("textarea")).toBeVisible();
-  const second = DOC.lastIndexOf(sentence);
-  await expect.poll(editorSelection).toEqual([second, second + sentence.length]);
+  await expect(page.locator("#markdown-source")).toBeVisible();
+  await expect
+    .poll(editorSelection)
+    .toEqual({ text: sentence, line: "Closing widget line. The same sentence appears twice." });
   await page.getByRole("button", { name: /Done/ }).click();
   await expect(page.getByRole("heading", { name: "Guide", level: 1 })).toBeVisible();
 
@@ -157,8 +163,9 @@ test("Inspect source selects exactly the occurrence that was selected", async ({
   await select(page, "widget", 1);
   await page.getByRole("button", { name: "More highlight actions" }).click();
   await page.getByRole("menuitem", { name: "Inspect source" }).click();
-  const cell = DOC.indexOf("widget cell");
-  await expect.poll(editorSelection).toEqual([cell, cell + "widget".length]);
+  await expect
+    .poll(editorSelection)
+    .toEqual({ text: "widget", line: "| widget | the widget cell |" });
 });
 
 test("a note's link lands on its own occurrence, even after the document is edited above it", async ({
@@ -175,7 +182,7 @@ test("a note's link lands on its own occurrence, even after the document is edit
   // Edit the document: a new paragraph above everything shifts every offset.
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page
-    .locator("textarea")
+    .locator("#markdown-source")
     .fill(DOC.replace("# Guide\n", "# Guide\n\nA new opening paragraph, added later.\n"));
   await page.getByRole("button", { name: /Done/ }).click();
   await expect(page.getByText("A new opening paragraph, added later.")).toBeVisible();

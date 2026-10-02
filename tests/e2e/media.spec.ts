@@ -200,17 +200,13 @@ test("attachment picker imports into the workspace, inserts a durable reference,
   await page.getByRole("button", { name: "Options", exact: true }).first().click();
   await page.getByText("Edit", { exact: true }).click();
   await page.locator("#markdown-source").focus();
-  await page
-    .locator("#markdown-source")
-    .evaluate((node: HTMLTextAreaElement) =>
-      node.setSelectionRange(node.value.length, node.value.length),
-    );
+  await page.locator("#markdown-source").press("ControlOrMeta+End");
   await page.getByRole("button", { name: "Attach media or files", exact: true }).click();
   await page
     .getByLabel("Upload attachments", { exact: true })
     .setInputFiles({ name: "uploaded.svg", mimeType: "image/svg+xml", buffer: picture });
   await expect(page.getByRole("dialog")).not.toBeVisible();
-  await expect(page.locator("#markdown-source")).toHaveValue(/workspace-artifact\.local/);
+  await expect(page.locator("#markdown-source")).toContainText(/workspace-artifact\.local/);
   await page.getByRole("button", { name: /Done.*Preview/ }).click();
   await expect(page.getByRole("img", { name: "uploaded.svg", exact: true })).toBeVisible();
   await expect.poll(async () => (await storedFiles(page)).length).toBe(2);

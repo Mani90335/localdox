@@ -1,16 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Tabs from "@radix-ui/react-tabs";
-import {
-  BookOpen,
-  Database,
-  Folder,
-  GitBranch,
-  Palette,
-  Sigma,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { BookOpen, Database, Folder, GitBranch, Palette, Sigma, Sparkles, X } from "lucide-react";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { AiSettings } from "@/services/ai";
 import { AppearanceSettings } from "./settings/AppearanceTab";
@@ -83,8 +74,7 @@ export interface SettingsPageProps {
   onClose: () => void;
 }
 
-type TabId =
-  "appearance" | "reading" | "diagrams" | "math" | "ai" | "workspace" | "storage";
+type TabId = "appearance" | "reading" | "diagrams" | "math" | "ai" | "workspace" | "storage";
 
 const SECTIONS = [
   {

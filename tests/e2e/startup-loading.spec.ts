@@ -103,7 +103,7 @@ test("the editor downloads on the way to editing, and editing works", async ({ p
   await expect.poll(async () => (await scripts.loaded()).has("editor")).toBe(true);
   await page.getByText("Edit", { exact: true }).click();
   const source = page.locator("#markdown-source");
-  await expect(source).toHaveValue("# Lazy note\n\nFirst paragraph.\n");
+  await expect(source).toHaveText("# Lazy note\n\nFirst paragraph.\n", { useInnerText: true });
   await source.fill("# Lazy note\n\nEdited on demand.\n");
   await page.getByRole("button", { name: "Done · Preview", exact: true }).click();
   await expect(page.getByText("Edited on demand.", { exact: true })).toBeVisible();
@@ -143,9 +143,7 @@ test("Inspect source selects the passage in an editor that wasn't loaded yet", a
   await expect(source).toBeFocused();
   await expect
     .poll(() =>
-      source.evaluate((el: HTMLTextAreaElement) =>
-        el.value.slice(el.selectionStart, el.selectionEnd),
-      ),
+      source.evaluate(() => window.getSelection()?.toString()),
     )
     .toBe("target passage");
 });
