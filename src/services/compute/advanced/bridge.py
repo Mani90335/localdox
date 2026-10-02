@@ -7,6 +7,8 @@
 # appears anywhere here: Python in Pyodide can reach JavaScript, and from the
 # worker, the origin's IndexedDB.
 #
+# Worked steps come from steps.py, run first in the same namespace.
+#
 # `run(request_json)` returns a JSON string shaped like ComputeResult
 # (src/services/compute/protocol.ts).
 
@@ -751,6 +753,11 @@ def answer(op, value, env, lhs=None, forms=None, notes=None, extra=None):
     return result
 
 
+def with_steps(steps):
+    """The `extra` that adds worked steps (steps.py) to an answer, when there are any."""
+    return {"steps": steps} if steps else None
+
+
 def form(label, value):
     return {"label": label, "latex": latex(value)}
 
@@ -797,7 +804,8 @@ def op_evaluate(targets, params, env):
     if isinstance(target, sp.Basic) and target.is_Relational:
         raise Refusal("wrong-operation", "That's an equation or inequality. Evaluate works out an expression.", suggest="solve")
     value = deep_doit(target)
-    return answer("evaluate", value, env)
+    steps = calculus_steps(target, value) if isinstance(target, sp.Basic) and not unevaluated(value) else None
+    return answer("evaluate", value, env, extra=with_steps(steps))
 
 
 def limit_value(expression):
@@ -934,16 +942,18 @@ def op_solve(targets, params, env):
             notes.append("The engine couldn't solve this in closed form.")
         return answer("solve", solution, env, lhs=lhs, notes=notes)
     variables = variables_of(sp.Tuple(*equations), params, env)
+    steps = None
     try:
         if all(sp.Poly(eq.lhs - eq.rhs, *variables).total_degree() <= 1 for eq in equations):
             solution = sp.linsolve([eq.lhs - eq.rhs for eq in equations], variables)
             notes.append("A linear system.")
+            steps = linear_system_steps(equations, variables, solution)
         else:
             solution = sp.nonlinsolve([eq.lhs - eq.rhs for eq in equations], variables)
     except sp.PolynomialError:
         solution = sp.nonlinsolve([eq.lhs - eq.rhs for eq in equations], variables)
     lhs = "\\left(" + ", ".join(latex(v) for v in variables) + "\\right) \\in "
-    return answer("solve", solution, env, lhs=lhs, notes=notes)
+    return answer("solve", solution, env, lhs=lhs, notes=notes, extra=with_steps(steps))
 
 
 def solve_ode(equations, conditions, params, env):
@@ -979,7 +989,9 @@ def op_differentiate(targets, params, env):
     else:
         specs = [(variable_of(target, params, env, "differentiate with respect to"), order)]
     derivative = sp.Derivative(target, *specs)
-    return answer("differentiate", derivative.doit(), env, lhs=latex(derivative))
+    value = derivative.doit()
+    steps = derivative_steps(target, specs, value) if isinstance(target, sp.Expr) else None
+    return answer("differentiate", value, env, lhs=latex(derivative), extra=with_steps(steps))
 
 
 def op_integrate(targets, params, env):
@@ -997,7 +1009,10 @@ def op_integrate(targets, params, env):
             notes.append("SymPy writes $\\ln(u)$ where a real-variable text writes $\\ln|u|$.")
     if isinstance(value, sp.Piecewise):
         notes.append("The answer depends on the conditions shown.")
-    return answer("integrate", value, env, lhs=latex(integral), notes=notes)
+    steps = None
+    if isinstance(target, sp.Expr) and not unevaluated(value) and not isinstance(value, sp.Piecewise):
+        steps = integral_steps(target, variable, lower, upper, value)
+    return answer("integrate", value, env, lhs=latex(integral), notes=notes, extra=with_steps(steps))
 
 
 def op_limit(targets, params, env):
@@ -1106,9 +1121,11 @@ def op_matrix(kind):
         m = matrix_target(targets, LABELS[kind])
         name = f"\\left({latex(m)}\\right)"
         if kind == "determinant":
-            return answer(kind, square(m, "A determinant").det(), env, lhs=f"\\det{name}")
+            value = square(m, "A determinant").det()
+            return answer(kind, value, env, lhs=f"\\det{name}", extra=with_steps(determinant_steps(m, value)))
         if kind == "inverse":
-            return answer(kind, inverse(m), env, lhs=f"{name}^{{-1}}")
+            value = inverse(m)
+            return answer(kind, value, env, lhs=f"{name}^{{-1}}", extra=with_steps(inverse_steps(m, value)))
         if kind == "transpose":
             return answer(kind, m.T, env, lhs=f"{name}^{{T}}")
         if kind == "trace":
@@ -1118,7 +1135,14 @@ def op_matrix(kind):
         if kind == "rref":
             reduced, pivots = m.rref()
             columns = ", ".join(str(p + 1) for p in pivots) or "none"
-            return answer(kind, reduced, env, lhs=f"\\operatorname{{rref}}{name}", notes=[f"Pivot columns: {columns}."])
+            return answer(
+                kind,
+                reduced,
+                env,
+                lhs=f"\\operatorname{{rref}}{name}",
+                notes=[f"Pivot columns: {columns}."],
+                extra=with_steps(rref_steps(m, reduced)),
+            )
         if kind == "nullspace":
             basis = m.nullspace()
             return answer(kind, span(basis), env, lhs=f"\\operatorname{{null}}{name}", notes=[f"Dimension {len(basis)}."])

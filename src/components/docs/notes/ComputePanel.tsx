@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   Calculator,
   Check,
+  ChevronRight,
   Copy,
   Cpu,
   FileInput,
@@ -29,6 +30,7 @@ import {
   type ComputeOperation,
   type ComputeRequest,
   type ComputeResult,
+  type Step,
 } from "@/services/compute/protocol";
 import { resultMarkdown, solutionLatex, withLhs } from "@/services/compute/result-markdown";
 import type {
@@ -102,6 +104,23 @@ function rememberConsent() {
 }
 
 const DOWNLOAD_MB = (PYODIDE_DOWNLOAD_BYTES / 1_000_000).toFixed(1);
+
+/** Whether worked steps are shown under a result: on, unless the reader hid them. */
+const STEPS_KEY = "localdox:compute-steps";
+function stepsPreferred(): boolean {
+  try {
+    return localStorage.getItem(STEPS_KEY) !== "hidden";
+  } catch {
+    return true;
+  }
+}
+function rememberSteps(shown: boolean) {
+  try {
+    localStorage.setItem(STEPS_KEY, shown ? "shown" : "hidden");
+  } catch {
+    // Shown again next time; nothing else depends on it.
+  }
+}
 
 /**
  * What the tab holds between visits in this session: switching to Notes and
@@ -623,7 +642,10 @@ function ResultCard({
   /** Offered when the basic engine's answer may be incomplete. */
   onAdvanced?: () => void;
 }) {
-  const markdown = useMemo(() => resultMarkdown(answer), [answer]);
+  const [showSteps, setShowSteps] = useState(stepsPreferred);
+  const hasSteps = Boolean(answer.steps?.length);
+  // What is copied or added is what the card shows: the steps too, when open.
+  const markdown = useMemo(() => resultMarkdown(answer, { steps: showSteps }), [answer, showSteps]);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -732,6 +754,16 @@ function ResultCard({
           ))}
         </div>
       )}
+      {hasSteps && (
+        <StepsSection
+          steps={answer.steps!}
+          open={showSteps}
+          onToggle={() => {
+            rememberSteps(!showSteps);
+            setShowSteps(!showSteps);
+          }}
+        />
+      )}
       <footer className="flex flex-wrap gap-1.5 border-t border-border/60 px-3 py-2">
         <ActionButton
           onClick={async () => {
@@ -755,6 +787,82 @@ function ResultCard({
         )}
       </footer>
     </section>
+  );
+}
+
+/** How the result is reached: numbered steps, each with the work for its parts beneath it. */
+function StepsSection({
+  steps,
+  open,
+  onToggle,
+}: {
+  steps: Step[];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const id = useId();
+  return (
+    <div className="border-t border-border/60">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={onToggle}
+        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-2xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      >
+        <ChevronRight
+          className={`h-3 w-3 shrink-0 transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+          aria-hidden
+        />
+        Steps
+        <span className="font-normal normal-case tabular-nums">{steps.length}</span>
+      </button>
+      {open && (
+        <ol id={id} aria-label="Steps" className="space-y-3 px-3 pb-3 text-sm">
+          {steps.map((step, index) => (
+            <StepItem key={index} step={step} number={index + 1} depth={0} />
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function StepItem({ step, number, depth }: { step: Step; number?: number; depth: number }) {
+  return (
+    <li className="flex min-w-0 gap-2">
+      {number !== undefined && (
+        <span
+          aria-hidden
+          className="mt-px w-4 shrink-0 text-right text-xs tabular-nums text-muted-foreground"
+        >
+          {number}
+        </span>
+      )}
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="docs-note text-xs leading-relaxed text-foreground/90 [&_p]:m-0">
+          <ReactMarkdown remarkPlugins={NOTE_PLUGINS} components={NOTE_COMPONENTS}>
+            {step.text}
+          </ReactMarkdown>
+        </div>
+        {step.latex && (
+          // One line, scrolled rather than broken mid-expression.
+          <div className="min-w-0 overflow-x-auto overflow-y-hidden whitespace-nowrap py-0.5 [&_.katex]:whitespace-nowrap">
+            <NoteMath latex={`\\displaystyle ${step.latex}`} display={false} />
+          </div>
+        )}
+        {step.substeps && (
+          // Past three levels the indent stops growing: the panel is narrow.
+          <ul
+            className={`mt-1.5 space-y-2 border-l border-border/70 ${depth < 3 ? "pl-3" : "pl-1.5"}`}
+          >
+            {step.substeps.map((substep, index) => (
+              <StepItem key={index} step={substep} depth={depth + 1} />
+            ))}
+          </ul>
+        )}
+      </div>
+    </li>
   );
 }
 

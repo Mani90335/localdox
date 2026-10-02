@@ -5,7 +5,9 @@ calculus, linear algebra, probability and random variables, statistics,
 transforms and differential equations. It is **SymPy**, the standard Python
 computer algebra system, running on the device in a Web Worker through
 **Pyodide** (CPython compiled to WebAssembly). It is downloaded only after the
-reader agrees (10.9 MB, once), and after that it works offline.
+reader agrees (10.9 MB, once), and after that it works offline. Derivatives,
+integrals, determinants, row reductions, inverses and linear systems come with
+worked steps (steps.py, loaded before bridge.py; see math-compute-steps.md).
 
 ## The problem
 
@@ -94,7 +96,7 @@ import("advanced/advanced") ── createComputeClient(...) ── new Worker(ad
 advanced.worker.ts                ▼
    progress "runtime" ─ import(base + "pyodide.mjs") ─ loadPyodide({indexURL: base})
    progress "sympy"   ─ loadPackage("sympy")  (checked against the trimmed lock)
-   runPython(bridge.py) ─ ready
+   runPython(steps.py), runPython(bridge.py) ─ ready
    request ─▶ run.ts: parseStatements ─ prepareInput(advanced) ─ preprocessLatex
               ─ parse (latex-syntax, 62 KB) ─ normalize ─▶ JSON ─▶ bridge.run (Python)
           ◀─ ComputeResult (JSON) ◀───────────────────────────────────┘

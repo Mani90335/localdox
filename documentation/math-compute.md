@@ -8,8 +8,9 @@ to a second engine, SymPy, downloaded only after the reader agrees; see
 math-compute-advanced.md. What the
 reader wrote and what the engine computed never mix: a result goes to rough
 work or into a document only when the reader asks, and an insertion only after
-its confirmation dialog. The input is a math field with an embedded keypad,
-or plain text; see math-input.md.
+its confirmation dialog. Results come with worked steps where a textbook
+method applies; see math-compute-steps.md. The input is a math field with an
+embedded keypad, or plain text; see math-input.md.
 
 ## The problem
 

@@ -23,6 +23,7 @@ import type {
   ComputeAnswer,
   ComputeFailure,
   ComputeResult,
+  Step,
 } from "../src/services/compute/protocol.ts";
 import { resultLatex, resultMarkdown } from "../src/services/compute/result-markdown.ts";
 import { macrosFor } from "../src/services/math/latex.ts";
@@ -39,6 +40,7 @@ before(async () => {
   await mirrorPyodide(dir);
   const pyodide = await loadPyodide({ indexURL: `${dir}/` });
   await pyodide.loadPackage("sympy", { messageCallback: () => {} });
+  pyodide.runPython(await readFile("src/services/compute/advanced/steps.py", "utf8"));
   pyodide.runPython(await readFile("src/services/compute/advanced/bridge.py", "utf8"));
   const run = pyodide.globals.get("run");
   bridge = { run: (request) => run(request) as string };
@@ -356,6 +358,86 @@ test("statistics, special functions, transforms, complex numbers, assumptions", 
     answer("simplify", "\\frac{x^2-1}{x^2+2x+1}").forms?.map((f) => f.label),
     ["Expanded", "Partial fractions"],
   );
+});
+
+// ---- worked steps (steps.py) --------------------------------------------------------------
+
+function flatten(steps: Step[] = []): Step[] {
+  return steps.flatMap((s) => [s, ...flatten(s.substeps)]);
+}
+
+function stepText(result: ComputeAnswer): string {
+  return flatten(result.steps)
+    .map((s) => `${s.text} ${s.latex ?? ""}`)
+    .join("\n");
+}
+
+function assertStepsDraw(result: ComputeAnswer) {
+  const macros = macrosFor("katex");
+  for (const step of flatten(result.steps)) {
+    if (step.latex) {
+      assert.doesNotThrow(
+        () => katex.renderToString(`\\displaystyle ${step.latex}`, { throwOnError: true, macros }),
+        step.latex,
+      );
+    }
+    for (const [, math] of step.text.matchAll(/\$([^$]+)\$/g)) {
+      assert.doesNotThrow(() => katex.renderToString(math, { throwOnError: true, macros }), math);
+    }
+  }
+}
+
+test("steps: derivatives rule by rule, checked against the result", () => {
+  const product = answer("differentiate", "x^2 \\sin(x)");
+  assert.match(stepText(product), /Product rule/);
+  assert.match(stepText(product), /Power rule/);
+  const chain = answer("differentiate", "\\sin(x^2)");
+  assert.match(stepText(chain), /Chain rule/);
+  const quotient = answer("differentiate", "\\frac{x^2+1}{x-1}");
+  assert.match(stepText(quotient), /Quotient rule/);
+  const second = answer("differentiate", "x^3 \\sin(x)", { variable: "x", order: 2 });
+  assert.match(stepText(second), /The second derivative/);
+  // No rule here for a variable power of a variable: no steps, the result still stands.
+  const power = answer("differentiate", "x^x");
+  assert.equal(power.steps, undefined);
+  assert.ok(power.exact);
+  for (const result of [product, chain, quotient, second]) assertStepsDraw(result);
+});
+
+test("steps: integrals by SymPy's method, antiderivatives checked by differentiating", () => {
+  const parts = answer("integrate", "x e^{x}");
+  assert.match(stepText(parts), /Integrate by parts/);
+  assert.match(stepText(parts), /\+ C/);
+  const substitution = answer("integrate", "\\sin^2(x) \\cos(x)");
+  assert.match(stepText(substitution), /Substitute \$u = \\sin/);
+  const terms = answer("integrate", "3x^2 + 2x - 5");
+  assert.match(stepText(terms), /term by term/);
+  // Written out and evaluated, an integral gets the same steps.
+  assert.match(stepText(answer("evaluate", "\\int x e^{x}\\,dx")), /Integrate by parts/);
+  assert.match(stepText(answer("evaluate", "\\frac{d}{dx} x^2 \\sin(x)")), /Product rule/);
+  const definite = answer("integrate", "x^2", { variable: "x", lower: "0", upper: "1" });
+  assert.match(stepText(definite), /fundamental theorem of calculus/);
+  assert.match(stepText(definite), /= \\frac\{1\}\{3\}/);
+  // Across a pole the antiderivative's difference is finite, but the integral isn't: no steps.
+  const divergent = run("integrate", "\\frac{1}{x^2}", { variable: "x", lower: "-1", upper: "1" });
+  if (divergent.ok) assert.equal(divergent.steps, undefined);
+  for (const result of [parts, substitution, terms, definite]) assertStepsDraw(result);
+});
+
+test("steps: matrices by cofactors and row operations, linear systems by elimination", () => {
+  const determinant = answer("determinant", "[[1,2,3],[0,1,4],[5,6,0]]");
+  assert.equal(determinant.exact, "1");
+  assert.match(stepText(determinant), /Expand along row 2/);
+  assert.match(stepText(determinant), /ad - bc/);
+  const reduced = answer("rref", "[[1,2,3],[0,1,4],[5,6,0]]");
+  assert.match(stepText(reduced), /R_\{3\} \\to R_\{3\} - 5R_\{1\}/);
+  const inverse = answer("inverse", "[[1,2],[3,4]]");
+  assert.match(stepText(inverse), /beside the identity/);
+  assert.match(stepText(inverse), /right half is the inverse/);
+  const system = answer("solve", "2x + y = 5\nx - y = 1");
+  assert.match(stepText(system), /augmented matrix/);
+  assert.match(stepText(system), /x = 2,\\quad y = 1/);
+  for (const result of [determinant, reduced, inverse, system]) assertStepsDraw(result);
 });
 
 test("input never runs as Python: names and heads are allow-listed on both sides", () => {

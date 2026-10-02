@@ -3,7 +3,7 @@
 // (input = result ≈ decimal, or equation ⟹ solutions), then the notes, so
 // the assumptions travel with the result they qualify.
 
-import type { ComputeAnswer, Solution } from "./protocol.ts";
+import type { ComputeAnswer, Solution, Step } from "./protocol.ts";
 
 /** "x = 2", "x = \frac{\pi}{6} \approx 0.5236", "x = 1 \ (\times 2)". */
 export function solutionLatex(variable: string, solution: Solution): string {
@@ -54,7 +54,24 @@ export function resultLatex(answer: ComputeAnswer): string {
   return latex;
 }
 
-export function resultMarkdown(answer: ComputeAnswer): string {
+/**
+ * Steps as a Markdown list: numbered at the top, bullets beneath, each with
+ * its math as a display block indented into the item.
+ */
+export function stepsMarkdown(steps: Step[], prefix = ""): string {
+  return steps
+    .map((step, index) => {
+      const marker = prefix ? "- " : `${index + 1}. `;
+      const inside = prefix + " ".repeat(marker.length);
+      const lines = [`${prefix}${marker}${step.text}`];
+      if (step.latex) lines.push("", `${inside}$$`, `${inside}${step.latex}`, `${inside}$$`);
+      if (step.substeps?.length) lines.push("", stepsMarkdown(step.substeps, inside));
+      return lines.join("\n");
+    })
+    .join("\n\n");
+}
+
+export function resultMarkdown(answer: ComputeAnswer, options: { steps?: boolean } = {}): string {
   const parts: string[] = [];
   if (answer.given?.length) parts.push(`Given ${answer.given.map((g) => `$${g}$`).join(", ")}.`);
   parts.push(`$$\n${resultLatex(answer)}\n$$`);
@@ -63,5 +80,8 @@ export function resultMarkdown(answer: ComputeAnswer): string {
     parts.push(answer.forms.map((f) => `- ${f.label}: $${f.latex}$`).join("\n"));
   }
   if (answer.notes.length) parts.push(answer.notes.join("\n\n"));
+  if (options.steps && answer.steps?.length) {
+    parts.push("**Steps**", stepsMarkdown(answer.steps));
+  }
   return parts.join("\n\n");
 }

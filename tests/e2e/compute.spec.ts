@@ -83,10 +83,19 @@ test("evaluate, copy, add to rough work, then insert into the document only when
   const result = panel(page).getByRole("region", { name: "Evaluate result" });
   await expect(result).toBeVisible();
   // Input, exact result and decimal, each drawn by the app's math renderer.
-  await expect(result.locator(".katex")).toHaveCount(3);
+  await expect(result.locator("dl .katex")).toHaveCount(3);
   await expect(result).toContainText("0.833333333333");
   // What was typed is untouched by the result.
   await expect(field(page)).toHaveValue("1/2 + 1/3");
+
+  // Worked steps, open by default: the fraction work under its step.
+  const stepsToggle = result.getByRole("button", { name: /^Steps/ });
+  await expect(stepsToggle).toHaveAttribute("aria-expanded", "true");
+  const steps = result.getByRole("list", { name: "Steps" });
+  await expect(steps).toContainText("Write both over the common denominator");
+  // Hidden steps aren't copied: what is copied is what the card shows.
+  await stepsToggle.click();
+  await expect(steps).toBeHidden();
 
   const markdown = "$$\n1/2+1/3 = \\frac{5}{6} \\approx 0.833333333333\n$$";
   await result.getByRole("button", { name: "Copy" }).click();
@@ -138,8 +147,11 @@ test("a result goes straight into the document too, but only after its confirmat
   await field(page).fill("x^2 - 5x + 6 = 0");
   await button(page, "Solve").click();
   const result = panel(page).getByRole("region", { name: "Solve result" });
-  await expect(result.getByRole("listitem")).toHaveCount(2);
+  await expect(result.locator("dl").getByRole("listitem")).toHaveCount(2);
   await expect(result).toContainText("Solutions");
+  await expect(result.getByRole("list", { name: "Steps" })).toContainText(
+    "find two numbers that multiply to",
+  );
 
   await result.getByRole("button", { name: "Insert into document…" }).click();
   const dialog = page.getByRole("dialog", { name: "Insert into “guide.md”?" });
@@ -148,9 +160,18 @@ test("a result goes straight into the document too, but only after its confirmat
 
   await result.getByRole("button", { name: "Insert into document…" }).click();
   await dialog.getByRole("button", { name: "Insert", exact: true }).click();
+  // The steps, shown, go in with the result: a numbered list with its math as display blocks.
   await expect
     .poll(async () => (await stored(page)).files[0].content)
-    .toBe(`${GUIDE}\n$$\nx^{2}-5x+6=0 \\quad\\Longrightarrow\\quad x = 3,\\quad x = 2\n$$\n`);
+    .toContain("**Steps**\n\n1. Factor: find two numbers");
+  const inserted = (await stored(page)).files[0].content;
+  expect(
+    inserted.startsWith(
+      `${GUIDE}\n$$\nx^{2}-5x+6=0 \\quad\\Longrightarrow\\quad x = 3,\\quad x = 2\n$$\n`,
+    ),
+  ).toBe(true);
+  // Every step's math renders in the document: the result's block and one per step line.
+  await expect(page.locator("article li .katex-display").first()).toBeVisible();
   // Inserting from Compute makes no scratchpad.
   expect((await stored(page)).scratchpads).toEqual([]);
 });
@@ -362,6 +383,6 @@ test("once loaded, Compute works offline after a reload", async ({ page, context
   await field(page).fill("x^2 = 2");
   await button(page, "Solve").click();
   const result = panel(page).getByRole("region", { name: "Solve result" });
-  await expect(result.getByRole("listitem")).toHaveCount(2);
+  await expect(result.locator("dl").getByRole("listitem")).toHaveCount(2);
   await expect(result).toContainText("1.41421356237");
 });

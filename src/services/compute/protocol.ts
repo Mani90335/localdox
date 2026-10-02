@@ -121,6 +121,18 @@ export interface Solution {
   complex: boolean;
 }
 
+/**
+ * One step of a worked solution: what is done, and what it gives. A step can
+ * hold the work for one of its parts (the chain rule inside a sum rule).
+ */
+export interface Step {
+  /** What is done, as Markdown with `$…$` math: "Subtract $2x$ from both sides." */
+  text: string;
+  /** What it gives, as LaTeX. */
+  latex?: string;
+  substeps?: Step[];
+}
+
 /** An equivalent form shown beside a simplification (expanded, factored). */
 export interface AlternativeForm {
   label: string;
@@ -151,6 +163,11 @@ export interface ComputeAnswer {
   solutions?: Solution[];
   /** Solve: the solution list is provably complete. */
   complete?: boolean;
+  /**
+   * How the result is reached, step by step, when there is a method to show.
+   * Steps are shown only when they arrive at this same result.
+   */
+  steps?: Step[];
   /**
    * Assumptions, domain restrictions and caveats, as Markdown with `$…$`
    * math. Shown with the result and carried along when it is copied.

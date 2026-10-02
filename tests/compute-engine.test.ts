@@ -309,11 +309,19 @@ test("other equations use the engine's solver, checked and caveated", () => {
   assert.deepEqual(solutions("sqrt(x+1) = 3"), ["8"]);
   assert.match(answer("solve", "|x| = 3").notes.join(" "), /May be incomplete/);
 
-  // Nothing found is not "no solution".
+  // The engine's solver finds nothing for 2^x = 8; isolating x does, checked like any other.
   const exponential = answer("solve", "2^x = 8");
-  assert.deepEqual(exponential.solutions, []);
+  assert.deepEqual(
+    exponential.solutions?.map((s) => s.exact),
+    ["3"],
+  );
   assert.equal(exponential.complete, false);
-  assert.match(exponential.notes.join(" "), /doesn't prove there are none/);
+
+  // Nothing found is not "no solution".
+  const transcendental = answer("solve", "2^x = x + 3");
+  assert.deepEqual(transcendental.solutions, []);
+  assert.equal(transcendental.complete, false);
+  assert.match(transcendental.notes.join(" "), /doesn't prove there are none/);
 
   // Other unknowns as constants, with the assumption the answer needs.
   const linear = answer("solve", "a x + b = 0", "x");
@@ -375,6 +383,17 @@ test("roots: every root of a polynomial, with multiplicity", () => {
 });
 
 // ---- output -------------------------------------------------------------------------
+
+test("large powers are exact to the last digit", () => {
+  // The engine keeps about 20 significant digits for these and still calls them exact.
+  assert.equal(answer("evaluate", "2^{100}").exact, (2n ** 100n).toString());
+  assert.equal(answer("evaluate", "3^{50}").exact, (3n ** 50n).toString());
+  assert.equal(answer("evaluate", "\\frac{2^{70}}{3}").exact, `\\frac{${2n ** 70n}}{3}`);
+  // Past what can be worked out exactly here: a rounded decimal, said so, not invented digits.
+  const huge = answer("evaluate", "2^{20000}");
+  assert.equal(huge.exact, undefined);
+  assert.match(huge.notes.join(" "), /too long to work out/);
+});
 
 test("every result is LaTeX the app's renderer can draw, and Markdown that carries it", () => {
   const cases: [ComputeOperation, string, string?][] = [

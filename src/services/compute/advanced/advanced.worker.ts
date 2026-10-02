@@ -7,6 +7,7 @@
 // "failed": a rejected promise in a worker never reaches the page as an error.
 import { parse as parseLatex } from "@cortex-js/compute-engine/latex-syntax";
 import bridgeSource from "./bridge.py?raw";
+import stepsSource from "./steps.py?raw";
 import { runAdvanced, type Bridge } from "./run";
 import type { AdvancedRequest, ComputeResult } from "../protocol";
 
@@ -50,6 +51,8 @@ async function start(base: string): Promise<Bridge> {
   const pyodide = await loadPyodide({ indexURL: base });
   post({ type: "progress", stage: "sympy" });
   await pyodide.loadPackage("sympy", { messageCallback: () => {}, errorCallback: () => {} });
+  // steps.py first: bridge.py calls its functions.
+  pyodide.runPython(stepsSource);
   pyodide.runPython(bridgeSource);
   const run = pyodide.globals.get("run");
   post({ type: "ready" });

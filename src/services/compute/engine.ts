@@ -32,6 +32,9 @@ import {
   vanishesAt,
   type Complex,
 } from "./polynomial.ts";
+import { arithmeticSteps, exactArithmetic } from "./arithmetic-steps.ts";
+import { qLatex, qValue } from "./exact.ts";
+import { solveSteps, type Toolkit, type Worked } from "./solve-steps.ts";
 import type {
   AlternativeForm,
   ComputeFailure,
@@ -148,7 +151,23 @@ function evaluate({ ce, op, latex, expr, json }: Context): ComputeResult {
   const value = expr.evaluate();
   const undefinedValue = undefinedFailure(op, value.json);
   if (undefinedValue) return undefinedValue;
-  return numericAnswer(ce, op, latex, expr, value);
+  return withArithmeticSteps(ce, latex, value, numericAnswer(ce, op, latex, expr, value));
+}
+
+/** Order-of-operations steps for exact arithmetic, when they reach the same value. */
+function withArithmeticSteps(
+  ce: Engine,
+  latex: string,
+  value: Expr,
+  result: ComputeResult,
+): ComputeResult {
+  if (!result.ok) return result;
+  const work = arithmeticSteps(ce.parse(latex, { form: "raw" }).json);
+  const expected = complexValue(value.N());
+  if (!work || !expected || expected.im !== 0) return result;
+  const got = qValue(work.value);
+  if (Math.abs(got - expected.re) > 1e-12 * Math.max(1, Math.abs(expected.re))) return result;
+  return { ...result, steps: work.steps };
 }
 
 function simplify({ ce, op, latex, expr, json }: Context): ComputeResult {
@@ -248,7 +267,18 @@ function numericAnswer(
     if (exactExpr && hasDecimal(exactExpr.json)) exactExpr = undefined;
     if (!exactExpr) notes.push("No exact form: the input has decimals, or the engine has none.");
   }
-  const exact = exactExpr ? shown(ce, exactExpr, notes) : undefined;
+  // The engine works a large power to about 20 significant digits and still
+  // calls it exact: 2^100 would end in zeros. Exact arithmetic doesn't round.
+  const raw = ce.parse(latex, { form: "raw" }).json;
+  const arithmetic = exactArithmetic(raw, MAX_RESULT_CHARS);
+  let exact = arithmetic ? qLatex(arithmetic) : exactExpr ? shown(ce, exactExpr, notes) : undefined;
+  if (!arithmetic && exact && exactExpr && mentionsHead(raw, "Power")) {
+    // Past exact arithmetic's reach, digits·10^n from a power may be rounded.
+    if (/\\cdot10\^\{/.test(latexOf(exactExpr))) {
+      exact = undefined;
+      notes.push("The exact result is too long to work out here; the decimal is rounded.");
+    }
+  }
   const approx = approximation(isNumberLiteral(value) ? value : expr.N());
   if (approx?.complex) notes.push("Complex: there is no real value.");
   return {
@@ -332,7 +362,10 @@ function solve({ ce, op, latex, expr, json }: Context, requested?: string): Comp
       }
       throw error;
     }
-    if (form) return solveRational(ce, op, latex, f, variable, form, notes);
+    if (form) {
+      const worked = solveSteps(toolkit(ce, variable, {}), lhs, rhs);
+      return solveRational(ce, op, latex, f, variable, form, notes, worked);
+    }
   }
 
   // The engine's own solver, for everything else. Its answers are checked.
@@ -344,7 +377,15 @@ function solve({ ce, op, latex, expr, json }: Context, requested?: string): Comp
   const samples = Object.fromEntries(parameters.map((name, i) => [name, PARAMETER_SAMPLES[i % 6]]));
   const solutions: Solution[] = [];
   const seen: Complex[] = [];
-  for (const solution of (found ?? []) as unknown as Expr[]) {
+  const candidates = [...((found ?? []) as unknown as Expr[])];
+  // Isolating the unknown solves some equations the engine's solver doesn't
+  // (2^x = 8); its answers are checked below like the engine's own.
+  const worked = solveSteps(toolkit(ce, variable, samples), lhs, rhs);
+  for (const method of worked) {
+    for (const s of method.solutions)
+      if (s.json !== undefined) candidates.push(ce.box(s.json as never));
+  }
+  for (const solution of candidates) {
     const value = complexValue(solution.subs(samples).N());
     const shownAs = `$${symbol} = ${portableLatex(latexOf(solution))}$`;
     if (!value || !Number.isFinite(value.re) || !Number.isFinite(value.im)) {
@@ -384,6 +425,10 @@ function solve({ ce, op, latex, expr, json }: Context, requested?: string): Comp
     }
     if (assumptions.size) notes.push(`Assumes ${conditionList([...assumptions.values()])}.`);
   }
+  const method = chooseMethod(worked, seen, false);
+  if (!parameters.length) {
+    adoptExactForms(solutions, new Map(solutions.map((s, i) => [s, seen[i]])), method);
+  }
   if (TRIG.some((name) => mentionsHead(json, name))) {
     notes.push(
       "Trigonometric: only solutions within one period are listed. Add whole multiples of the period ($2\\pi$ for sine and cosine, $\\pi$ for tangent) for the rest.",
@@ -397,7 +442,16 @@ function solve({ ce, op, latex, expr, json }: Context, requested?: string): Comp
   if (solutions.some((s) => s.exact === undefined)) {
     notes.push("Shown as decimals where the engine gave no exact form.");
   }
-  return { ok: true, op, input: latex, variable: symbol, solutions, complete: false, notes };
+  return {
+    ok: true,
+    op,
+    input: latex,
+    variable: symbol,
+    solutions,
+    complete: false,
+    notes,
+    steps: method?.steps,
+  };
 }
 
 /** A polynomial or rational equation: every root of the numerator, checked. */
@@ -409,6 +463,7 @@ function solveRational(
   variable: string,
   form: { num: number[]; den: number[] },
   notes: string[],
+  worked: Worked[],
 ): ComputeResult {
   const symbol = symbolLatex(ce, variable);
   const poles = degree(form.den) > 0 ? clusterRoots(form.den, roots(form.den)) : [];
@@ -427,6 +482,7 @@ function solveRational(
       solutions: [],
       complete: true,
       notes: [...notes, "Both sides are equal for every value where they are defined."],
+      steps: chooseSteps(worked, [], true),
     };
   }
   if (degree(form.num) === 0) {
@@ -438,27 +494,35 @@ function solveRational(
       solutions: [],
       complete: true,
       notes: [...notes, "No solution: the equation reduces to a false statement."],
+      steps: chooseSteps(worked, [], false),
     };
   }
 
   const engineSolutions = engineExactSolutions(ce, f, variable);
   const solutions: Solution[] = [];
+  const kept: Complex[] = [];
+  const values = new Map<Solution, Complex>();
   for (const { value, multiplicity } of clusterRoots(form.num, roots(form.num))) {
     if (excluded(value)) {
       notes.push(`Left out $${symbol} = ${describe(value)}$: the equation is undefined there.`);
       continue;
     }
+    kept.push(value);
     const exact =
       exactRealLatex(ce, f, variable, value) ??
       engineSolutions.find((candidate) => close(candidate.value, value))?.latex;
     const approx = formatComplex(value);
-    solutions.push({
+    const solution = {
       exact,
       approx: approx !== exact ? approx : undefined,
       multiplicity,
       complex: value.im !== 0,
-    });
+    };
+    values.set(solution, value);
+    solutions.push(solution);
   }
+  const method = chooseMethod(worked, kept, false);
+  adoptExactForms(solutions, values, method);
   solutions.sort((a, b) => Number(a.complex) - Number(b.complex));
   const real = solutions.filter((s) => !s.complex).length;
   if (solutions.length && real === 0) notes.push("No real solutions; the complex ones are listed.");
@@ -467,7 +531,97 @@ function solveRational(
   if (solutions.some((s) => s.exact === undefined)) {
     notes.push("Shown as decimals where no exact form was found.");
   }
-  return { ok: true, op, input: latex, variable: symbol, solutions, complete: true, notes };
+  return {
+    ok: true,
+    op,
+    input: latex,
+    variable: symbol,
+    solutions,
+    complete: true,
+    notes,
+    steps: method?.steps,
+  };
+}
+
+/**
+ * The first worked method that arrives at exactly the solutions found (the
+ * same set, compared numerically), or none: steps that disagree with the
+ * checked answer would teach something wrong.
+ */
+function chooseMethod(worked: Worked[], values: Complex[], identity: boolean) {
+  const agrees = (method: Worked) =>
+    Boolean(method.identity) === identity &&
+    method.solutions.every((s) => values.some((v) => close(s.value, v))) &&
+    values.every((v) => method.solutions.some((s) => close(s.value, v)));
+  return worked.find(agrees);
+}
+
+function chooseSteps(worked: Worked[], values: Complex[], identity: boolean) {
+  return chooseMethod(worked, values, identity)?.steps;
+}
+
+/**
+ * The steps' exact form for a solution when the answer has none (a decimal
+ * root of a quadratic) or a longer one (1 + √8/2 for 1 + √2). Both name the
+ * same number: the steps were chosen because their values match.
+ */
+function adoptExactForms(
+  solutions: Solution[],
+  values: Map<Solution, Complex>,
+  method: Worked | undefined,
+) {
+  if (!method) return;
+  for (const solution of solutions) {
+    const value = values.get(solution);
+    const found = value && method.solutions.find((s) => close(s.value, value));
+    if (!found || (solution.exact && solution.exact.length <= found.latex.length)) continue;
+    solution.exact = found.latex;
+    const approx = formatComplex(value);
+    solution.approx = approx !== found.latex ? approx : undefined;
+  }
+}
+
+/** What the worked steps need from the engine (solve-steps.ts). */
+function toolkit(ce: Engine, variable: string, samples: Record<string, number>): Toolkit {
+  const box = (json: Json) => ce.box(json as never);
+  const simplify = (json: Json): Json => {
+    const expr = box(json);
+    const simpler = expr.simplify();
+    // ln 5 "simplifies" to 1.609…: keep the exact form.
+    return hasDecimal(simpler.json) && !hasDecimal(expr.json) ? expr.json : simpler.json;
+  };
+  const value = (json: Json) => complexValue(box(json).subs(samples).N());
+  return {
+    variable,
+    symbol: symbolLatex(ce, variable),
+    latex: (json) => portableLatex(latexOf(box(json))),
+    simplify,
+    value,
+    angle(fn, target) {
+      const v = value(target);
+      if (!v || v.im !== 0) return null;
+      const principal = { Sin: Math.asin, Cos: Math.acos, Tan: Math.atan }[fn](v.re);
+      const fraction = nearbyFraction(principal / Math.PI, 24);
+      if (!fraction) return null;
+      const [p, q] = fraction;
+      const candidate: Json =
+        p === 0
+          ? 0
+          : q === 1
+            ? p === 1
+              ? "Pi"
+              : ["Multiply", p, "Pi"]
+            : ["Multiply", ["Rational", p, q], "Pi"];
+      try {
+        return box([fn, candidate]).evaluate().isSame(box(target).evaluate()) ? candidate : null;
+      } catch {
+        return null;
+      }
+    },
+    substitute: (json, at) => simplify(box(json).subs({ [variable]: box(at) }).json),
+    holds: (lhs, rhs, at) =>
+      satisfies(ce, lhs, rhs, { ...samples, [variable]: box(at).subs(samples) }),
+  };
 }
 
 /** The engine's exact solutions, with values, to put names to numeric roots. */
@@ -901,6 +1055,8 @@ export function portableLatex(latex: string): string {
       .replace(/\\gt\b/g, ">")
       // \frac{-b}{a} → -\frac{b}{a}, for a one-term numerator at the start of a term.
       .replace(/(^|[=,(]\s*)\\frac\{-([^{}+-]+)\}/g, "$1-\\frac{$2}")
+      // -(\frac{\sqrt{2}}{2}) → -\frac{\sqrt{2}}{2}: a fraction needs no brackets after a sign.
+      .replace(/-\((\\frac\{(?:[^{}]|\{[^{}]*\})*\}\{(?:[^{}]|\{[^{}]*\})*\})\)/g, "-$1")
   );
 }
 
