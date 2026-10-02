@@ -218,3 +218,60 @@ test("PDF search paints exact matches and changes the active occurrence within o
   await page.getByRole("button", { name: "Close search", exact: true }).click();
   await expect.poll(async () => (await read()).active.length).toBe(0);
 });
+
+test("the selection menu opens beside the selection, never over it", async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 600 });
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "localdox:prefs",
+      JSON.stringify({ name: "Reader", namePrompted: true, aiEnabled: false }),
+    ),
+  );
+  await page.goto("/");
+  const paragraphs = Array.from({ length: 30 }, (_, i) => `Paragraph ${i + 1} body text.`);
+  await page
+    .locator('input[type="file"]')
+    .first()
+    .setInputFiles({
+      name: "placement.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from(`# Placement\n\n${paragraphs.join("\n\n")}`),
+    });
+  await expect(page.getByRole("heading", { name: "Placement", exact: true })).toBeVisible();
+  // Selects a paragraph's text, then returns the selection's and the menu's boxes.
+  const open = (text: string, block: ScrollLogicalPosition) =>
+    page
+      .locator("article p")
+      .filter({ hasText: text })
+      .first()
+      .evaluate(async (el, at) => {
+        el.scrollIntoView({ block: at, behavior: "instant" });
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        getSelection()!.removeAllRanges();
+        getSelection()!.addRange(range);
+        el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+        const menu = await new Promise<Element>((resolve) => {
+          const find = () => {
+            const button = document.querySelector('[aria-label="More highlight actions"]');
+            if (button) resolve(button.closest(".fixed")!);
+            else requestAnimationFrame(find);
+          };
+          find();
+        });
+        const s = range.getBoundingClientRect();
+        const m = menu.getBoundingClientRect();
+        return { selTop: s.top, selBottom: s.bottom, menuTop: m.top, menuBottom: m.bottom };
+      }, block);
+
+  // Room below: the menu sits under the selection.
+  const middle = await open("Paragraph 10 body", "center");
+  expect(middle.menuTop).toBeGreaterThanOrEqual(middle.selBottom);
+  await page.keyboard.press("Escape");
+
+  // The last line of the window: no room below, so the menu flips above.
+  const bottom = await open("Paragraph 30 body", "end");
+  expect(bottom.menuBottom).toBeLessThanOrEqual(bottom.selTop);
+  expect(bottom.menuBottom).toBeLessThanOrEqual(600);
+});

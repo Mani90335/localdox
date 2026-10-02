@@ -46,6 +46,7 @@ import {
   Code2,
   FileText,
   NotebookPen,
+  ChevronRight,
 } from "lucide-react";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { ReadingMode } from "@/lib/workspace/persistence";
@@ -114,6 +115,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ViewerHeader, ViewerPager } from "../navigation/ViewerHeader";
@@ -496,13 +498,18 @@ function MarkdownViewerImpl({
         prefix: string;
         suffix: string;
         x: number;
-        y: number;
+        /** The selection's box: the menu opens below it, or above when there's no room. */
+        top: number;
+        bottom: number;
         label: string;
         /** The selection itself, kept for copying it as Markdown. */
         range?: Range;
       }
-    | { mode: "edit"; hl: Highlight; x: number; y: number; label: string };
+    | { mode: "edit"; hl: Highlight; x: number; top: number; bottom: number; label: string };
   const [menu, setMenu] = useState<HlMenu | null>(null);
+  // Whether the AI actions are unfolded in the menu's More list. Kept while the
+  // reader stays on the document, so someone who uses AI often opens it once.
+  const [aiActionsOpen, setAiActionsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   // A selection inside a figure in full screen (a JSON tree) opens the menu
   // there, since <body> is not painted while it is up.
@@ -527,7 +534,8 @@ function MarkdownViewerImpl({
       prefix: ctx.prefix,
       suffix: ctx.suffix,
       x: at ? at.x : r ? r.left + r.width / 2 : window.innerWidth / 2,
-      y: at ? at.y : r ? r.top : 120,
+      top: r ? r.top : (at?.y ?? 120),
+      bottom: r ? r.bottom : (at?.y ?? 120),
       label: "",
       // A copy, so typing a label (which clears the live selection) or
       // clicking a button in the menu doesn't take it away.
@@ -535,8 +543,8 @@ function MarkdownViewerImpl({
     });
   };
 
-  const openEditMenu = (hl: Highlight, x: number, y: number) => {
-    setMenu({ mode: "edit", hl, x, y, label: hl.label ?? "" });
+  const openEditMenu = (hl: Highlight, x: number, box: { top: number; bottom: number }) => {
+    setMenu({ mode: "edit", hl, x, top: box.top, bottom: box.bottom, label: hl.label ?? "" });
   };
 
   // Sections the reader has wrapped up, by heading id. Cleared on a document
@@ -1003,22 +1011,32 @@ function MarkdownViewerImpl({
           e.clientY <= rect.bottom,
       );
     });
-    if (hit) openEditMenu(hit.hl, e.clientX, e.clientY);
+    if (hit) openEditMenu(hit.hl, e.clientX, hit.range.getBoundingClientRect());
   };
 
-  // Keep the whole menu on screen. It opens at the selection and grows down,
-  // so a selection near the bottom of the window (the last lines of a
-  // document, which can't scroll any higher) pushed its lower row — the label
-  // field — past the edge, out of reach. Measured
-  // before paint, so it never appears in the wrong place first.
+  // Place the menu beside the selection, never on it, so the reader still sees
+  // what they picked: below by default, above when the selection sits near the
+  // bottom of the window (the last lines of a document, which can't scroll any
+  // higher). A selection taller than the window leaves no free side, so the
+  // menu is only kept on screen. Measured before paint, so it never appears in
+  // the wrong place first.
   useLayoutEffect(() => {
     const element = menuRef.current;
     if (!menu || !element) return;
+    const gap = 8;
     const margin = 8;
     const { height } = element.getBoundingClientRect();
-    const top = parseFloat(element.style.top) || 0;
-    const fits = Math.max(margin, Math.min(top, window.innerHeight - height - margin));
-    if (fits !== top) element.style.top = `${fits}px`;
+    const below = menu.bottom + gap;
+    const above = menu.top - gap - height;
+    const top =
+      below + height + margin <= window.innerHeight
+        ? below
+        : above >= margin
+          ? above
+          : Math.max(margin, Math.min(below, window.innerHeight - height - margin));
+    // Measuring commits the first position, so the menu must not transition
+    // `top` (transition-none above), or a flip would slide it over the selection.
+    element.style.top = `${top}px`;
   }, [menu]);
 
   // Close the menu on outside click / Escape (but keep it open while the reader
@@ -1421,9 +1439,9 @@ function MarkdownViewerImpl({
           createPortal(
             <div
               ref={menuRef}
-              className="fixed z-(--z-dropdown) -translate-x-1/2 flex flex-col gap-1 rounded-xl border border-border bg-popover p-1.5 shadow-xl animate-in fade-in zoom-in-95 duration-100"
+              className="fixed z-(--z-dropdown) -translate-x-1/2 flex flex-col gap-1 rounded-xl border border-border bg-popover p-1.5 shadow-xl transition-none animate-in fade-in zoom-in-95 duration-100"
               style={{
-                top: Math.min(Math.max(56, menu.y - 12), window.innerHeight - 50),
+                top: menu.bottom + 8,
                 left: Math.min(Math.max(160, menu.x), window.innerWidth - 160),
               }}
               onMouseDown={(e) => e.stopPropagation()}
@@ -1466,40 +1484,6 @@ function MarkdownViewerImpl({
                 <div className="mx-1 h-4 w-px bg-border" />
 
                 {/* Actions */}
-                {menu.mode === "create" && onAskAi && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        aria-label="AI actions"
-                        className="flex h-7 items-center gap-1 rounded px-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-                      >
-                        <Sparkles className="h-3.5 w-3.5" /> AI
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="z-(--z-menu)">
-                      {[
-                        { label: "Ask AI", action: undefined },
-                        { label: "Summarize", action: "summary" },
-                        { label: "Explain", action: "explain" },
-                        { label: "Rewrite", action: "rewrite" },
-                        { label: "Notes", action: "notes" },
-                        { label: "Mermaid", action: "mermaid" },
-                      ].map((item) => (
-                        <DropdownMenuItem
-                          key={item.label}
-                          onClick={() => {
-                            onAskAi({ selection: menu.text, actionId: item.action });
-                            window.getSelection()?.removeAllRanges();
-                            setMenu(null);
-                          }}
-                        >
-                          {item.label}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-
                 <button
                   onClick={() => {
                     navigator.clipboard.writeText(
@@ -1560,7 +1544,7 @@ function MarkdownViewerImpl({
                         setMenu(null);
                       }}
                     >
-                      <Crosshair className="mr-2 h-4 w-4" /> Inspect source
+                      <Crosshair /> Inspect source
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => {
@@ -1568,8 +1552,58 @@ function MarkdownViewerImpl({
                         setMenu(null);
                       }}
                     >
-                      <Code2 className="mr-2 h-4 w-4" /> Copy code
+                      <Code2 /> Copy code
                     </DropdownMenuItem>
+                    {menu.mode === "create" && onAskAi && (
+                      <>
+                        <DropdownMenuSeparator />
+                        {/* A disclosure row, not a submenu: the actions unfold in
+                            place, and choosing the row keeps the menu open. */}
+                        <DropdownMenuItem
+                          aria-expanded={aiActionsOpen}
+                          onSelect={(e) => {
+                            e.preventDefault();
+                            setAiActionsOpen((open) => !open);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                              e.preventDefault();
+                              setAiActionsOpen(e.key === "ArrowRight");
+                            }
+                          }}
+                        >
+                          <Sparkles /> AI
+                          <ChevronRight
+                            className={cn(
+                              "ml-auto text-muted-foreground transition-transform duration-150",
+                              aiActionsOpen && "rotate-90",
+                            )}
+                          />
+                        </DropdownMenuItem>
+                        {aiActionsOpen &&
+                          [
+                            { label: "Ask AI", action: undefined },
+                            { label: "Summarize", action: "summary" },
+                            { label: "Explain", action: "explain" },
+                            { label: "Rewrite", action: "rewrite" },
+                            { label: "Notes", action: "notes" },
+                            { label: "Mermaid", action: "mermaid" },
+                          ].map((item) => (
+                            <DropdownMenuItem
+                              key={item.label}
+                              inset
+                              className="animate-in fade-in slide-in-from-top-1 duration-150"
+                              onClick={() => {
+                                onAskAi({ selection: menu.text, actionId: item.action });
+                                window.getSelection()?.removeAllRanges();
+                                setMenu(null);
+                              }}
+                            >
+                              {item.label}
+                            </DropdownMenuItem>
+                          ))}
+                      </>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
 

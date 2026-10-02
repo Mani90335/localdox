@@ -6,14 +6,14 @@ note links all use these addresses to land on the exact occurrence.
 
 ## The problem
 
-Each of these features used to find its target by searching *rendered text*:
+Each of these features used to find its target by searching _rendered text_:
 
-| Feature | Old method | Where it broke |
-| --- | --- | --- |
-| Search hit | the N-th match of the query on the page, if the page's count equalled the index's | any diagram (its SVG labels and Mermaid's stylesheet add matches), so every hit after it fell back… |
-| …fallback | find the hit's indexed line on the page | table rows (indexed as `cell⇥cell`; the page has no tab), diagram source (not on the page) → **first match in the document** |
-| Inspect / Copy code | search the whole file for the selected words | a phrase that occurs twice → the first copy |
-| Note link | search the page for the note's quote | repeated passages; equations in the quote |
+| Feature             | Old method                                                                        | Where it broke                                                                                                               |
+| ------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Search hit          | the N-th match of the query on the page, if the page's count equalled the index's | any diagram (its SVG labels and Mermaid's stylesheet add matches), so every hit after it fell back…                          |
+| …fallback           | find the hit's indexed line on the page                                           | table rows (indexed as `cell⇥cell`; the page has no tab), diagram source (not on the page) → **first match in the document** |
+| Inspect / Copy code | search the whole file for the selected words                                      | a phrase that occurs twice → the first copy                                                                                  |
+| Note link           | search the page for the note's quote                                              | repeated passages; equations in the quote                                                                                    |
 
 Reproduced before the fix: in a document with a table and a diagram, all 4 table
 and diagram hits for "widget" flashed the intro paragraph's "widget".
@@ -46,7 +46,7 @@ note anchor { start, end, head, tail } ── relocateAnchor ──┘
 **`lib/markdown/source-address.ts`** (pure, unit-tested):
 
 - `rehypeSourceAddress` stamps `p, h1–h6, li, blockquote, pre, table, tr, td,
-  th, dt, dd, img` and equations with `data-src="start:end"` from Markdown's
+th, dt, dd, img` and equations with `data-src="start:end"` from Markdown's
   own node positions. These are block-level only: inline elements outnumber
   blocks many times over, and alignment within one block is exact enough.
   Spans are Markdown's: a cell starts at its `|`, an item at its `-`.
@@ -64,7 +64,7 @@ note anchor { start, end, head, tail } ── relocateAnchor ──┘
   divergences such as collapsed whitespace, list numbers or footnote markers,
   with bounded look-ahead.
 - `searchHitSpan(file, lineIndex, rowText, query, occurrence)` counts the
-  occurrence in the *indexed* row text, exactly as the search index counted it
+  occurrence in the _indexed_ row text, exactly as the search index counted it
   (tabs between cells and all), then maps it through the line's projection.
 - `anchorSpan` / `relocateAnchor`: a span plus its first and last 32 source
   characters. The offsets are tried first. If the file changed, the head
@@ -94,13 +94,13 @@ rule is `!important`).
 
 ## Where it is used
 
-| Caller | Flow | Fallback |
-| --- | --- | --- |
-| Inspect source | `menuAddress()` → editor selects exactly that span | `locateInSource` (whole-file text search) |
-| Copy code | `menuAddress()` → `lineSpan` | `sourceLinesForSelection` |
-| Copy to notes | stores `source.anchor = anchorSpan(file, address)` | quote, prefix/suffix |
-| Note link | `resolveNoteSource`: `relocateAnchor` → page → `pendingSaved.span` → `rangeOfAddress` | quote search (notes from before addressing) |
-| Search hit | `searchHitSpan` → `rangeOfAddress`; a diagram hit lands on its label, or on the diagram | occurrence counting, for unaddressed content |
+| Caller         | Flow                                                                                    | Fallback                                     |
+| -------------- | --------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Inspect source | `menuAddress()` → editor selects exactly that span                                      | `locateInSource` (whole-file text search)    |
+| Copy code      | `menuAddress()` → `lineSpan`                                                            | `sourceLinesForSelection`                    |
+| Copy to notes  | stores `source.anchor = anchorSpan(file, address)`                                      | quote, prefix/suffix                         |
+| Note link      | `resolveNoteSource`: `relocateAnchor` → page → `pendingSaved.span` → `rangeOfAddress`   | quote search (notes from before addressing)  |
+| Search hit     | `searchHitSpan` → `rangeOfAddress`; a diagram hit lands on its label, or on the diagram | occurrence counting, for unaddressed content |
 
 The fallbacks remain for content with no source positions, mainly converted
 HTML documents.
@@ -111,6 +111,14 @@ The selection menu opened downward from the selection, so selecting near the
 bottom of the window (any document's last lines, which can't scroll higher) put
 **Save**, **Highlight** and **Copy selection to notes** off screen. A layout
 effect now measures the menu and keeps it inside the viewport, before paint.
+
+Later, the menu stopped covering the text it acts on. It remembers the
+selection's box (`top`/`bottom`, or the clicked highlight's range box) and opens
+8 px below it, flipping above when there's no room below. Only a selection
+taller than the window falls back to clamping. The menu has `transition-none`
+because Tailwind v4's `duration-100` (meant for the enter animation) also sets
+`transition-duration` with `transition-property: all`. Measuring commits the
+first position, so a flip would otherwise slide over the selection for ~80 ms.
 
 ## Cost (measured)
 
