@@ -48,7 +48,7 @@ export const ViewerRegistry = {
   ["json"],
   ["md", "markdown", "mdx", "txt"],
   ["mmd", "mermaid"],
-  ["excalidraw"],
+  ["board", "excalidraw"],
   ["png", "jpg", "jpeg", "webp", "gif", "svg"],
   ["mp4", "webm", "mov", "mp3", "wav", "ogg", "m4a"],
   ["html", "htm"],

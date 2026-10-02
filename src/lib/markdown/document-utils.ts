@@ -8,6 +8,8 @@ const kindByExtension: Record<string, DocumentKind> = {
   mdx: "markdown",
   mmd: "mermaid",
   mermaid: "mermaid",
+  board: "board",
+  // Boards made before the native editor; same element schema, opened as boards.
   excalidraw: "board",
   txt: "text",
   // RTF can contain legacy-encoded bytes and binary image runs; retain it as
@@ -103,7 +105,7 @@ export function isEditableKind(kind: DocumentKind) {
  * Kinds whose bytes are stored as text in `content` rather than as a Blob
  * in `data`.
  *
- * An `.excalidraw` board is JSON, so it is stored as text — but it is not
+ * A board (`.board`, or an older `.excalidraw`) is JSON, so it is stored as text — but it is not
  * an `isTextKind`, because that flag also decides who may edit a document, and
  * a board's editor is its canvas, never the markdown editor.
  *

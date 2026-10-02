@@ -141,6 +141,7 @@ export function PaneDocument({
         nextFile={null}
         onNavFile={() => {}}
         onContentChange={onContentChange}
+        onRenameFile={onRenameFile}
         onDocumentSave={onDocumentSave}
         onEditorDirtyChange={onEditorDirtyChange}
         fillAvailableHeight

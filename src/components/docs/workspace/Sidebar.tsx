@@ -832,7 +832,7 @@ function SidebarImpl({
     const isTextual = kind === "markdown" || kind === "text";
     const mins = readingMinutes(file.content);
     const title = file.name.replace(
-      /\.(md|markdown|mdx|mmd|mermaid|excalidraw|txt|docx|pdf|xlsx|xls|csv|json|html|htm|ppt|pptx|gdoc|gslides)$/i,
+      /\.(md|markdown|mdx|mmd|mermaid|board|excalidraw|txt|docx|pdf|xlsx|xls|csv|json|html|htm|ppt|pptx|gdoc|gslides)$/i,
       "",
     );
     const dragActive = reordering && !viewActive && realIndex >= 0 && !selecting;

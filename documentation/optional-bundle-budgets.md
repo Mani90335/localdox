@@ -69,7 +69,7 @@ Other substantial assets remain optional: Babel's worker is 2,967,068 raw bytes,
 MathLive 807,992, XLSX's worker 430,570 (including its protocol), PDF's worker
 1,265,413, and conversion WASM 6,691,779. The 1,821,047-byte chunk from the audit
 is Excalidraw's vendor output, not a common vendor bundle fetched by these nine
-journeys. The emitted module report identifies its owner. A future compiler
+journeys. (Boards no longer use Excalidraw; see `boards.md`.) The emitted module report identifies its owner. A future compiler
 replacement needs a separate syntax-compatibility decision; worker execution
 alone does not reduce download size.
 

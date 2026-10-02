@@ -17,6 +17,8 @@ export interface Props {
   fillAvailableHeight?: boolean;
   /** Persist an edited document. Omitted where the viewer is read-only. */
   onContentChange?: (fileId: string, content: string) => void;
+  /** Renames the file in place (boards name themselves from their title). */
+  onRenameFile?: (fileId: string, name: string) => void;
   onDocumentSave?: (fileId: string, update: DocumentUpdate) => void;
   onEditorDirtyChange?: (dirty: boolean) => void;
   /** Opens the workspace command palette from the header's search field. */

@@ -11,14 +11,26 @@
 import type { ReadingFont } from "../workspace/persistence";
 
 /** Families already requested, so repeated calls don't re-import. */
-const loaded = new Set<string>();
+const loaded = new Map<string, Promise<void>>();
 
-function once(key: string, load: () => Promise<unknown>): void {
-  if (loaded.has(key)) return;
-  loaded.add(key);
+/**
+ * Imports a family's stylesheet once. The returned promise settles when the
+ * stylesheet has arrived (never rejects), for callers that must know — a
+ * canvas, unlike HTML text, doesn't re-lay itself out when a face swaps in.
+ */
+function once(key: string, load: () => Promise<unknown>): Promise<void> {
+  let pending = loaded.get(key);
+  if (pending) return pending;
   // A font that fails to load is not an error worth surfacing: the fallback
   // stack is already on screen and stays there.
-  void load().catch(() => loaded.delete(key));
+  pending = load().then(
+    () => undefined,
+    () => {
+      loaded.delete(key);
+    },
+  );
+  loaded.set(key, pending);
+  return pending;
 }
 
 /** JetBrains Mono — `--font-mono`. Requested when a document renders code. */
@@ -33,18 +45,17 @@ export function loadMonoFont(): void {
 
 /** The reader's chosen body/heading face. "custom" is an uploaded file, served
  *  from IndexedDB and registered by custom-font.ts — nothing to fetch here. */
-export function loadReadingFont(font: ReadingFont): void {
+export function loadReadingFont(font: ReadingFont): Promise<void> {
   switch (font) {
     case "hyperlegible":
-      once("atkinson-hyperlegible", () =>
+      return once("atkinson-hyperlegible", () =>
         Promise.all([
           import("@fontsource/atkinson-hyperlegible/400.css"),
           import("@fontsource/atkinson-hyperlegible/700.css"),
         ]),
       );
-      break;
-    case "custom":
-      break;
+    default:
+      return Promise.resolve();
   }
 }
 

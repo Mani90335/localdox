@@ -1859,16 +1859,20 @@ export function DocsApp() {
       const taken = new Set(snapshotRef.current.files.map((f) => f.name));
       const isMermaid = documentKind === "mermaid";
       const isBoard = documentKind === "board";
-      const extension = isBoard ? ".excalidraw" : isMermaid ? ".mmd" : ".md";
+      const extension = isBoard ? ".board" : isMermaid ? ".mmd" : ".md";
       const suggested = uniqueFileName(
-        isBoard ? "board.excalidraw" : isMermaid ? "animation.mmd" : "new.md",
+        isBoard ? "Untitled board.board" : isMermaid ? "animation.mmd" : "new.md",
         taken,
       );
 
       // Ask for the name up front. Creating the document and leaving the reader
       // to find Rename in a menu meant every new file started as "new.md", and
       // a workspace filled up with documents named after nothing.
-      const entered = window.prompt("Name for the new file:", suggested);
+      //
+      // Boards are the exception: they open at once and are named in place, in
+      // the title at the board's top-left. A native prompt freezes the whole
+      // page, which is the wrong first moment for a canvas you came to sketch on.
+      const entered = isBoard ? suggested : window.prompt("Name for the new file:", suggested);
       // Cancel means cancel — no document, rather than one with the default name.
       if (entered === null) return;
       const trimmed = entered.trim();
@@ -1903,7 +1907,7 @@ flowchart LR
         name,
         content,
         mimeType: isBoard
-          ? "application/vnd.excalidraw+json"
+          ? "application/vnd.localdox.board+json"
           : isMermaid
             ? "text/vnd.mermaid"
             : "text/markdown",
@@ -1940,12 +1944,13 @@ flowchart LR
       setDrawerOpen(false);
       if (location.pathname !== "/") navigate({ to: "/" });
       markDirty();
+      // A new board's empty state already says how to start; a toast would
+      // only sit on top of its tool dock.
+      if (isBoard) return;
       toast.success(`Created ${name}`, {
-        description: isBoard
-          ? "Draw, drop in images, and sketch diagrams. Changes save automatically."
-          : isMermaid
-            ? "Edit the flow script and Mermaid source, then preview the animation."
-            : "Paste your markdown, then Save.",
+        description: isMermaid
+          ? "Edit the flow script and Mermaid source, then preview the animation."
+          : "Paste your markdown, then Save.",
       });
     },
     [location.pathname, navigate, markDirty],
@@ -4765,6 +4770,7 @@ flowchart LR
                         nextFile={nextFile}
                         onNavFile={navToFile}
                         onContentChange={handleContentChange}
+                        onRenameFile={renameFile}
                         startInEditFileId={autoEditFileId}
                         onStartInEditConsumed={consumeStartInEdit}
                       />

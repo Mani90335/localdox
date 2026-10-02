@@ -10,32 +10,20 @@ import { Suspense, lazy, useEffect, useState, type FC } from "react";
  */
 type BoardProps = {
   fileId: string;
+  fileName?: string;
   content: string;
   onContentChange?: (content: string) => void;
+  onRename?: (name: string) => void;
 };
 
 /**
- * Excalidraw, loaded only when a board is actually opened — and only in a
- * browser.
+ * The board editor, loaded only when a board is actually opened — and only in
+ * a browser.
  *
- * Two separate reasons this import is deferred:
- *
- * 1. Size. The package is a whole drawing editor — canvas renderer, shape
- *    library and its own stylesheet. Importing `./Board` directly would put all
- *    of that in the first download for every reader, including the ones who
- *    only ever open a markdown file.
- *
- * 2. It cannot be evaluated on the server. Excalidraw reads `navigator.platform`
- *    and `"netscape" in window` at module top level, with no guard, so merely
- *    importing it throws `window is not defined` during prerender and leaves
- *    `.output/public` with no HTML at all.
- *
- *    The import below stays a plain literal on purpose. Hiding the specifier
- *    from the bundler does keep Excalidraw out of the server graph, but it
- *    blinds the *client* build too: no chunk is emitted, and opening a board in
- *    production 404s while dev still works, because the dev server resolves
- *    modules on demand. `./Board` therefore imports Excalidraw from an effect
- *    instead, which leaves this module safe for the server to evaluate.
+ * Size is the reason: the editor (canvas engine, tools, menus) has no business
+ * in the first download for a reader who only ever opens markdown. The import
+ * stays a plain literal so Vite emits a client chunk for it; the SSR branch
+ * returns a stub so the server never renders a canvas it can't measure.
  */
 const Board = lazy(async () => {
   // Typed from the local `BoardProps` so both branches share one signature —

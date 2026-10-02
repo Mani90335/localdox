@@ -83,6 +83,9 @@ export default defineConfig({
       "cytoscape-cose-bilkent",
       "cytoscape-fcose",
       "pdfjs-dist",
+      // Boards' pen strokes. Discovered at runtime instead, it makes the dev
+      // server re-bundle every dependency and reload the page on first open.
+      "perfect-freehand",
     ],
   },
   build: {
