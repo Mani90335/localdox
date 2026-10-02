@@ -75,7 +75,9 @@ export default defineConfig({
       "xlsx",
       "mammoth/mammoth.browser",
       "dayjs",
-      "@braintree/sanitize-url",
+      // Mermaid's own dependency; resolved through it because the package
+      // manager may nest it under mermaid rather than hoist it.
+      "mermaid > @braintree/sanitize-url",
       "cytoscape",
       "cytoscape-cose-bilkent",
       "cytoscape-fcose",
