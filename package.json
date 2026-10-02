@@ -15,7 +15,9 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test:e2e": "playwright test",
-    "test:bundles": "node scripts/check-bundle-budgets.mjs"
+    "test:bundles": "node scripts/check-bundle-budgets.mjs",
+    "bench:compute": "node --experimental-strip-types scripts/benchmark-compute.ts",
+    "test:compute-reference": "node --experimental-strip-types --test scripts/compute-reference/reference.test.ts"
   },
   "dependencies": {
     "@babel/standalone": "^7.29.7",
