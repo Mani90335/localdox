@@ -156,29 +156,43 @@ test("Escape closes nested search before navigation", async ({ page }) => {
 test("file actions remain usable in a nested menu and document selection closes navigation", async ({
   page,
 }) => {
+  // Markdown is renamed from its editor's name field, so rename a kind that
+  // keeps the menu item. Adding a file doesn't switch to it.
+  await page
+    .locator('input[type="file"]')
+    .first()
+    .setInputFiles({
+      name: "navigation-data.json",
+      mimeType: "application/json",
+      buffer: Buffer.from('{ "fixture": true }'),
+    });
   const menu = page.getByRole("button", { name: "Menu", exact: true });
   await menu.click();
   const drawer = page.getByRole("dialog", { name: "Workspace navigation" });
-  const options = drawer.getByRole("button", { name: "Options", exact: true }).first();
-  await options.click();
+  const rows = drawer.locator("[data-sidebar-file]");
+  const note = rows.filter({ hasText: /^navigation(?!-)/ });
+  const data = rows.filter({ hasText: "navigation-data" });
+  await data.getByRole("button", { name: "Options", exact: true }).click();
   const rename = drawer.getByRole("button", { name: "Rename", exact: true });
   await expect(rename).toBeVisible();
   // A portaled menu must be reachable within the modal, including by keyboard.
   await rename.focus();
   await expect(rename).toBeFocused();
-  page.once("dialog", (dialog) => dialog.accept("renamed-navigation.md"));
+  page.once("dialog", (dialog) => dialog.accept("renamed-navigation.json"));
   await page.keyboard.press("Enter");
   await expect(drawer.getByRole("button", { name: /^renamed-navigation/ })).toBeVisible();
-  await options.click();
+  await note.getByRole("button", { name: "Options", exact: true }).click();
+  await expect(drawer.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "Rename", exact: true })).toHaveCount(0);
   await drawer.getByRole("button", { name: "Export", exact: true }).click();
   const share = drawer.getByRole("button", { name: "Share link", exact: true });
   await share.focus();
   await expect(share).toBeFocused();
   await page.keyboard.press("Escape");
-  await expect(page.getByText("Rename", { exact: true })).toBeHidden();
+  await expect(page.locator("[data-sidebar-menu-panel]")).toHaveCount(0);
   await expect(drawer).toHaveAttribute("data-state", "open");
   await expectFocusInsideDrawer(page);
-  await drawer.getByRole("button", { name: /^renamed-navigation/ }).click();
+  await note.getByRole("button", { name: /^navigation/ }).click();
   await expect(drawer).toBeHidden();
   await expect(menu).toBeFocused();
   await expect(page.getByRole("heading", { name: "Navigation fixture" })).toBeVisible();

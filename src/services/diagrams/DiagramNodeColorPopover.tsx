@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { RotateCcw, X } from "lucide-react";
+import { usePortalContainer } from "@/hooks/use-portal-container";
 import { NODE_COLORS } from "./diagram-node-colors";
 
 /**
@@ -32,6 +33,8 @@ export function DiagramNodeColorPopover({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Inside the diagram when it is in full screen, where <body> is not painted.
+  const container = usePortalContainer();
   const [position, setPosition] = useState({ top: 0, left: 0 });
 
   // Measured before paint: placing it from an effect would show one frame at
@@ -112,6 +115,6 @@ export function DiagramNodeColorPopover({
         )}
       </div>
     </>,
-    document.body,
+    container ?? document.body,
   );
 }

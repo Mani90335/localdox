@@ -10,6 +10,7 @@ import { DiagramTopBar, SelectionActionTray } from "./DiagramInteractionBar";
 import { useGpuDiagramInteraction } from "./engine/interaction/use-gpu-diagram-interaction";
 import { describeRenderError } from "./render-error";
 import { useSvgViewport } from "./use-svg-viewport";
+import { centredBoxCap } from "./mermaid-diagram-helpers";
 import { TALL_STAGE_RATIO, clampStageRatio, stageBoxStyle, stageWidthCap } from "./stage-ratio";
 
 const TRAY_GUTTER = 56;
@@ -104,10 +105,7 @@ export function LargeDiagramStage({
 
   const cap = ratio ? stageWidthCap(ratio) : undefined;
   return (
-    <div
-      className="group/stage relative h-full w-full"
-      style={fill || !cap ? undefined : { maxWidth: `calc(${cap})`, marginInline: "auto" }}
-    >
+    <div className="group/stage relative h-full w-full">
       <DiagramTopBar interaction={interaction} />
       {interaction.selectMode && interaction.selectedIds.size > 0 && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-start gap-2 p-3">
@@ -142,7 +140,14 @@ export function LargeDiagramStage({
         className={`overflow-hidden rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
           fill ? "h-full min-h-0 w-full" : "w-full box-content"
         }`}
-        style={fill ? undefined : stageBoxStyle(ratio ?? 0.42, TRAY_GUTTER)}
+        style={
+          fill
+            ? undefined
+            : {
+                ...stageBoxStyle(ratio ?? 0.42, TRAY_GUTTER),
+                ...centredBoxCap(cap ? `calc(${cap})` : undefined),
+              }
+        }
       />
     </div>
   );

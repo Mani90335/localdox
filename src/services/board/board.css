@@ -1,39 +1,889 @@
 /*
- * Make a board sit on the app's own paper.
+ * The board's chrome.
  *
- * Excalidraw paints its canvas from `viewBackgroundColor`, which lives in the
- * scene's own appState and is saved into the `.excalidraw` file. Writing the
- * app's theme colour there would bake a theme into the document and travel with
- * it to excalidraw.com, so the file keeps its own background and the *frame*
- * around it is what adapts: the container and its UI islands inherit the app
- * surface, which is what removes the "pasted-in iframe" seam.
+ * Everything floats over one continuous canvas: the tool dock at the bottom,
+ * a toolbar that floats beside whatever is selected, and
+ * history/zoom/menu at the top right. Every surface uses the app's own tokens,
+ * so a board sits on the same paper, in the same type, as every other document.
  */
-.excalidraw-surface,
-.excalidraw-surface .excalidraw {
+
+.board {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-ui);
+  -webkit-user-select: none;
+  user-select: none;
+  contain: strict;
+}
+
+.board-stage {
+  position: absolute;
+  inset: 0;
+  outline: none;
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+
+/* Shows where Tab landed; drops away once you start working on the board,
+   where a ring around the whole canvas would only be noise. */
+.board-stage:focus-visible:not([data-engaged]) {
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--ring) 45%, transparent);
+}
+
+.board-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.board-text-editor {
+  position: absolute;
+  z-index: 2;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+  caret-color: var(--primary);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.board-text-editor::selection {
+  background: color-mix(in oklab, var(--primary) 28%, transparent);
+}
+
+/* --- Empty state ------------------------------------------------------- */
+
+.board-empty {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  translate: -50% -50%;
+  width: min(30rem, calc(100% - 3rem));
+  text-align: center;
+  pointer-events: none;
+  animation: board-fade-in 320ms ease-out both;
+}
+
+.board-empty__title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.board-empty__body {
+  margin-top: 0.375rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.board-empty__keys {
+  margin-top: 1.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.375rem 1rem;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+
+.board-empty__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.board kbd,
+.board-shortcuts kbd {
+  display: inline-flex;
+  min-width: 1.375rem;
+  height: 1.375rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.375rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  background: var(--card);
+  font: 500 0.75rem/1 var(--font-ui);
+  color: var(--foreground);
+  white-space: nowrap;
+}
+
+/* --- Floating surfaces -------------------------------------------------- */
+
+.board-rail,
+.board-pill,
+.board-bar,
+.board-pop,
+.board-tool-options {
+  background: color-mix(in oklab, var(--card) 92%, transparent);
+  -webkit-backdrop-filter: saturate(1.4) blur(14px);
+  backdrop-filter: saturate(1.4) blur(14px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-3);
+  z-index: 10;
+}
+
+/* The tool rail runs down the left edge, under the title: next to the
+   workspace sidebar, early in reading order, and clear of the phone's home
+   indicator, browser toolbars and on-screen keyboard at the bottom. */
+.board-rail-wrap {
+  position: absolute;
+  top: 3.75rem;
+  left: max(0.75rem, env(safe-area-inset-left));
+  z-index: 10;
+}
+
+.board-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.3125rem;
+  border-radius: 1rem;
+  animation: board-slide-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.board-rail__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.board-rail__group + .board-rail__group {
+  margin-top: 0.3125rem;
+  padding-top: 0.3125rem;
+  border-top: 1px solid var(--border);
+}
+
+.board-tool {
+  position: relative;
+  display: inline-flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.6875rem;
+  color: var(--muted-foreground);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.board-tool:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.board-tool:active {
+  transform: scale(0.94);
+}
+
+.board-tool[aria-pressed="true"],
+.board-tool[data-active] {
+  background: color-mix(in oklab, var(--primary) 14%, transparent);
+  color: var(--primary);
+}
+
+.board-tool:focus-visible,
+.board-icon-button:focus-visible,
+.board-segmented__option:focus-visible,
+.board-swatch:focus-visible,
+.board-picker:focus-visible,
+.board-zoom-label:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* The overflow button only exists where secondary tools are tucked away. */
+.board-tool--overflow {
+  display: none;
+}
+
+.board-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.0625rem;
+  padding: 0.1875rem;
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-2);
+}
+
+.board-top {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  gap: 0.5rem;
+  z-index: 10;
+}
+
+.board-icon-button {
+  position: relative;
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  color: var(--muted-foreground);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.board-icon-button:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.board-icon-button[data-tone="danger"]:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--destructive) 12%, transparent);
+  color: var(--destructive);
+}
+
+.board-icon-button:disabled {
+  opacity: 0.38;
+}
+
+.board-zoom-label {
+  min-width: 3.25rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+}
+
+.board-zoom-label:hover {
+  background: var(--accent);
+}
+
+.board-menu svg {
+  color: var(--muted-foreground);
+}
+
+.board-menu__glyph {
+  display: inline-flex;
+  width: 18px;
+  justify-content: center;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+/* --- Selection bar, its panels, tool options, title ----------------------- */
+
+.board-bar {
+  position: absolute;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 0.0625rem;
+  padding: 0.25rem;
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-2);
+  animation: board-pop-in 120ms ease-out both;
+}
+
+.board-bar__unlock {
+  display: inline-flex;
+  height: 2rem;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0 0.625rem 0 0.5rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.board-bar__unlock:hover {
+  background: var(--accent);
+}
+
+.board-bar__unlock:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.board-bar__item {
+  position: relative;
+}
+
+.board-bar__dot {
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 18%, transparent);
+}
+
+.board-bar__fill {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 0.3125rem;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 18%, transparent);
+}
+
+.board-bar__text {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.board-bar__divider {
+  width: 1px;
+  height: 1.25rem;
+  margin: 0 0.25rem;
+  background: var(--border);
+}
+
+.board-pop {
+  position: absolute;
+  left: 50%;
+  translate: -50% 0;
+  z-index: 20;
+  display: flex;
+  width: max-content;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 0.875rem;
+  animation: board-pop-in 120ms ease-out both;
+}
+
+.board-pop[data-side="up"] {
+  bottom: calc(100% + 0.625rem);
+}
+
+.board-pop[data-side="down"] {
+  top: calc(100% + 0.625rem);
+}
+
+/* Options for the tool in hand: a slim second column beside the rail, pinned
+   to its top. Narrow and at the edge, it stays out of the drawing area, and it
+   doesn't move as tools change. */
+.board-tool-options {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 0.5rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.375rem;
+  border-radius: 0.875rem;
+  box-shadow: var(--shadow-2);
+  animation: board-pop-in 140ms ease-out both;
+}
+
+.board-tool-options .board-swatches {
+  display: grid;
+  grid-template-columns: repeat(2, 1.375rem);
+  gap: 0.375rem;
+}
+
+.board-tool-options .board-segmented {
+  flex-direction: column;
+}
+
+.board-tool-options .board-bar__divider {
+  width: 1.75rem;
+  height: 1px;
+  margin: 0.125rem 0;
+}
+
+.board-title {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 10;
+  max-width: calc(100% - 22rem);
+}
+
+.board-title__input,
+.board-title__static {
+  display: block;
+  max-width: 100%;
+  height: 2.25rem;
+  padding: 0 0.625rem;
+  border: 1px solid transparent;
+  border-radius: 0.625rem;
+  background: color-mix(in oklab, var(--background) 82%, transparent);
+  font: 600 0.875rem/2.125rem var(--font-ui);
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  outline: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.board-title__input:hover {
+  background: var(--accent);
+}
+
+.board-title__input:focus {
+  border-color: var(--ring);
+  background: var(--card);
+}
+
+.board-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4375rem;
+}
+
+.board-field__label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+}
+
+.board-swatches {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.375rem;
+}
+
+.board-swatch {
+  position: relative;
+  width: 1.375rem;
+  height: 1.375rem;
+  border-radius: 999px;
+  background: var(--swatch);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 14%, transparent);
+  transition: transform 120ms ease;
+}
+
+.board-swatch:hover {
+  transform: scale(1.1);
+}
+
+.board-swatch[aria-pressed="true"] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--foreground) 14%, transparent),
+    0 0 0 2px var(--card),
+    0 0 0 3.5px var(--primary);
+}
+
+/* "Custom colour": a hue ring; once a custom colour is in use, its centre
+   shows that colour. */
+.board-swatch--custom {
+  background: conic-gradient(
+    from 90deg,
+    #ff4d4d,
+    #ffb84d,
+    #f2e34d,
+    #4dd97a,
+    #4db8ff,
+    #8f6bff,
+    #ff4dc4,
+    #ff4d4d
+  );
+  box-shadow: none;
+}
+
+.board-swatch--custom::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 999px;
+  background: var(--swatch, var(--card));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 14%, transparent);
+}
+
+.board-swatch--custom[aria-pressed="true"] {
+  box-shadow:
+    0 0 0 2px var(--card),
+    0 0 0 3.5px var(--primary);
+}
+
+.board-swatch--small {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.board-swatches-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* In the narrow tool column the picker opens beside the column instead. */
+.board-swatches-wrap[data-flyout] .board-color-flyout {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 0.5rem);
+  padding: 0.75rem;
+  border-radius: 0.875rem;
+  border: 1px solid var(--border);
+  background: var(--popover);
+  box-shadow: var(--shadow-3);
+  animation: board-pop-in 120ms ease-out both;
+  z-index: 20;
+}
+
+.board-color-picker {
+  display: flex;
+  width: 10.5rem;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.board-color-picker__wheel {
+  position: relative;
+  align-self: center;
+}
+
+.board-color-picker__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.board-color-picker__canvas:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.board-color-picker__marker {
+  position: absolute;
+  width: 1rem;
+  height: 1rem;
+  translate: -50% -50%;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.35),
+    0 1px 3px rgb(0 0 0 / 0.3);
+  pointer-events: none;
+}
+
+.board-color-picker__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.board-color-picker__label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.board-color-picker__range {
+  flex: 1;
+  min-width: 0;
+  height: 0.625rem;
+  border-radius: 999px;
+  appearance: none;
+  background: linear-gradient(to right, #000, var(--range-to, #fff));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 14%, transparent);
+}
+
+.board-color-picker__range::-webkit-slider-thumb {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  background: transparent;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35);
+}
+
+.board-color-picker__range::-moz-range-thumb {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  background: transparent;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35);
+}
+
+.board-color-picker__range:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.board-color-picker__preview {
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  border-radius: 0.5rem;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 14%, transparent);
+}
+
+.board-color-picker__hex {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  height: 1.75rem;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--background);
+  font: 500 0.8125rem/1 var(--font-mono);
+  color: var(--muted-foreground);
+}
+
+.board-color-picker__hex:focus-within {
+  border-color: var(--ring);
+}
+
+.board-color-picker__hex input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  color: var(--foreground);
+  text-transform: uppercase;
+}
+
+.board-color-picker__recents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.board-swatch--none {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--muted-foreground);
+  box-shadow: none;
+}
+
+.board-segmented {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.125rem;
+  gap: 0.125rem;
+  border-radius: 0.5625rem;
+  background: var(--muted);
+}
+
+.board-segmented__option {
+  position: relative;
+  display: inline-flex;
+  min-width: 2rem;
+  height: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.375rem;
+  border-radius: 0.4375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.board-segmented__option:hover {
+  color: var(--foreground);
+}
+
+.board-segmented__option[aria-pressed="true"] {
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--shadow-1);
+}
+
+.board-picker {
+  position: relative;
+  display: inline-flex;
+  height: 2rem;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0 0.25rem 0 0.375rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  color: var(--foreground);
+}
+
+.board-picker:hover {
+  background: var(--accent);
+}
+
+/* --- Tooltips ------------------------------------------------------------ */
+
+/* Pure CSS: no tooltip component per button, no JS on hover. Shown after a
+   short dwell on pointer devices and immediately on keyboard focus. */
+@media (hover: hover) {
+  .board [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 0.5rem);
+    translate: -50% 2px;
+    padding: 0.3125rem 0.5rem;
+    border-radius: 0.4375rem;
+    background: var(--foreground);
+    color: var(--background);
+    font: 500 0.75rem/1 var(--font-ui);
+    letter-spacing: 0;
+    white-space: pre;
+    pointer-events: none;
+    opacity: 0;
+    transition:
+      opacity 120ms ease,
+      translate 120ms ease;
+    z-index: 20;
+  }
+
+  .board [data-tip][data-tip-side="right"]::after {
+    left: calc(100% + 0.625rem);
+    bottom: auto;
+    top: 50%;
+    translate: -2px -50%;
+  }
+
+  .board [data-tip][data-tip-side="bottom"]::after {
+    bottom: auto;
+    top: calc(100% + 0.5rem);
+    translate: -50% -2px;
+  }
+
+  .board [data-tip]:hover::after {
+    opacity: 1;
+    translate: -50% 0;
+    transition-delay: 380ms;
+  }
+
+  .board [data-tip]:focus-visible::after {
+    opacity: 1;
+    translate: -50% 0;
+  }
+
+  .board [data-tip][data-tip-side="right"]:hover::after,
+  .board [data-tip][data-tip-side="right"]:focus-visible::after {
+    translate: 0 -50%;
+  }
+
+  .board [aria-expanded="true"][data-tip]::after {
+    display: none;
+  }
+}
+
+/* --- Small screens -------------------------------------------------------- */
+
+/* A short board (landscape phone, small window) can't fit the whole rail, so
+   the secondary tools move into "More tools". Height, not width, decides:
+   the rail is vertical. */
+@media (max-height: 660px) {
+  .board-tool[data-secondary]:not([aria-pressed="true"]) {
+    display: none;
+  }
+
+  .board-tool--overflow {
+    display: inline-flex;
+    margin-top: 0.3125rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .board-rail-wrap {
+    top: 3.25rem;
+    left: max(0.5rem, env(safe-area-inset-left));
+  }
+
+  .board-top {
+    top: 0.5rem;
+    right: 0.5rem;
+  }
+
+  .board-title {
+    top: 0.5rem;
+    left: 0.5rem;
+    max-width: calc(100% - 15.5rem);
+  }
+}
+
+/* --- Shortcuts dialog ----------------------------------------------------- */
+
+.board-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 1.25rem 1.75rem;
+  max-height: min(65vh, 34rem);
+  overflow-y: auto;
+}
+
+.board-shortcuts h3 {
+  margin-bottom: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.board-shortcuts dl > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.3125rem 0;
+  font-size: 0.8125rem;
+}
+
+/* --- Unreadable file ------------------------------------------------------- */
+
+.board-unreadable {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
   background: var(--background);
 }
 
-/* Split panes can be narrower and shorter than the browser viewport. Keep the
-   editor inside that measured box so Excalidraw's own ResizeObserver sees the
-   real dimensions and switches to its compact controls when necessary. */
-.excalidraw-surface {
-  min-width: 0;
-  overflow: hidden;
+.board-unreadable__card {
+  max-width: 24rem;
+  text-align: center;
+  color: var(--muted-foreground);
 }
 
-/* The canvas keeps the scene's own background — only the surround follows the
-   app theme, so a board exported from here looks the same everywhere. */
-.excalidraw-surface .excalidraw .excalidraw__canvas {
-  background: transparent;
+.board-unreadable__card svg {
+  margin: 0 auto 0.75rem;
 }
 
-/*
- * An embedded board: a figure in a document, not a workspace.
- *
- * A canvas has no intrinsic height to flow to, so the embed is given one —
- * tall enough to read a diagram, short enough that a document with several
- * boards is still a document. `vh` keeps it sane on a laptop and a phone alike.
- */
+.board-unreadable__title {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.board-unreadable__body {
+  margin-top: 0.375rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* --- Embedded board (a figure in a document) ------------------------------ */
+
 .docs-board-embed-figure {
   margin: 1.5rem 0;
 }
@@ -46,6 +896,37 @@
   overflow: hidden;
 }
 
+.board-embed {
+  position: relative;
+  background: var(--background);
+}
+
+.board-embed__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: pan-x pan-y;
+}
+
+.board-embed__canvas:active {
+  cursor: grabbing;
+}
+
+.board-embed__reset {
+  position: absolute;
+  right: 0.625rem;
+  bottom: 0.625rem;
+  padding: 0.3125rem 0.625rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: var(--shadow-2);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
 .docs-board-embed-caption {
   margin-top: 0.5rem;
   font-size: 0.8125rem;
@@ -53,80 +934,38 @@
   text-align: center;
 }
 
-/* View mode still renders a help button and a footer island; a figure in a
-   document wants neither. Pan and zoom remain — they are pointer gestures, not
-   chrome. */
-.docs-board-embed .excalidraw .help-icon,
-.docs-board-embed .excalidraw .layer-ui__wrapper__footer {
-  display: none;
+@keyframes board-fade-in {
+  from {
+    opacity: 0;
+  }
 }
 
-/*
- * Reskin Excalidraw's own design tokens to the app's, so the toolbar, side
- * panels, dialogs and buttons read as product chrome rather than an embedded
- * third-party tool. This only touches the CSS custom properties Excalidraw's
- * stylesheet exposes for exactly this purpose — never its class-level rules —
- * so an Excalidraw upgrade keeps working as long as the variable names hold.
- * The canvas's own drawing content (strokes, the hand-drawn text faces a user
- * picks per element) is untouched; only the surrounding UI is reskinned.
- *
- * `.theme--dark` is repeated in the selector list, not as a separate rule with
- * its own declarations, purely so this wins on specificity over Excalidraw's
- * own same-named `.excalidraw.theme--dark` rule regardless of whether its
- * stylesheet (loaded from a lazy chunk) lands before or after this one in the
- * document — the values referenced are the app's own tokens, which already
- * resolve differently under `.dark`, so nothing here needs to change per theme.
- */
-.excalidraw-surface .excalidraw,
-.excalidraw-surface .excalidraw.theme--dark {
-  --ui-font: var(--font-ui);
+@keyframes board-pop-in {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
+}
 
-  --island-bg-color: var(--card);
-  --default-bg-color: var(--card);
-  --popup-bg-color: var(--popover);
-  --popup-secondary-bg-color: var(--muted);
-  --popup-text-color: var(--popover-foreground);
+@keyframes board-slide-in {
+  from {
+    opacity: 0;
+    translate: -6px 0;
+  }
+}
 
-  --input-bg-color: var(--background);
-  --input-border-color: var(--border);
-  --input-hover-bg-color: var(--accent);
-  --input-label-color: var(--muted-foreground);
+@media (prefers-reduced-motion: reduce) {
+  .board-rail,
+  .board-bar,
+  .board-pop,
+  .board-tool-options,
+  .board-empty {
+    animation: none;
+  }
 
-  --default-border-color: var(--border);
-  --dialog-border-color: var(--border);
-  --sidebar-bg-color: var(--card);
-  --sidebar-border-color: var(--border);
-
-  --text-primary-color: var(--foreground);
-  --color-on-surface: var(--foreground);
-  --color-surface-lowest: var(--background);
-  --color-surface-low: var(--muted);
-  --color-surface-mid: var(--accent);
-  --color-surface-high: var(--border);
-
-  --color-primary: var(--primary);
-  --color-primary-hover: color-mix(in oklab, var(--primary) 88%, var(--foreground));
-  --color-primary-darker: color-mix(in oklab, var(--primary) 82%, var(--foreground));
-  --color-primary-darkest: color-mix(in oklab, var(--primary) 68%, var(--foreground));
-  --color-primary-light: color-mix(in oklab, var(--primary) 18%, var(--background));
-  --color-primary-light-darker: color-mix(in oklab, var(--primary) 28%, var(--background));
-  --color-selection: var(--primary);
-  --link-color: var(--primary);
-  --focus-highlight-color: var(--ring);
-
-  --color-danger: var(--destructive);
-  --color-danger-text: var(--destructive);
-
-  --keybinding-color: var(--muted-foreground);
-  --scrollbar-thumb: var(--border);
-  --scrollbar-thumb-hover: var(--muted-foreground);
-
-  --border-radius-md: calc(var(--radius) - 2px);
-  --border-radius-lg: var(--radius);
-
-  --overlay-bg-color: color-mix(in oklab, var(--background) 85%, transparent);
-  --modal-shadow: var(--shadow-3);
-  --shadow-island: var(--shadow-1);
-  --sidebar-shadow: var(--shadow-2);
-  --library-dropdown-shadow: var(--shadow-2);
+  .board-tool,
+  .board-swatch,
+  .board [data-tip]::after {
+    transition: none;
+  }
 }

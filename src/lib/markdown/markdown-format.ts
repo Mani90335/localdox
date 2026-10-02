@@ -276,3 +276,20 @@ function linkLike(prefix: string, placeholder: string): FormatAction {
 
 export const link = linkLike("", "link text");
 export const image = linkLike("!", "alt text");
+
+/**
+ * What the math keyboard should open showing, given the text the reader had
+ * selected: the LaTeX inside a `$...$` or `$$...$$` span if that's what was
+ * selected (so re-opening an equation to edit it doesn't hand the dialog the
+ * delimiters too), or the plain selection otherwise.
+ */
+export function mathSeedFrom(selected: string): { latex: string; display: boolean } {
+  const trimmed = selected.trim();
+  if (trimmed.startsWith("$$") && trimmed.endsWith("$$") && trimmed.length >= 4) {
+    return { latex: trimmed.slice(2, -2).trim(), display: true };
+  }
+  if (trimmed.startsWith("$") && trimmed.endsWith("$") && trimmed.length >= 2) {
+    return { latex: trimmed.slice(1, -1), display: false };
+  }
+  return { latex: trimmed, display: false };
+}

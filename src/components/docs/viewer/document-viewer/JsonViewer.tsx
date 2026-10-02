@@ -15,8 +15,6 @@ const MindMapView = lazy(() =>
 
 export function JsonViewer({
   file,
-  isBookmarked,
-  onToggleBookmark,
   prevFile,
   nextFile,
   onNavFile,
@@ -168,12 +166,11 @@ export function JsonViewer({
   return (
     <ViewerFrame
       file={file}
-      isBookmarked={isBookmarked}
-      onToggleBookmark={onToggleBookmark}
       prevFile={prevFile}
       nextFile={nextFile}
       onNavFile={onNavFile}
       onOpenPalette={onOpenPalette}
+      editing={editing}
       navAction={modeSwitch}
       action={
         // Entering the editor is the file's own action and lives in its

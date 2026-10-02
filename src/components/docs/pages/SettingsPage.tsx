@@ -9,7 +9,6 @@ import {
   Palette,
   Sigma,
   Sparkles,
-  Star,
   X,
 } from "lucide-react";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -19,14 +18,12 @@ import { ReadingSettings } from "./settings/ReadingTab";
 import { DiagramSettings } from "./settings/DiagramsTab";
 import { MathSettings } from "./settings/MathTab";
 import { WorkspaceSettings } from "./settings/WorkspaceTab";
-import { SavedSettings, HighlightSettings, BinSettings } from "./settings/SavedTab";
+import { BinSettings } from "./settings/SavedTab";
 import { StorageSettings } from "./settings/StorageTab";
 import "./settings/settings.css";
-import type { Highlight } from "@/lib/markdown/dom-highlighter";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { ThemePref, ReadingMode, ReadingFont } from "@/lib/workspace/persistence";
 import type { MathRendererType } from "@/services/math";
-import type { SavedEntry, SavedItem } from "@/lib/workspace/saved-items";
 
 export interface SettingsPageProps {
   showEmbedMedia: boolean;
@@ -37,15 +34,12 @@ export interface SettingsPageProps {
   onDeleteWorkspace: (id: string) => void;
   onNewWorkspace: (name: string) => void;
   onClearStorage: () => void;
-  saved: SavedEntry[];
-  onOpenSaved: (item: SavedItem) => void;
-  onRemoveSaved: (id: string) => void;
-  onClearSaved: () => void;
-  highlights: Highlight[];
-  onRemoveHighlight: (id: string) => void;
-  onClearHighlights: () => void;
-  onNavigate: (fileId: string, subtopicId?: string) => void;
   files: MdFile[];
+  /** The open workspace's notes and rough work, for the storage total. */
+  writing?: {
+    notes: readonly { content: string }[];
+    scratchpads: readonly { title: string; content: string }[];
+  };
   onOpenWorkspace: (id: string) => void;
   theme: ThemePref;
   onSetTheme: (theme: ThemePref) => void;
@@ -90,7 +84,7 @@ export interface SettingsPageProps {
 }
 
 type TabId =
-  "appearance" | "reading" | "diagrams" | "math" | "ai" | "workspace" | "saved" | "storage";
+  "appearance" | "reading" | "diagrams" | "math" | "ai" | "workspace" | "storage";
 
 const SECTIONS = [
   {
@@ -133,13 +127,6 @@ const SECTIONS = [
     label: "Workspace",
     description: "Organize your spaces and take your work with you.",
     icon: Folder,
-    group: "Your library",
-  },
-  {
-    id: "saved",
-    label: "Saved",
-    description: "Your saved items, highlights, and recently deleted files.",
-    icon: Star,
     group: "Your library",
   },
   {
@@ -309,20 +296,17 @@ export function SettingsPage(props: SettingsPageProps) {
                         onShare={props.onShareWorkspace}
                       />
                     )}
-                    {section.id === "saved" && (
+                    {section.id === "storage" && (
                       <div className="space-y-7">
-                        <SavedSettings
-                          saved={props.saved}
-                          onOpen={props.onOpenSaved}
-                          onRemove={props.onRemoveSaved}
-                          onClearAll={props.onClearSaved}
-                        />
-                        <HighlightSettings
-                          highlights={props.highlights}
+                        <StorageSettings
+                          onClearStorage={props.onClearStorage}
+                          workspaceId={props.currentWorkspaceId}
                           files={props.files}
-                          onRemove={props.onRemoveHighlight}
-                          onClearAll={props.onClearHighlights}
-                          onNavigate={props.onNavigate}
+                          writing={props.writing}
+                          binCount={
+                            props.files.filter((file) => typeof file.deletedAt === "number").length
+                          }
+                          onEmptyBin={props.onEmptyBin}
                         />
                         <BinSettings
                           files={props.files}
@@ -331,17 +315,6 @@ export function SettingsPage(props: SettingsPageProps) {
                           onEmptyBin={props.onEmptyBin}
                         />
                       </div>
-                    )}
-                    {section.id === "storage" && (
-                      <StorageSettings
-                        onClearStorage={props.onClearStorage}
-                        workspaceId={props.currentWorkspaceId}
-                        files={props.files}
-                        binCount={
-                          props.files.filter((file) => typeof file.deletedAt === "number").length
-                        }
-                        onEmptyBin={props.onEmptyBin}
-                      />
                     )}
                   </div>
                 </Tabs.Content>

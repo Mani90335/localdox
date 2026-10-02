@@ -1,11 +1,28 @@
 import { test, expect, type Page } from "@playwright/test";
 import path from "node:path";
+import { openExportMenu } from "./sidebar-menu";
+
+/** The sidebar row's ⋮ ▸ Export ▸ Convert, for the document on screen. */
+async function convertItem(page: Page, again = false) {
+  const menu = await openExportMenu(page);
+  return menu.getByRole("button", {
+    name: again ? "Convert again" : "Convert to Markdown",
+    exact: true,
+  });
+}
 
 async function convert(page: Page, again = false) {
-  await page.getByRole("button", { name: "Export", exact: true }).click();
-  await page
-    .getByRole("menuitem", { name: again ? /^Convert again/ : /^Convert to Markdown/ })
-    .click();
+  const item = await convertItem(page, again);
+  // Disabled while another conversion is still running.
+  await expect(item).toBeEnabled();
+  await item.click();
+}
+
+/** No conversion in progress: Convert is offered again. */
+async function expectConvertible(page: Page) {
+  await expect(await convertItem(page)).toBeEnabled();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("[data-sidebar-menu-panel]")).toHaveCount(0);
 }
 
 async function storedFiles(
@@ -56,7 +73,7 @@ test("convert, edit, repeat, reload and compare while preserving the original", 
       mimeType: "text/csv",
       buffer: Buffer.from("Name,Count\nApples,4\nPears,2\n"),
     });
-  await expect(page.getByRole("button", { name: "Export", exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Filter rows" })).toBeVisible();
   const original = (await storedFiles(page))[0];
   await convert(page);
   await expect(page.getByText("Converted from table.csv", { exact: true })).toBeVisible();
@@ -111,7 +128,7 @@ test("cancel and worker-load failure preserve the source", async ({ context, pag
     .setInputFiles({ name: "cancel.csv", mimeType: "text/csv", buffer: Buffer.from("A,B\n1,2") });
   await convert(page);
   await page.getByRole("button", { name: "Cancel", exact: true }).first().click();
-  await expect(page.getByRole("button", { name: "Export", exact: true })).toBeEnabled();
+  await expectConvertible(page);
   await convert(page);
   await expect(page.getByText(/local converter could not load/)).toBeVisible();
   expect((await storedFiles(page)).length).toBe(1);
@@ -122,7 +139,7 @@ test("a failed local save leaves no partial Markdown copy", async ({ page }) => 
     .locator('input[type="file"]')
     .first()
     .setInputFiles({ name: "quota.csv", mimeType: "text/csv", buffer: Buffer.from("A,B\n1,2") });
-  await expect(page.getByRole("button", { name: "Export", exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Filter rows" })).toBeVisible();
   const original = (await storedFiles(page))[0];
   await page.evaluate(() => {
     const put = IDBObjectStore.prototype.put;
@@ -139,9 +156,9 @@ test("a failed local save leaves no partial Markdown copy", async ({ page }) => 
   await expect(
     page.getByText("The Markdown copy could not be saved. The original is unchanged."),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Export", exact: true })).toBeEnabled();
+  await expectConvertible(page);
   expect(await storedFiles(page)).toEqual([original]);
   await page.reload();
-  await expect(page.getByRole("button", { name: "Export", exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Filter rows" })).toBeVisible();
   expect(await storedFiles(page)).toEqual([original]);
 });

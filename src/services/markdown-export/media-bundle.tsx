@@ -301,15 +301,3 @@ export async function buildMarkdownHTML(
     html,
   };
 }
-
-export async function downloadMarkdownHTML(file: MdFile, context: MediaContext) {
-  const result = await buildMarkdownHTML(file, context);
-  const url = URL.createObjectURL(result.blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = result.name;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
-}

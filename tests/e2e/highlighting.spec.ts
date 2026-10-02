@@ -117,7 +117,17 @@ test("application search preserves the article DOM and saved highlights repaint 
     sel.addRange(range);
     el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
   });
-  await expect(page.getByRole("button", { name: "Highlight", exact: true })).toBeVisible();
+  // Measured before the dropdown opens: an open Radix menu hides the rest of
+  // the page from the accessibility tree.
+  const highlightLayer = await page
+    .getByRole("button", { name: "Highlight #fde047", exact: true })
+    .evaluate((button) => Number(getComputedStyle(button.closest(".fixed")!).zIndex));
+  await page.getByRole("button", { name: "More highlight actions" }).click();
+  const actionsLayer = await page
+    .getByRole("menu")
+    .evaluate((menu) => Number(getComputedStyle(menu).zIndex));
+  expect(actionsLayer).toBeGreaterThan(highlightLayer);
+  await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Highlight #fde047", exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => (CSS as any).highlights.get("dc-hl-0")?.size ?? 0))
@@ -153,7 +163,7 @@ test("application search preserves the article DOM and saved highlights repaint 
       return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
     }, group);
     await page.mouse.click(point.x, point.y);
-    await expect(page.getByText("Edit highlight", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Remove highlight" })).toBeVisible();
   };
   await clickHighlight("dc-hl-0");
   await page.getByRole("button", { name: "Highlight #86efac", exact: true }).click();
@@ -161,7 +171,7 @@ test("application search preserves the article DOM and saved highlights repaint 
     .poll(() => page.evaluate(() => (CSS as any).highlights.get("dc-hl-1")?.size ?? 0))
     .toBe(1);
   await clickHighlight("dc-hl-1");
-  await page.getByRole("button", { name: "Remove", exact: true }).click();
+  await page.getByRole("button", { name: "Remove highlight" }).click();
   await expect
     .poll(() => page.evaluate(() => (CSS as any).highlights.get("dc-hl-1")?.size ?? 0))
     .toBe(0);
@@ -207,4 +217,61 @@ test("PDF search paints exact matches and changes the active occurrence within o
   expect((await read()).active[0].text).toBe("target");
   await page.getByRole("button", { name: "Close search", exact: true }).click();
   await expect.poll(async () => (await read()).active.length).toBe(0);
+});
+
+test("the selection menu opens beside the selection, never over it", async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 600 });
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "localdox:prefs",
+      JSON.stringify({ name: "Reader", namePrompted: true, aiEnabled: false }),
+    ),
+  );
+  await page.goto("/");
+  const paragraphs = Array.from({ length: 30 }, (_, i) => `Paragraph ${i + 1} body text.`);
+  await page
+    .locator('input[type="file"]')
+    .first()
+    .setInputFiles({
+      name: "placement.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from(`# Placement\n\n${paragraphs.join("\n\n")}`),
+    });
+  await expect(page.getByRole("heading", { name: "Placement", exact: true })).toBeVisible();
+  // Selects a paragraph's text, then returns the selection's and the menu's boxes.
+  const open = (text: string, block: ScrollLogicalPosition) =>
+    page
+      .locator("article p")
+      .filter({ hasText: text })
+      .first()
+      .evaluate(async (el, at) => {
+        el.scrollIntoView({ block: at, behavior: "instant" });
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        getSelection()!.removeAllRanges();
+        getSelection()!.addRange(range);
+        el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+        const menu = await new Promise<Element>((resolve) => {
+          const find = () => {
+            const button = document.querySelector('[aria-label="More highlight actions"]');
+            if (button) resolve(button.closest(".fixed")!);
+            else requestAnimationFrame(find);
+          };
+          find();
+        });
+        const s = range.getBoundingClientRect();
+        const m = menu.getBoundingClientRect();
+        return { selTop: s.top, selBottom: s.bottom, menuTop: m.top, menuBottom: m.bottom };
+      }, block);
+
+  // Room below: the menu sits under the selection.
+  const middle = await open("Paragraph 10 body", "center");
+  expect(middle.menuTop).toBeGreaterThanOrEqual(middle.selBottom);
+  await page.keyboard.press("Escape");
+
+  // The last line of the window: no room below, so the menu flips above.
+  const bottom = await open("Paragraph 30 body", "end");
+  expect(bottom.menuBottom).toBeLessThanOrEqual(bottom.selTop);
+  expect(bottom.menuBottom).toBeLessThanOrEqual(600);
 });

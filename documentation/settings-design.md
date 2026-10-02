@@ -2,7 +2,7 @@
 
 Settings opens as a modal over the current reading space. Desktop uses a grouped sidebar; screens below 640px use a full-screen dialog with a horizontally scrolling tab row. The content panel scrolls independently so the section heading and Done button remain available.
 
-Preferences are divided into Appearance, Reading, Diagrams, Equations, and Ask AI. Workspace, Saved, and Storage form the library group. Splitting reading controls out of Appearance makes each section shorter and keeps related choices together. Theme previews use isolated palettes so both choices remain recognizable in either theme.
+Preferences are divided into Appearance, Reading, Diagrams, Equations, and Ask AI. Workspace and Storage form the library group. The Bin lives in Storage alongside quota and offline controls; highlights remain in the upstream Notes panel. Splitting reading controls out of Appearance makes each section shorter and keeps related choices together. Theme previews use isolated palettes so both choices remain recognizable in either theme.
 
 `SettingsPage` owns section selection and composes the existing callbacks. Individual panels update the same app preferences and workspace actions as before; closing the dialog does not commit or discard a separate settings form. Changes apply immediately. Ask AI disappears when AI features are disabled, with Appearance as the fallback for a requested AI section.
 

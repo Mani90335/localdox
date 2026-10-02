@@ -5,9 +5,7 @@
 // reference jumps to, the actions tray, horizontal scrolling on narrow screens,
 // and a failure that does not take the document with it.
 
-import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { Check, ClipboardCopy } from "lucide-react";
-import { copyText } from "@/lib/workspace/share";
+import { memo, useMemo, useState } from "react";
 import { extractLabel, isNumberSuppressed } from "./latex";
 import { slugLabel } from "./equation-registry";
 import { useMathContext } from "./MathContext";
@@ -54,8 +52,6 @@ function InlineMath({ latex }: { latex: string }) {
 function DisplayMath({ latex }: { latex: string }) {
   const { registry, preferences } = useMathContext();
   const state = useMathRender(latex, true, preferences.renderer);
-  const [copied, setCopied] = useState(false);
-  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Numbering comes from the registry, which numbered the whole document from
   // its source — so this number is the same whichever engine drew the equation
@@ -69,16 +65,6 @@ function DisplayMath({ latex }: { latex: string }) {
   const number = isNumberSuppressed(latex) ? undefined : entry?.number;
   const domId =
     entry?.domId ?? (extractLabel(latex) ? `eq-${slugLabel(extractLabel(latex)!)}` : undefined);
-
-  // Copy LaTeX hands over the author's source, never anything reconstructed
-  // from the rendered output — which is the whole reason the source is carried
-  // through every layer untouched.
-  const copyLatex = useCallback(() => {
-    void copyText(latex);
-    setCopied(true);
-    if (copyTimer.current) clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setCopied(false), 1500);
-  }, [latex]);
 
   if (state.status === "error") {
     return (
@@ -127,21 +113,6 @@ function DisplayMath({ latex }: { latex: string }) {
         </span>
       )}
 
-      {/* Copy alone. An equation is something a reader lifts out and pastes
-          elsewhere; zooming, MathML and a source pane were chrome around a
-          block that already shows its own source on failure and already scrolls
-          at full size. Hover-revealed on a pointer device, always present on
-          touch — the same rule the code block's copy button follows. */}
-      <div className="docs-math-actions" role="group" aria-label="Equation actions">
-        <button
-          type="button"
-          onClick={copyLatex}
-          title="Copy LaTeX source"
-          aria-label="Copy LaTeX source"
-        >
-          {copied ? <Check className="h-3.5 w-3.5" /> : <ClipboardCopy className="h-3.5 w-3.5" />}
-        </button>
-      </div>
     </div>
   );
 }
@@ -207,16 +178,6 @@ function MathFailure({
       {expanded && attempted && (
         <p className="docs-math-error-detail">Renderers tried: {attempted}</p>
       )}
-      <div className="docs-math-actions docs-math-actions-static">
-        <button
-          type="button"
-          onClick={() => void copyText(latex)}
-          title="Copy LaTeX source"
-          aria-label="Copy LaTeX source"
-        >
-          <ClipboardCopy className="h-3.5 w-3.5" />
-        </button>
-      </div>
     </div>
   );
 }

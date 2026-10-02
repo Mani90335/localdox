@@ -10,6 +10,7 @@ import { pdfjsAssets } from "./build/vite-pdfjs-assets";
 import { offlineShell } from "./build/vite-offline-shell";
 import { interactiveRuntime } from "./build/vite-interactive-runtime";
 import { bundleReport } from "./build/vite-bundle-report";
+import { pyodide } from "./build/vite-pyodide";
 
 export default defineConfig({
   plugins: [
@@ -34,17 +35,18 @@ export default defineConfig({
     // The ```interactive-react preview runtime, inlined into its sandboxed
     // frame. See the plugin's header.
     interactiveRuntime(),
+    // The advanced math engine (Pyodide + SymPy), published under /pyodide/.
+    pyodide(),
     // Emits /sw.js so the app reopens offline. See the plugin's header.
     offlineShell({
       // Lazy, but needed offline without a download: reading and editing
       // Markdown, opening local files of any kind, Settings (including the
-      // offline status) and Saved.
+      // offline status).
       core: [
         "src/components/docs/viewer/MarkdownViewer.tsx",
         "src/components/docs/editor/MarkdownEditor.tsx",
         "src/components/docs/viewer/DocumentViewer.tsx",
         "src/components/docs/pages/SettingsPage.tsx",
-        "src/components/docs/pages/SavedPage.tsx",
         // Split view's panes.
         "src/components/ui/resizable.tsx",
         // Search's main-thread fallback, for when the worker can't start.
@@ -81,6 +83,9 @@ export default defineConfig({
       "cytoscape-cose-bilkent",
       "cytoscape-fcose",
       "pdfjs-dist",
+      // Boards' pen strokes. Discovered at runtime instead, it makes the dev
+      // server re-bundle every dependency and reload the page on first open.
+      "perfect-freehand",
     ],
   },
   build: {
