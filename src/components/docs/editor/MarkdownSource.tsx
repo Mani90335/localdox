@@ -1,7 +1,7 @@
 import { forwardRef, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, drawSelection } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, isolateHistory } from "@codemirror/commands";
 import {
   foldGutter,
   foldKeymap,
@@ -160,6 +160,7 @@ export const MarkdownSource = forwardRef<
           selection: { anchor: next.start, head: next.end },
           scrollIntoView: true,
           userEvent: "input",
+          annotations: isolateHistory.of("full"),
         });
         view.focus();
       },

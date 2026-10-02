@@ -2,6 +2,7 @@ import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
+import { exportFile, openExportMenu } from "./sidebar-menu";
 
 test.skip(!process.env.PLAYWRIGHT_PRODUCTION, "Measures production bundles");
 // Disable registration in the top page below. Playwright's "block" init script
@@ -16,18 +17,23 @@ const budgets = {
   pdf: 570,
   conversion: 3250,
   diagram: 390,
-  edit: 12,
+  // CodeMirror source highlighting, folding, and undo: 193.2 KiB measured.
+  edit: 210,
   export: 165,
   spreadsheet: 180,
   interactive: 840,
   keyboard: 240,
+  // The engine worker (~303 KiB) and, since Compute's input became a math
+  // field, MathLive (~215 KiB; the keyboard journey's library).
+  compute: 540,
+  advanced: 12000,
 } as const;
 type Journey = keyof typeof budgets;
 const optional =
-  /(?:compiler\.worker|mathlive\.min|spreadsheet\.worker|pdf(?:\.worker)?-|anydoc_wasm|conversion\.worker|mermaid\.core|media-bundle|react-dom-server|katex-[^.]+\.js)/;
+  /(?:compiler\.worker|compute\.worker|advanced\.worker|\/pyodide\/|mathlive\.min|spreadsheet\.worker|pdf(?:\.worker)?-|anydoc_wasm|conversion\.worker|mermaid\.core|media-bundle|react-dom-server|katex-[^.]+\.js)/;
 type ReportFile = { file: string; modules?: string[] };
 const capabilityModules =
-  /node_modules\/(?:@babel\/standalone|mathlive|xlsx|pdfjs-dist|mermaid|katex)\//;
+  /node_modules\/(?:@babel\/standalone|@(?:codemirror|lezer)\/[^/]+|@cortex-js\/compute-engine|mathlive|xlsx|pdfjs-dist|mermaid|katex)\//;
 
 async function upload(page: Page, name: string, source: string) {
   await page
@@ -54,7 +60,7 @@ function track(context: BrowserContext) {
   const rows: { phase: string; file: string; bytes: number; gzip: number }[] = [];
   context.on("response", (response) => {
     const file = new URL(response.url()).pathname;
-    if (!/\.(?:js|mjs|wasm|css|woff2?|ttf)$/.test(file)) return;
+    if (!/\.(?:js|mjs|wasm|zip|whl|css|woff2?|ttf)$/.test(file)) return;
     const requestedPhase = phases.get(response.request()) ?? phase;
     pending.push(
       (async () => {
@@ -116,10 +122,15 @@ for (const journey of Object.keys(budgets) as Journey[]) {
       ).toEqual([]);
     }
 
-    if (["edit", "export", "keyboard"].includes(journey)) {
+    if (["edit", "export", "keyboard", "compute", "advanced"].includes(journey)) {
       await upload(page, "budget.md", "# Budget note\n\nA **complete** note with $E=mc^2$.\n");
       await expect(page.locator("article .katex")).toHaveCount(1);
       if (journey === "keyboard") await edit(page);
+      // The Notes panel itself is a prerequisite; the engine is the feature.
+      if (journey === "compute" || journey === "advanced") {
+        await page.getByRole("button", { name: "Notes", exact: true }).click();
+        await expect(page.getByRole("tab", { name: "Compute" })).toBeVisible();
+      }
       await page.waitForLoadState("networkidle");
       await traffic.finish();
     }
@@ -141,11 +152,14 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         break;
       case "conversion":
         await upload(page, "budget.csv", "Name,Count\nApples,4\nPears,2\n");
-        await expect(page.getByRole("button", { name: "Export", exact: true })).toBeVisible();
+        await expect(page.getByRole("textbox", { name: "Filter rows" })).toBeVisible();
         await page.waitForLoadState("networkidle");
         // CSV's viewer is a prerequisite, so keep its bytes in this journey too.
-        await page.getByRole("button", { name: "Export", exact: true }).click();
-        await page.getByRole("menuitem", { name: /^Convert to Markdown/ }).click();
+        await (
+          await openExportMenu(page)
+        )
+          .getByRole("button", { name: "Convert to Markdown", exact: true })
+          .click();
         await expect(page.getByText("Converted from budget.csv", { exact: true })).toBeVisible({
           timeout: 60_000,
         });
@@ -167,9 +181,8 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         await expect(page.getByText("Edited text.", { exact: true })).toBeVisible();
         break;
       case "export": {
-        const download = page.waitForEvent("download");
-        await page.getByRole("button", { name: "Download HTML + Media", exact: true }).click();
-        const html = await readFile((await (await download).path())!, "utf8");
+        const download = await exportFile(page, "Web page (.html)");
+        const html = await readFile((await download.path())!, "utf8");
         expect(html).toContain("<strong>complete</strong>");
         expect(html).toContain("<math");
         expect(html).not.toContain("katex-error");
@@ -201,11 +214,37 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         await page.getByRole("button", { name: "Insert equation", exact: true }).click();
         await expect(page.locator("math-field")).toBeVisible();
         break;
+      case "advanced":
+        await page.getByRole("tab", { name: "Compute" }).click();
+        // LaTeX typed as text: the engine is the feature, not the math field.
+        await page.getByRole("radio", { name: "Text" }).click();
+        await page
+          .getByRole("textbox", { name: /^Expression or equation/ })
+          .fill("\\int_0^1 x^2\\,dx");
+        await page.getByRole("button", { name: "Evaluate", exact: true }).click();
+        await page.getByRole("button", { name: "Download and compute" }).click();
+        await expect(page.getByRole("region", { name: "Evaluate result" })).toContainText(
+          "0.333333333333",
+          { timeout: 120_000 },
+        );
+        break;
+      case "compute":
+        // As a reader first meets it: the math field (MathLive) and its keypad.
+        await page.getByRole("tab", { name: "Compute" }).click();
+        for (const key of ["1", "Fraction", "2", "Move right", "Plus", "1", "Fraction", "3"]) {
+          await page.getByRole("button", { name: key, exact: true }).click();
+        }
+        await page.getByRole("button", { name: "Evaluate", exact: true }).click();
+        await expect(page.getByRole("region", { name: "Evaluate result" })).toContainText(
+          "0.833333333333",
+        );
+        break;
     }
     await page.waitForLoadState("networkidle");
     const rows = await traffic.finish();
     const feature = rows.filter((row) => row.phase === "feature");
-    const executable = feature.filter((row) => /\.(?:js|mjs|wasm)$/.test(row.file));
+    // Python wheels and the standard library are code too.
+    const executable = feature.filter((row) => /\.(?:js|mjs|wasm|zip|whl)$/.test(row.file));
     const totals = {
       raw: executable.reduce((n, row) => n + row.bytes, 0),
       gzip: executable.reduce((n, row) => n + row.gzip, 0),
@@ -241,6 +280,8 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         spreadsheet: /spreadsheet\.worker/,
         interactive: /compiler\.worker/,
         keyboard: /mathlive\.min/,
+        compute: /compute\.worker/,
+        advanced: /sympy-[\d.]+-py3-none-any\.whl$/,
         diagram: /katex-[^.]+\.js$/,
       };
       if (required[journey])
@@ -263,4 +304,19 @@ test("build contains one shared KaTeX implementation", async () => {
   expect(implementations).toHaveLength(1);
   const sw = await readFile(".output/public/sw.js", "utf8");
   expect(sw).not.toContain("bundle-report.json");
+});
+
+test("the math engine ships only inside its worker", async () => {
+  const report = JSON.parse(await readFile(".output/public/bundle-report.json", "utf8"));
+  // Page chunks list their modules; the engine must be in none of them.
+  const onPage = report.files.filter((file: ReportFile) =>
+    (file.modules ?? []).some((id) => id.includes("/@cortex-js/compute-engine/")),
+  );
+  expect(onPage.map((file: ReportFile) => file.file)).toEqual([]);
+  const worker = report.files.filter((file: ReportFile) => /compute\.worker/.test(file.file));
+  expect(worker).toHaveLength(1);
+  // Precached only once used (or downloaded on request), like other optional engines.
+  const sw = await readFile(".output/public/sw.js", "utf8");
+  const manifest = JSON.parse(sw.slice(sw.indexOf("=") + 1, sw.indexOf(";\n")));
+  expect(manifest.shell.filter((url: string) => /compute\.worker/.test(url))).toEqual([]);
 });

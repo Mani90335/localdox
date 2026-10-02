@@ -1,6 +1,6 @@
 // A board embedded in a document, by reference.
 //
-// `![[Sketch.excalidraw]]` (or `![[Other Workspace/Sketch.excalidraw]]`) puts
+// `![[Sketch.board]]` (or `![[Other Workspace/Sketch.board]]`) puts
 // the *live* scene of another workspace file into the prose — not an exported
 // image. The file stays the single copy: edit the board in its own tab and
 // every document embedding it shows the new drawing on next render.
@@ -22,7 +22,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState, type FC } from "r
  */
 type BoardViewProps = {
   scene: string;
-  /** Excalidraw is keyed on this so two embeds of two boards never share state. */
+  /** The board's name, used as the figure's accessible label. */
   sceneKey: string;
 };
 
@@ -51,9 +51,8 @@ export function BoardEmbed({ content, name }: { content: string; name?: string }
   const targetRef = useRef<HTMLDivElement>(null);
   const [nearViewport, setNearViewport] = useState(false);
 
-  // Excalidraw and its canvas renderer are far heavier than a diagram, so an
-  // embed below the fold costs nothing until the reader approaches it — the
-  // same rule `MermaidBlock` follows, for the same reason.
+  // An embed below the fold costs nothing until the reader approaches it —
+  // the same rule `MermaidBlock` follows, for the same reason.
   useEffect(() => {
     const target = targetRef.current;
     if (!target || typeof IntersectionObserver === "undefined") {
@@ -77,8 +76,9 @@ export function BoardEmbed({ content, name }: { content: string; name?: string }
   const valid = useMemo(() => {
     if (!content.trim()) return false;
     try {
-      JSON.parse(content);
-      return true;
+      // The same test the board's parser applies, inlined so the reader's
+      // main chunk doesn't carry the board model just to ask this.
+      return Array.isArray(JSON.parse(content)?.elements);
     } catch {
       return false;
     }
@@ -87,7 +87,7 @@ export function BoardEmbed({ content, name }: { content: string; name?: string }
   if (!valid) {
     return (
       <div className="artifact-error">
-        <strong>{name ?? "This board"}</strong> isn’t a readable Excalidraw scene.
+        <strong>{name ?? "This board"}</strong> is empty or isn’t a readable board.
       </div>
     );
   }

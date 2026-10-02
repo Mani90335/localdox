@@ -13,11 +13,17 @@ let loading: Promise<typeof import("mathlive")> | null = null;
 
 export function loadMathlive(): Promise<typeof import("mathlive")> {
   if (!loading) {
-    loading = import("mathlive").then((mathlive) => {
-      mathlive.MathfieldElement.fontsDirectory = "/mathlive/fonts";
-      mathlive.MathfieldElement.soundsDirectory = null;
-      return mathlive;
-    });
+    loading = import("mathlive").then(
+      (mathlive) => {
+        mathlive.MathfieldElement.fontsDirectory = "/mathlive/fonts";
+        mathlive.MathfieldElement.soundsDirectory = null;
+        return mathlive;
+      },
+      (error) => {
+        loading = null; // Offline now; a later attempt may succeed.
+        throw error;
+      },
+    );
   }
   return loading;
 }

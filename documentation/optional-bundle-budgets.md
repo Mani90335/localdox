@@ -22,11 +22,15 @@ contains a math label. These prerequisites matter when interpreting the totals.
 | First PDF | 517.4 | 517.4 | 570 |
 | First conversion, including CSV viewer | 3038.4 | 3038.4 | 3250 |
 | First flowchart with math label | 420.1 | 345.2 | 390 |
-| First edit | 8.4 | 8.4 | 12 |
+| First edit (CodeMirror source editor; updated 2026-10-02) | 8.4 | 193.2 | 210 |
 | First HTML export after reading math | 215.3 | 140.4 | 165 |
 | First XLSX | 156.6 | 156.6 | 180 |
 | First interactive React example | 764.7 | 764.7 | 840 |
 | First math keyboard | 215.0 | 215.0 | 240 |
+| First Compute result, typed in the math field (MathLive 214.9 + engine 302.7; updated 2026-10-02; macOS, Chromium) | — | 519.2 | 540 |
+| First advanced (SymPy) result, incl. the basic engine (added 2026-10-02) | — | 11034.1 | 12000 |
+
+The source editor was remeasured on 2026-10-02 with Windows, Edge, Node 24.18.0, and the locked Vite 8.3.1 build. Highlighting, folding, and editor history replace the textarea and add CodeMirror plus its parsers. The 210 KiB ceiling gives the measured 193.2 KiB first edit modest headroom. These packages stay behind the lazy editor; the gate now also rejects CodeMirror and Lezer modules in the startup shell. The other table entries retain their original measurement dates.
 
 The gate sums decoded JS/MJS/WASM responses recompressed independently with
 Node's default `gzipSync`. It includes dedicated-worker requests through the
@@ -67,7 +71,7 @@ Other substantial assets remain optional: Babel's worker is 2,967,068 raw bytes,
 MathLive 807,992, XLSX's worker 430,570 (including its protocol), PDF's worker
 1,265,413, and conversion WASM 6,691,779. The 1,821,047-byte chunk from the audit
 is Excalidraw's vendor output, not a common vendor bundle fetched by these nine
-journeys. The emitted module report identifies its owner. A future compiler
+journeys. (Boards no longer use Excalidraw; see `boards.md`.) The emitted module report identifies its owner. A future compiler
 replacement needs a separate syntax-compatibility decision; worker execution
 alone does not reduce download size.
 

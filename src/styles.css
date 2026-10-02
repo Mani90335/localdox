@@ -216,12 +216,9 @@
    * neutral hue rather than pure black, so a raised surface never looks smudged.
    */
   --shadow-1: 0 1px 2px oklch(0.21 0.02 265 / 0.05);
-  --shadow-2:
-    0 1px 2px oklch(0.21 0.02 265 / 0.06), 0 4px 12px -2px oklch(0.21 0.02 265 / 0.08);
-  --shadow-3:
-    0 1px 3px oklch(0.21 0.02 265 / 0.08), 0 12px 32px -8px oklch(0.21 0.02 265 / 0.14);
-  --shadow-4:
-    0 2px 6px oklch(0.21 0.02 265 / 0.1), 0 32px 64px -16px oklch(0.21 0.02 265 / 0.22);
+  --shadow-2: 0 1px 2px oklch(0.21 0.02 265 / 0.06), 0 4px 12px -2px oklch(0.21 0.02 265 / 0.08);
+  --shadow-3: 0 1px 3px oklch(0.21 0.02 265 / 0.08), 0 12px 32px -8px oklch(0.21 0.02 265 / 0.14);
+  --shadow-4: 0 2px 6px oklch(0.21 0.02 265 / 0.1), 0 32px 64px -16px oklch(0.21 0.02 265 / 0.22);
 
   /*
    * Reading measure.
@@ -623,7 +620,10 @@
 .docs-prose > * {
   min-width: 0;
 }
-.docs-prose :is(pre, .workspace-artifact, .interactive-block, .docs-mermaid) {
+/* Code blocks stay inside the column like diagrams and mind maps do: a fence
+   that bled past the text was the one block in a document out of line with
+   everything around it. Long lines scroll inside the block instead. */
+.docs-prose :is(.workspace-artifact, .interactive-block, .docs-mermaid) {
   width: calc(100% + var(--bleed) * 2);
   margin-inline: calc(var(--bleed) * -1);
 }
@@ -1083,6 +1083,48 @@
     10px -10px,
     -10px 0;
   touch-action: none;
+}
+/*
+ * Element fullscreen: a viewer, diagram, mind map or JSON tree taken full
+ * screen with the Fullscreen API.
+ *
+ * The browser paints a black ::backdrop behind the fullscreen element. A
+ * translucent surface on it (the Mermaid frame is `bg-muted/30`) composites
+ * over that black instead of over the page: a grey veil in the light theme, a
+ * too-dark frame in the dark one. Painting the page background there makes the
+ * surface look exactly as it does inline. `::backdrop` inherits custom
+ * properties from its element in current engines; `Canvas` covers older ones.
+ *
+ * Viewers size their content as "the viewport minus the app chrome above
+ * them". In fullscreen there is no app chrome, so that height drops to zero
+ * rather than leaving a dead band under the content.
+ */
+:root {
+  --app-chrome-h: 4rem;
+}
+:fullscreen {
+  --app-chrome-h: 0px;
+}
+:not(:root):fullscreen::backdrop {
+  background: var(--background, Canvas);
+}
+/* A presented deck scales the slide to the screen: the widest 16:9 box that
+   fits the stage in both directions, with the rail kept on screen below it.
+   Inline, the slide's fixed cap made header + slide + rail taller than a
+   laptop screen, and fullscreen cut the rail off with no way to scroll. */
+.presentation-shell:fullscreen {
+  display: flex;
+  flex-direction: column;
+}
+.presentation-shell:fullscreen > div.flex-col {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.presentation-shell:fullscreen .presentation-stage {
+  container-type: size;
+}
+.presentation-shell:fullscreen .presentation-slide {
+  width: min(100cqw, 100cqh * 16 / 9);
 }
 .presentation-slide {
   position: relative;
@@ -1737,14 +1779,6 @@ mjx-container[jax="CHTML"] {
   }
 }
 
-/* Block elements that can be saved (tables, code, quotes, images). They no
-   longer draw anything of their own — saving moved to the selection popover,
-   which can save any range instead of only the block it sits on — but the
-   wrapper stays: it anchors the offsets a saved item re-finds itself by. */
-.docs-savable {
-  position: relative;
-}
-
 /* Interactive markdown blocks: a compact workbench that keeps authored code
    beside the result without allowing demo styles to touch the document. */
 .interactive-block {
@@ -1965,9 +1999,207 @@ mjx-container[jax="CHTML"] {
 }
 
 /* Markdown media shares the reader's width; native controls remain usable on touch. */
-.markdown-media-paragraph { margin: 1.25em 0; }
-.markdown-media-player { display: block; margin: 1.5em 0; }
-.markdown-media-player video { display: block; width: 100%; max-height: 75vh; border-radius: .75rem; background: var(--media-backdrop); }
-.markdown-media-player audio { display: block; width: 100%; }
-.markdown-media-download { display: block; margin-top: .5rem; font-size: .8em; }
-.artifact-image { max-width: 100%; height: auto; }
+.markdown-media-paragraph {
+  margin: 1.25em 0;
+}
+.markdown-media-player {
+  display: block;
+  margin: 1.5em 0;
+}
+.markdown-media-player video {
+  display: block;
+  width: 100%;
+  max-height: 75vh;
+  border-radius: 0.75rem;
+  background: var(--media-backdrop);
+}
+.markdown-media-player audio {
+  display: block;
+  width: 100%;
+}
+.markdown-media-download {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.8em;
+}
+.artifact-image {
+  max-width: 100%;
+  height: auto;
+}
+
+/*
+ * Compute's math field (notes/MathField.tsx): MathLive's <math-field> in the
+ * app's colours, borderless inside its composer card. MathLive's keyboard
+ * toggle and menu are hidden: the keypad under the field is the keyboard.
+ */
+.compute-math-field math-field {
+  display: block;
+  width: 100%;
+  padding: 0 1.75rem 0 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 1.375rem;
+  --caret-color: var(--primary);
+  --primary-color: var(--primary);
+  --selection-background-color: color-mix(in oklab, var(--primary) 22%, transparent);
+  --selection-color: var(--foreground);
+  --contains-highlight-background-color: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --placeholder-color: var(--muted-foreground);
+  --placeholder-opacity: 0.7;
+  --smart-fence-color: var(--muted-foreground);
+  --latex-color: var(--primary);
+}
+.compute-math-field math-field::part(menu-toggle),
+.compute-math-field math-field::part(virtual-keyboard-toggle) {
+  display: none;
+}
+
+/*
+ * Notes panel (components/docs/notes). Markdown at the scale of a 22rem card.
+ * Deliberately not `.docs-prose`: its fluid headings, serif measure and
+ * bleeding blocks are sized for a reading column, and would swamp a panel.
+ */
+.docs-note {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+.docs-note > * + * {
+  margin-top: 0.6rem;
+}
+.docs-note :is(h1, h2, h3, h4, h5, h6) {
+  font-size: 0.875rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.docs-note :is(ul, ol) {
+  padding-left: 1.25rem;
+}
+.docs-note ul {
+  list-style: disc;
+}
+.docs-note ol {
+  list-style: decimal;
+}
+.docs-note li + li,
+.docs-note li > :is(ul, ol) {
+  margin-top: 0.2rem;
+}
+.docs-note li:has(> input[type="checkbox"]) {
+  list-style: none;
+}
+.docs-note input[type="checkbox"] {
+  margin: 0 0.4rem 0 -1.15rem;
+  vertical-align: -1px;
+}
+.docs-note blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 0.75rem;
+  color: var(--muted-foreground);
+}
+.docs-note a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.docs-note code {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  background: var(--surface-sunken);
+  border: 1px solid var(--hairline);
+  border-radius: 0.3rem;
+  padding: 0.05em 0.3em;
+}
+.docs-note pre {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  background: var(--surface-sunken);
+  border: 1px solid var(--hairline);
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  overflow-x: auto;
+  overflow-wrap: normal;
+}
+.docs-note pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+.docs-note table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  overflow-wrap: normal;
+}
+.docs-note :is(th, td) {
+  border: 1px solid var(--border);
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+.docs-note th {
+  font-weight: 600;
+  background: var(--surface-sunken);
+}
+.docs-note img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.375rem;
+}
+.docs-note hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+/* Equations in notes (note-blocks.tsx): drawn, or their source until they are. */
+.docs-note-math .katex {
+  font-size: 1.05em;
+}
+.docs-note-math-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.15rem 0;
+  text-align: center;
+}
+.docs-note-math-display .katex-display {
+  margin: 0;
+}
+.docs-note pre.docs-note-math-source {
+  white-space: pre-wrap;
+}
+/* Diagrams in notes: a still SVG scaled to the card, or the source. */
+.docs-note-diagram {
+  overflow: auto;
+  max-height: 24rem;
+  border: 1px solid var(--hairline);
+  border-radius: 0.5rem;
+  background: var(--background);
+  padding: 0.5rem;
+}
+.docs-note-diagram svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+.docs-note-diagram-pending {
+  display: flex;
+  min-height: 6rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border);
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.docs-note-diagram-source figcaption {
+  margin-bottom: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}

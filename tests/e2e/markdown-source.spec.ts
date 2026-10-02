@@ -47,7 +47,7 @@ test("source highlights Markdown and fenced code, folds nested sections, and wra
   await editor.press("Control+Home");
   await editor.press("ArrowDown");
   await editor.press("ArrowDown");
-  await editor.press("Control+Shift+[");
+  await editor.press("Control+Shift+{");
   await expect(editor.locator(".cm-foldPlaceholder")).toHaveCount(1);
   await expect(editor).not.toContainText("Nested body.");
   await expect(editor).toContainText("Keep this body visible.");
@@ -78,7 +78,8 @@ test("formatting, undo, autosave and cancel retain the source editor's document"
   await expect(editor).toContainText("**formatme**");
   await editor.press("Control+z");
   await expect(editor).not.toContainText("**formatme**");
-  await editor.press("Control+Shift+z");
+  await expect(editor).toContainText("formatme");
+  await editor.press("Control+y");
   await expect(editor).toContainText("**formatme**");
   await editor.press("Control+s");
   await page.getByRole("button", { name: /Done.*Preview/ }).click();

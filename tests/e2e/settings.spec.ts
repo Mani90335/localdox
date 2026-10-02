@@ -154,7 +154,6 @@ for (const width of [320, 390, 768, 1440]) {
       "Equations",
       "Ask AI",
       "Workspace",
-      "Saved",
       "Storage",
     ]) {
       await dialog.getByRole("tab", { name, exact: true }).click();

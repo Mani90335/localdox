@@ -333,25 +333,21 @@ test("a share keeps only the folders on the path to a shared file", () => {
 
 test("annotations travel only when opted in, and only for shared files", () => {
   const w = richWorkspace();
-  assert.equal(countAnnotations(w, liveIds(w)), 3);
+  // Stars are kept in the record but are no longer visible, so they are
+  // neither counted nor shared.
+  assert.equal(countAnnotations(w, liveIds(w)), 1);
   const shared = buildWorkspaceShare(w, { fileIds: liveIds(w), includeAnnotations: true });
-  assert.deepEqual(
-    shared.saved?.map((s) => s.id),
-    ["star-table", "star-code"],
-  );
+  assert.deepEqual(shared.saved, []);
   assert.deepEqual(
     shared.highlights?.map((h) => h.id),
     ["hl"],
   );
-  assert.deepEqual(shared.bookmarks, ["note#title"]);
+  assert.deepEqual(shared.bookmarks, []);
 
-  // A binned file the sender ticks explicitly arrives live, with its star only if opted in.
+  // A binned file the sender ticks explicitly arrives live.
   const withBin = buildWorkspaceShare(w, { fileIds: ["binned"], includeAnnotations: true });
   assert.equal(withBin.files[0].deletedAt, undefined);
-  assert.deepEqual(
-    withBin.saved?.map((s) => s.id),
-    ["star-file"],
-  );
+  assert.deepEqual(withBin.saved, []);
 });
 
 test("a shared workspace imports as the previewed selection", async () => {

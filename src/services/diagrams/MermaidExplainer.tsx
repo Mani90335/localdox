@@ -15,6 +15,7 @@ import type { GpuPlayer } from "./engine/gpu-player";
 import { zoomCeiling } from "./engine/zoom";
 import { Tray, TrayButton, ZoomControls } from "./Mermaid";
 import { useSvgViewport } from "./use-svg-viewport";
+import { centredBoxCap } from "./mermaid-diagram-helpers";
 import { prefersReducedMotion, useStageVisibility } from "./use-stage-visibility";
 import { PUBLISH_MS } from "./explainer/clock";
 import {
@@ -365,11 +366,7 @@ export function MermaidExplainer({
   };
 
   return (
-    <div
-      className="group/stage relative h-full w-full"
-      style={fill || !ratio ? undefined : { maxWidth: widthCap(ratio), marginInline: "auto" }}
-      onKeyDown={onKeyDown}
-    >
+    <div className="group/stage relative h-full w-full" onKeyDown={onKeyDown}>
       <div
         className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 p-3 ${
           fill || large
@@ -467,7 +464,14 @@ export function MermaidExplainer({
         } overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring${
           colored ? " diagram-colored" : ""
         }`}
-        style={fill ? undefined : playbackBoxStyle(ratio ?? 0.42, 56)}
+        style={
+          fill
+            ? undefined
+            : {
+                ...playbackBoxStyle(ratio ?? 0.42, 56),
+                ...centredBoxCap(ratio ? widthCap(ratio) : undefined),
+              }
+        }
       />
     </div>
   );

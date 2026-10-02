@@ -1,18 +1,14 @@
 import { useContext } from "react";
-import { ChevronDown, Star } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { slugify } from "@/lib/markdown/markdown-utils";
-import { CollapseContext, SavedContext } from "./contexts";
+import { CollapseContext } from "./contexts";
 
 export function HeadingLink({ as: Tag, children, id, highlight, ...rest }: any) {
-  const ctx = useContext(SavedContext);
   const collapse = useContext(CollapseContext);
   const text = Array.isArray(children)
     ? children.map((c) => (typeof c === "string" ? c : "")).join("")
     : String(children ?? "");
   const finalId = id || slugify(text);
-  const savedSection = ctx?.enabled
-    ? ctx.isSaved({ kind: "section", headingId: finalId })
-    : undefined;
   const collapsed = collapse?.isCollapsed(finalId) ?? false;
   return (
     <Tag id={finalId} {...rest} className="group relative scroll-mt-24">
@@ -51,20 +47,6 @@ export function HeadingLink({ as: Tag, children, id, highlight, ...rest }: any) 
         </button>
       )}
       {typeof children === "string" ? (highlight?.(children) ?? children) : children}
-      {/* A saved section still marks its heading, but only once it *is* saved:
-          an always-present star on every heading was chrome the reader had to
-          look past on the way down the page. Saving a section is done from the
-          selection popover now; this is the receipt, not the button. */}
-      {ctx?.enabled && savedSection && (
-        <button
-          onClick={() => ctx.remove(savedSection.id)}
-          className="ml-1 inline-flex h-9 w-9 items-center justify-center align-middle"
-          title="Saved — click to remove"
-          aria-label="Remove saved section"
-        >
-          <Star className="h-4 w-4 fill-gold text-gold" />
-        </button>
-      )}
     </Tag>
   );
 }

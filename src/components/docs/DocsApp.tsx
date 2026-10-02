@@ -4,7 +4,7 @@ import { ensureEmbedMediaFolder } from "@/lib/workspace/embed-media";
 import type { DocumentUpdate } from "@/services/office-editing";
 import { Fragment, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { Menu, X, Search, Undo2, Settings } from "lucide-react";
+import { PanelLeft, X, Search, Undo2, Settings } from "lucide-react";
 
 import {
   ESCAPE_DEPTH,
@@ -12,7 +12,13 @@ import {
   useNavHistoryState,
   type NavEntry,
 } from "@/hooks/use-nav-history";
-import { Sidebar, AddMenu, DEFAULT_VIEW, type SidebarView } from "./workspace/Sidebar";
+import {
+  Sidebar,
+  AddMenu,
+  CHROME_BUTTON,
+  DEFAULT_VIEW,
+  type SidebarView,
+} from "./workspace/Sidebar";
 import { MarkdownViewer, preloadMarkdownViewer } from "./viewer/MarkdownViewerLazy";
 import { preloadMarkdownEditor } from "./editor/MarkdownEditorLazy";
 import { PaneDocument } from "./viewer/PaneDocument";
@@ -71,6 +77,20 @@ import {
 import { WorkspaceMenu } from "./workspace/WorkspaceMenu";
 import { WorkspaceSheet } from "./workspace/WorkspaceSheet";
 import { MoveToWorkspaceDialog } from "./workspace/MoveToWorkspaceDialog";
+import { MoveToBinDialog, type BinRequest } from "./workspace/MoveToBinDialog";
+import { NothingHere } from "./docs-app/NothingHere";
+import {
+  NotesPanel,
+  type ComputeProps,
+  type InsertRequest,
+  type InsertTarget,
+  type NoteSourceState,
+  type NotesTab,
+  type RoughWorkProps,
+} from "./notes/NotesPanelLazy";
+import { isEditorOpen } from "./editor/open-editors";
+import { BottomSheet } from "@/components/ui/bottom-sheet";
+import { EditFileContext } from "./viewer/EditFileContext";
 import type { AskAiPrefill } from "@/services/ai";
 
 // Code-split surfaces. None of these is on the path to reading a document — the
@@ -90,8 +110,6 @@ const DocumentViewer = lazy(() =>
  * monitor comfortably carries four.
  */
 const MAX_PANES = 4;
-
-const SavedPage = lazy(() => import("./pages/SavedPage").then((m) => ({ default: m.SavedPage })));
 
 const SettingsPage = lazy(() =>
   import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
@@ -139,6 +157,7 @@ import {
   hasModKey,
   requestIdleCallbackSafe,
   cancelIdleCallbackSafe,
+  modKeyLabel,
 } from "@/lib/platform/keyboard";
 import {
   persistence,
@@ -158,15 +177,40 @@ import {
   type ThemePref,
 } from "@/lib/workspace/persistence";
 import {
-  findSaved,
   migrateBookmarks,
-  newSavedId,
-  savedKey,
   toLegacyBookmarks,
-  type SavedDraft,
-  type SavedEntry,
+  type PassageTarget,
   type SavedItem,
 } from "@/lib/workspace/saved-items";
+import {
+  createNote,
+  editNote,
+  highlightSource,
+  MAX_NOTE_CHARS,
+  resolveNoteSource,
+  sortNotes,
+  type Note,
+  type NoteDraft,
+  type NoteSource,
+} from "@/lib/workspace/notes";
+import {
+  createScratchpad,
+  duplicateScratchpad,
+  editScratchpad,
+  insertIntoDocument,
+  insertionPoints,
+  linkScratchpad,
+  MAX_SCRATCHPAD_CHARS,
+  newScratchpadId,
+  noteFromScratchpad,
+  pageAt,
+  renameScratchpad,
+  scratchpadDraftId,
+  scratchpadDrafts,
+  scratchpadOfDraft,
+  sortScratchpads,
+  type Scratchpad,
+} from "@/lib/workspace/rough-work";
 import {
   copyLink,
   fetchShare,
@@ -183,6 +227,8 @@ import {
   formatBytes,
   isQuotaExceeded,
   storedBytes,
+  storedRecordBytes,
+  recordTextBytes,
   utf8Length,
 } from "@/lib/workspace/storage-limits";
 import { reserveStorage, type StorageReservation } from "@/lib/workspace/storage-budget";
@@ -199,10 +245,15 @@ import {
 
 type Theme = ThemePref;
 
-// Shared empties, so "this file has no highlights / nothing saved" is always the
-// same array. A fresh `[]` would be a new prop identity on every render.
+// Shared empty, so "this file has no highlights" is always the same array. A
+// fresh `[]` would be a new prop identity on every render.
 const EMPTY_HIGHLIGHTS: Highlight[] = [];
-const EMPTY_SAVED: SavedItem[] = [];
+
+/** Whether the Notes panel was open — a per-device convenience, not workspace data. */
+const NOTES_OPEN_KEY = "localdox:notes-open";
+/** Which of its tabs was showing, and the scratchpad open in Rough work. Per device too. */
+const NOTES_TAB_KEY = "localdox:notes-tab";
+const ROUGH_PAD_KEY = "localdox:rough-pad";
 
 interface WorkspaceLite {
   id: string;
@@ -229,7 +280,7 @@ function importSharedWorkspaceOnce(key: string): Promise<WorkspaceRecord> {
       // meet before the app has even drawn.
       const already = await persistence.listWorkspaceSummaries();
       ws.name = availableWorkspaceName(`${ws.name} (Shared)`, already);
-      const room = await reserveStorage(storedBytes(ws.files));
+      const room = await reserveStorage(storedRecordBytes(ws));
       try {
         await persistence.serial(() => persistence.putWorkspace(ws));
       } finally {
@@ -450,12 +501,33 @@ export function DocsApp() {
     if (journalTimer.current) clearTimeout(journalTimer.current);
     journalTimer.current = setTimeout(() => journal.flush(), 250);
   }, [journal]);
-  // Stars. Not just files any more: a star can point at a section, a table, a
-  // code block or a passage the reader selected. Legacy `${fileId}#${sectionId}`
-  // bookmarks are read as saved items on hydrate (see `migrateBookmarks`).
+  // Stars the reader saved before saving was removed from the app. Nothing
+  // shows or creates them any more; they are only carried through so a
+  // workspace written back to storage, exported or moved keeps them intact.
+  // Legacy `${fileId}#${sectionId}` bookmarks are read as saved items on
+  // hydrate (see `migrateBookmarks`).
   const [saved, setSaved] = useState<SavedItem[]>([]);
-  /** A saved item the reader just opened — handed to the viewer to scroll to. */
-  const [pendingSaved, setPendingSaved] = useState<SavedItem | null>(null);
+  /**
+   * A passage the reader just opened — a note's source link — handed to the
+   * viewer to scroll to.
+   */
+  const [pendingSaved, setPendingSaved] = useState<PassageTarget | null>(null);
+  // Passages copied out of documents into the Notes panel. Snapshots: edits to
+  // their source never rewrite them (see lib/workspace/notes.ts).
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const notesOpenRef = useRef(notesOpen);
+  notesOpenRef.current = notesOpen;
+  /** The note just copied, marked in the panel for a moment. */
+  const [freshNoteId, setFreshNoteId] = useState<string | null>(null);
+  const [notesTab, setNotesTab] = useState<NotesTab>("notes");
+  // Rough work: the reader's scratchpads. Working space that never becomes part
+  // of a document unless the reader inserts it (see lib/workspace/rough-work.ts).
+  const [scratchpads, setScratchpads] = useState<Scratchpad[]>([]);
+  const [activePadId, setActivePadId] = useState<string | null>(null);
+  // Whether the scratchpad field holds text it hasn't handed over yet. Like
+  // `editorDirtyRef`, it is journalled, and holds off adopting another tab's write.
+  const roughDirtyRef = useRef(false);
   // Highlights are the one reader action with no other way back — a mis-drag
   // silently replaces whatever it overlaps — so they get an undo stack.
   // `resetHighlights` loads a workspace without making the previous one's
@@ -488,10 +560,6 @@ export function DocsApp() {
   const navigate = useNavigate();
   const showSettings = location.pathname === "/settings";
   const mountedSettingsRoute = useRef(showSettings);
-  // Saved is a page of its own rather than a tab inside settings: it is
-  // something the reader comes back to and reads, not a preference they set
-  // once. Settings keeps only the clear-everything control.
-  const showSaved = location.pathname === "/saved";
 
   // Navigation history. Owned here because this is where every destination —
   // the route, the open file, the section, the search term — actually lives.
@@ -526,6 +594,8 @@ export function DocsApp() {
     sidebarCollapsed,
     saved,
     highlights,
+    notes,
+    scratchpads,
     recentFileIds,
   });
   snapshotRef.current = {
@@ -537,11 +607,14 @@ export function DocsApp() {
     sidebarCollapsed,
     saved,
     highlights,
+    notes,
+    scratchpads,
     recentFileIds,
   };
   const scrollRef = useRef(0);
   const activeFileNameRef = useRef<string | null>(null);
   const readingModeRef = useRef(readingMode);
+  const activeHeadingIdRef = useRef<string | null>(null);
   const workspaceIdRef = useRef<string | null>(null);
   const workspaceNameRef = useRef("My workspace");
   const createdAtRef = useRef(Date.now());
@@ -633,6 +706,8 @@ export function DocsApp() {
       bookmarks: toLegacyBookmarks(s.saved),
       saved: s.saved,
       highlights: s.highlights,
+      notes: s.notes,
+      scratchpads: s.scratchpads,
       ui: {
         activeFileId: s.activeFileId,
         expanded: s.expanded,
@@ -735,7 +810,8 @@ export function DocsApp() {
           return false;
         }
         // Journalled drafts this record now holds are safe to forget.
-        if (journal.has(id)) journal.settle(id, record.files);
+        if (journal.has(id))
+          journal.settle(id, [...record.files, ...scratchpadDrafts(record.scratchpads)]);
         if (workspaceIdRef.current !== id) return true;
         storageRevisionRef.current = record.revision;
         storedRecordRef.current = record;
@@ -751,6 +827,7 @@ export function DocsApp() {
           merging &&
           mutationRef.current === pending &&
           !editorDirtyRef.current &&
+          !roughDirtyRef.current &&
           !officeDirtyPanes.current.size
         )
           adoptRef.current(record);
@@ -838,6 +915,8 @@ export function DocsApp() {
       setSidebarCollapsed(!!ws.ui?.sidebarCollapsed);
       setSaved(ws.saved?.length ? ws.saved : migrateBookmarks(ws.bookmarks ?? [], parsed));
       resetHighlights((ws.highlights ?? []).filter((h) => typeof h.text === "string"));
+      setNotes(ws.notes ?? []);
+      setScratchpads(ws.scratchpads ?? []);
       setWorkspaceId(ws.id);
       workspaceIdRef.current = ws.id;
       workspaceNameRef.current = ws.name;
@@ -1018,7 +1097,12 @@ export function DocsApp() {
 
   /** This tab's open workspace, unsaved edits included, for storage-budget. */
   const openWorkspace = useCallback(
-    () => ({ id: workspaceIdRef.current, files: snapshotRef.current.files }),
+    () => ({
+      id: workspaceIdRef.current,
+      files: snapshotRef.current.files,
+      notes: snapshotRef.current.notes,
+      scratchpads: snapshotRef.current.scratchpads,
+    }),
     [],
   );
 
@@ -1288,6 +1372,7 @@ export function DocsApp() {
   );
   activeFileNameRef.current = activeFile?.name ?? null;
   readingModeRef.current = readingMode;
+  activeHeadingIdRef.current = activeHeadingId;
 
   // Identity of the workspace's file set, used to invalidate the artifact
   // resolution cache and to key embed rendering. Built by walking every file, so
@@ -1328,7 +1413,10 @@ export function DocsApp() {
    */
   const editorDirtyRef = useRef(false);
   const syncEditorDirty = useCallback(
-    () => setEditorDirty(editorDirtyRef.current || officeDirtyPanes.current.size > 0),
+    () =>
+      setEditorDirty(
+        editorDirtyRef.current || roughDirtyRef.current || officeDirtyPanes.current.size > 0,
+      ),
     [],
   );
   const confirmDiscardDraft = useCallback((fileId?: string) => {
@@ -1529,12 +1617,90 @@ export function DocsApp() {
    * is one way too many: binning is the single gesture, and it is undoable for
    * thirty days from a place the reader can actually find.
    */
-  const moveToBin = useCallback(
-    (id: string) => {
-      setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, deletedAt: Date.now() } : f)));
+  const binNow = useCallback(
+    (fileIds: string[], folderIds: string[] = []) => {
+      const binning = new Set(fileIds);
+      const now = Date.now();
+      if (binning.size) {
+        setFiles((prev) => prev.map((f) => (binning.has(f.id) ? { ...f, deletedAt: now } : f)));
+      }
+      if (folderIds.length) {
+        // A folder has no Bin of its own; its documents are in `fileIds`
+        // already. Anything left under it (a hidden attachments folder) is
+        // lifted to the top level rather than orphaned.
+        const removing = new Set(folderIds);
+        setFolders((prev) =>
+          prev
+            .filter((f) => !removing.has(f.id))
+            .map((f) => (f.parentId && removing.has(f.parentId) ? { ...f, parentId: null } : f)),
+        );
+      }
+      // A binned document leaves the screen as well as the list. The column
+      // that was showing it shows nothing rather than falling back to some
+      // other document from its history, which would read as the wrong file
+      // having opened.
+      setPaneLayout((prev) => {
+        const showing = new Set(
+          prev.panes
+            .filter((pane) => pane.activeTabId && binning.has(pane.activeTabId))
+            .map((pane) => pane.id),
+        );
+        const next = closeFileEverywhere(prev, fileIds);
+        if (!showing.size) return next;
+        return {
+          ...next,
+          panes: next.panes.map((pane) =>
+            showing.has(pane.id) ? { ...pane, activeTabId: null } : pane,
+          ),
+        };
+      });
       markDirty();
     },
     [markDirty],
+  );
+
+  /** Waiting on the reader's answer: binning something that is open, or a folder. */
+  const [binRequest, setBinRequest] = useState<BinRequest | null>(null);
+
+  /**
+   * Bin now, or ask first.
+   *
+   * Asks only when the answer matters: a document on screen is about to vanish
+   * from under the reader, or a folder is about to leave the list (folders are
+   * not themselves recoverable). Anything else goes straight to the Bin.
+   */
+  const requestBin = useCallback(
+    (fileIds: string[], folderIds: string[] = []) => {
+      if (!fileIds.length && !folderIds.length) return;
+      const { files: current, folders, paneLayout: layout } = snapshotRef.current;
+      const onScreen = new Set(layout.panes.map((pane) => pane.activeTabId));
+      const binning = new Set(fileIds);
+      const openNames = current
+        .filter((f) => binning.has(f.id) && onScreen.has(f.id))
+        .map((f) => f.name);
+      if (!openNames.length && !folderIds.length) {
+        binNow(fileIds, folderIds);
+        return;
+      }
+      setBinRequest({
+        fileIds,
+        folderIds,
+        openNames,
+        singleName:
+          fileIds.length === 1 && !folderIds.length
+            ? current.find((f) => f.id === fileIds[0])?.name
+            : folderIds.length === 1 && !fileIds.length
+              ? folders.find((f) => f.id === folderIds[0])?.name
+              : undefined,
+      });
+    },
+    [binNow],
+  );
+  const moveToBin = useCallback((id: string) => requestBin([id]), [requestBin]);
+  const removeSelection = useCallback(
+    ({ fileIds, folderIds }: { fileIds: string[]; folderIds: string[] }) =>
+      requestBin(fileIds, folderIds),
+    [requestBin],
   );
 
   const restoreFromBin = useCallback(
@@ -1702,16 +1868,20 @@ export function DocsApp() {
       const taken = new Set(snapshotRef.current.files.map((f) => f.name));
       const isMermaid = documentKind === "mermaid";
       const isBoard = documentKind === "board";
-      const extension = isBoard ? ".excalidraw" : isMermaid ? ".mmd" : ".md";
+      const extension = isBoard ? ".board" : isMermaid ? ".mmd" : ".md";
       const suggested = uniqueFileName(
-        isBoard ? "board.excalidraw" : isMermaid ? "animation.mmd" : "new.md",
+        isBoard ? "Untitled board.board" : isMermaid ? "animation.mmd" : "new.md",
         taken,
       );
 
       // Ask for the name up front. Creating the document and leaving the reader
       // to find Rename in a menu meant every new file started as "new.md", and
       // a workspace filled up with documents named after nothing.
-      const entered = window.prompt("Name for the new file:", suggested);
+      //
+      // Boards are the exception: they open at once and are named in place, in
+      // the title at the board's top-left. A native prompt freezes the whole
+      // page, which is the wrong first moment for a canvas you came to sketch on.
+      const entered = isBoard ? suggested : window.prompt("Name for the new file:", suggested);
       // Cancel means cancel — no document, rather than one with the default name.
       if (entered === null) return;
       const trimmed = entered.trim();
@@ -1746,7 +1916,7 @@ flowchart LR
         name,
         content,
         mimeType: isBoard
-          ? "application/vnd.excalidraw+json"
+          ? "application/vnd.localdox.board+json"
           : isMermaid
             ? "text/vnd.mermaid"
             : "text/markdown",
@@ -1783,12 +1953,13 @@ flowchart LR
       setDrawerOpen(false);
       if (location.pathname !== "/") navigate({ to: "/" });
       markDirty();
+      // A new board's empty state already says how to start; a toast would
+      // only sit on top of its tool dock.
+      if (isBoard) return;
       toast.success(`Created ${name}`, {
-        description: isBoard
-          ? "Draw, drop in images, and sketch diagrams. Changes save automatically."
-          : isMermaid
-            ? "Edit the flow script and Mermaid source, then preview the animation."
-            : "Paste your markdown, then Save.",
+        description: isMermaid
+          ? "Edit the flow script and Mermaid source, then preview the animation."
+          : "Paste your markdown, then Save.",
       });
     },
     [location.pathname, navigate, markDirty],
@@ -1883,6 +2054,33 @@ flowchart LR
     [markDirty],
   );
 
+  /**
+   * Move a folder to where `targetId` sits: its place in the list, under the
+   * same parent. Refuses a drop into the folder's own subtree, for the same
+   * reason `moveFolderToFolder` does.
+   */
+  const reorderFolder = useCallback(
+    (folderId: string, targetId: string) => {
+      if (folderId === targetId) return;
+      setFolders((prev) => {
+        const from = prev.findIndex((f) => f.id === folderId);
+        const to = prev.findIndex((f) => f.id === targetId);
+        if (from === -1 || to === -1) return prev;
+        const parentId = prev[to].parentId ?? null;
+        const parentOf = new Map(prev.map((f) => [f.id, f.parentId ?? null]));
+        for (let at: string | null = parentId; at; at = parentOf.get(at) ?? null) {
+          if (at === folderId) return prev;
+        }
+        const next = [...prev];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, { ...moved, parentId });
+        return next;
+      });
+      markDirty();
+    },
+    [markDirty],
+  );
+
   const reorderFile = useCallback(
     (oldIndex: number, newIndex: number) => {
       setFiles((prev) => {
@@ -1910,7 +2108,10 @@ flowchart LR
             !(hl.end <= p.start || hl.start >= p.end),
         );
         const withoutOverlaps = prev.filter((p) => !overlaps.includes(p));
-        return [...withoutOverlaps, { id: crypto.randomUUID(), fileId, ...hl }];
+        return [
+          ...withoutOverlaps,
+          { id: crypto.randomUUID(), fileId, createdAt: Date.now(), ...hl },
+        ];
       });
       markDirty();
     },
@@ -2005,29 +2206,106 @@ flowchart LR
     markDirty();
   }, [markDirty]);
 
-  // Star or unstar one thing. Identity is what the star points at (file,
-  // section anchor, or the passage's text), never a generated id — re-saving
-  // the same table has to find the existing star, not add a second one.
-  const toggleSaved = useCallback(
-    (fileId: string, draft: SavedDraft) => {
-      setSaved((prev) => {
-        const key = savedKey({ fileId, ...draft });
-        const hit = prev.find((s) => savedKey(s) === key);
-        return hit
-          ? prev.filter((s) => s.id !== hit.id)
-          : [...prev, { ...draft, id: newSavedId(), fileId, createdAt: Date.now() }];
+  // ---- notes ----
+
+  // The panel's open state is the reader's, per device; it is not part of the
+  // workspace and never syncs. Read after mount so the server render and the
+  // first client render agree.
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(NOTES_OPEN_KEY) === "1") setNotesOpen(true);
+    } catch {
+      // Storage blocked: the panel simply starts closed.
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(NOTES_OPEN_KEY, notesOpen ? "1" : "0");
+    } catch {
+      // Not remembered; nothing else depends on it.
+    }
+  }, [notesOpen]);
+  const toggleNotes = useCallback(() => setNotesOpen((open) => !open), []);
+  const closeNotes = useCallback(() => setNotesOpen(false), []);
+
+  useEffect(() => {
+    if (!freshNoteId) return;
+    const timer = setTimeout(() => setFreshNoteId(null), 2000);
+    return () => clearTimeout(timer);
+  }, [freshNoteId]);
+
+  const addNote = useCallback(
+    (fileId: string, draft: NoteDraft) => {
+      const file = filesRef.current.find((f) => f.id === fileId);
+      if (!file || !draft.content.trim()) return;
+      const note = createNote(draft, file);
+      setNotes((prev) => [...prev, note]);
+      setFreshNoteId(note.id);
+      markDirty();
+      const truncated = draft.content.length > MAX_NOTE_CHARS;
+      toast.success("Copied to notes", {
+        id: "note-added",
+        description: truncated
+          ? `That selection was very long; the first ${MAX_NOTE_CHARS.toLocaleString()} characters were kept.`
+          : undefined,
+        action: notesOpenRef.current
+          ? undefined
+          : { label: "Show notes", onClick: () => setNotesOpen(true) },
       });
+    },
+    [markDirty],
+  );
+
+  const updateNote = useCallback(
+    (id: string, content: string) => {
+      setNotes((prev) => prev.map((note) => (note.id === id ? editNote(note, content) : note)));
       markDirty();
     },
     [markDirty],
   );
 
-  const removeSaved = useCallback(
+  // Deleting is immediate and undoable, rather than confirmed: a note is one
+  // click to make, and a confirmation on every tidy-up teaches readers to
+  // click through confirmations.
+  const removeNote = useCallback(
     (id: string) => {
-      setSaved((prev) => prev.filter((s) => s.id !== id));
+      const note = snapshotRef.current.notes.find((n) => n.id === id);
+      if (!note) return;
+      setNotes((prev) => prev.filter((n) => n.id !== id));
       markDirty();
+      toast("Note deleted", {
+        id: "note-deleted",
+        action: {
+          label: "Undo",
+          onClick: () => {
+            setNotes((prev) => (prev.some((n) => n.id === id) ? prev : [...prev, note]));
+            markDirty();
+          },
+        },
+      });
     },
     [markDirty],
+  );
+
+  // Deleting a highlight from the Notes list is offered back the way a note's
+  // deletion is: the list is far from the passage, so a misclick is unseen.
+  const removeHighlightFromNotes = useCallback(
+    (id: string) => {
+      const highlight = snapshotRef.current.highlights.find((h) => h.id === id);
+      if (!highlight) return;
+      removeHighlight(id);
+      toast("Highlight removed", {
+        id: "note-deleted",
+        action: {
+          label: "Undo",
+          onClick: () => {
+            setHighlights((prev) => (prev.some((h) => h.id === id) ? prev : [...prev, highlight]));
+            markDirty();
+          },
+        },
+      });
+    },
+    [removeHighlight, setHighlights, markDirty],
   );
 
   const sortFilesByName = useCallback(() => {
@@ -2108,6 +2386,284 @@ flowchart LR
     [markDirty],
   );
 
+  // ---- rough work ----
+
+  // Which tab and which pad were showing: per device, like the panel itself.
+  useEffect(() => {
+    try {
+      const tab = localStorage.getItem(NOTES_TAB_KEY);
+      if (tab === "notes" || tab === "rough" || tab === "compute") setNotesTab(tab);
+      setActivePadId(localStorage.getItem(ROUGH_PAD_KEY));
+    } catch {
+      // Storage blocked: Notes, and the most recent pad.
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(NOTES_TAB_KEY, notesTab);
+      if (activePadId) localStorage.setItem(ROUGH_PAD_KEY, activePadId);
+    } catch {
+      // Not remembered; nothing else depends on it.
+    }
+  }, [notesTab, activePadId]);
+
+  /** The live document in the reader, which new pads are linked to. */
+  const readerFile = useCallback(() => {
+    const s = snapshotRef.current;
+    const file = s.files.find((f) => f.id === s.activeFileId && f.deletedAt == null);
+    return file ? { id: file.id, name: file.name } : null;
+  }, []);
+
+  const updateScratchpad = useCallback(
+    (id: string, change: (pad: Scratchpad) => Scratchpad) => {
+      setScratchpads((prev) => prev.map((pad) => (pad.id === id ? change(pad) : pad)));
+      markDirty();
+    },
+    [markDirty],
+  );
+
+  const createPad = useCallback(() => {
+    const pad = createScratchpad(snapshotRef.current.scratchpads, readerFile());
+    setScratchpads((prev) => [...prev, pad]);
+    setActivePadId(pad.id);
+    markDirty();
+  }, [markDirty, readerFile]);
+
+  const changePad = useCallback(
+    (id: string, content: string) => updateScratchpad(id, (pad) => editScratchpad(pad, content)),
+    [updateScratchpad],
+  );
+  const renamePad = useCallback(
+    (id: string, title: string) => updateScratchpad(id, (pad) => renameScratchpad(pad, title)),
+    [updateScratchpad],
+  );
+  const linkPad = useCallback(
+    (id: string, fileId: string | null) => {
+      const file = fileId ? filesRef.current.find((f) => f.id === fileId) : undefined;
+      updateScratchpad(id, (pad) =>
+        linkScratchpad(pad, file ? { id: file.id, name: file.name } : null),
+      );
+    },
+    [updateScratchpad],
+  );
+
+  // The editor hands its pending text over just before these run, so they
+  // work from the pad as the queued update leaves it, not from the last render.
+  const duplicatePad = useCallback(
+    (id: string) => {
+      const copyId = newScratchpadId();
+      setScratchpads((prev) => {
+        const source = prev.find((pad) => pad.id === id);
+        return source ? [...prev, { ...duplicateScratchpad(source, prev), id: copyId }] : prev;
+      });
+      setActivePadId(copyId);
+      markDirty();
+    },
+    [markDirty],
+  );
+
+  // Confirmed in the panel first; Undo is a second chance, not the safeguard.
+  const clearPad = useCallback(
+    (id: string) => {
+      let before: Scratchpad | undefined;
+      setScratchpads((prev) =>
+        prev.map((pad) => (pad.id === id ? ((before = pad), editScratchpad(pad, "")) : pad)),
+      );
+      markDirty();
+      toast("Scratchpad cleared", {
+        id: "rough-cleared",
+        action: {
+          label: "Undo",
+          onClick: () => {
+            const previous = before;
+            if (!previous) return;
+            // Only into a pad still empty: nothing typed since is overwritten.
+            updateScratchpad(id, (pad) =>
+              pad.content ? pad : editScratchpad(pad, previous.content),
+            );
+          },
+        },
+      });
+    },
+    [markDirty, updateScratchpad],
+  );
+
+  const deletePad = useCallback(
+    (id: string) => {
+      let removed: Scratchpad | undefined;
+      setScratchpads((prev) => {
+        removed = prev.find((pad) => pad.id === id);
+        return prev.filter((pad) => pad.id !== id);
+      });
+      const workspace = workspaceIdRef.current;
+      if (workspace) journal.discard(workspace, scratchpadDraftId(id));
+      markDirty();
+      toast("Scratchpad deleted", {
+        id: "rough-deleted",
+        action: {
+          label: "Undo",
+          onClick: () => {
+            const pad = removed;
+            if (!pad) return;
+            setScratchpads((prev) => (prev.some((p) => p.id === id) ? prev : [...prev, pad]));
+            setActivePadId(id);
+            markDirty();
+          },
+        },
+      });
+    },
+    [journal, markDirty],
+  );
+
+  const savePadAsNote = useCallback(
+    (id: string, markdown: string) => {
+      const pad = snapshotRef.current.scratchpads.find((p) => p.id === id);
+      if (!pad || !markdown.trim()) return;
+      const note = noteFromScratchpad(pad, markdown.slice(0, MAX_NOTE_CHARS));
+      setNotes((prev) => [...prev, note]);
+      setFreshNoteId(note.id);
+      markDirty();
+      toast.success("Saved to notes", {
+        id: "note-added",
+        description: "A copy: changing the scratchpad later won't change the note.",
+        action: { label: "Show notes", onClick: () => setNotesTab("notes") },
+      });
+    },
+    [markDirty],
+  );
+
+  /**
+   * A computed result, added to the end of the scratchpad Rough work shows
+   * (or to a new one, linked to the open document). A copy: the result stays
+   * in Compute, and no document changes.
+   */
+  const appendToRoughWork = useCallback(
+    (markdown: string) => {
+      const pads = sortScratchpads(snapshotRef.current.scratchpads, readerFile()?.id ?? null);
+      const target = pads.find((p) => p.id === activePadId) ?? pads[0];
+      const append = (content: string) =>
+        insertIntoDocument(content, markdown, content.length).content;
+      let title: string;
+      if (target) {
+        if (append(target.content).length > MAX_SCRATCHPAD_CHARS) {
+          toast.error(`“${target.title}” is full`, {
+            id: "compute-rough",
+            description: "Nothing was added. Start a new scratchpad for more.",
+          });
+          return;
+        }
+        updateScratchpad(target.id, (pad) => editScratchpad(pad, append(pad.content)));
+        setActivePadId(target.id);
+        title = target.title;
+      } else {
+        const pad = createScratchpad([], readerFile());
+        setScratchpads((prev) => [...prev, { ...pad, content: append("") }]);
+        setActivePadId(pad.id);
+        markDirty();
+        title = pad.title;
+      }
+      toast.success(`Added to “${title}”`, {
+        id: "compute-rough",
+        description: "A copy: the result stays in Compute.",
+        action: { label: "Show", onClick: () => setNotesTab("rough") },
+      });
+    },
+    [activePadId, markDirty, readerFile, updateScratchpad],
+  );
+
+  const openPadDocument = useCallback(
+    async (fileId: string) => {
+      if (mobileNavigation) setNotesOpen(false);
+      if (showSettings) await openFromHome(fileId);
+      else handleSelect(fileId);
+    },
+    // handleSelect is redefined every render; calling the latest one is correct.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mobileNavigation, showSettings, openFromHome],
+  );
+
+  /** Where the document in the reader can take rough work, measured now. */
+  const roughInsertTarget = useCallback((): InsertTarget | null => {
+    const s = snapshotRef.current;
+    const file = s.files.find((f) => f.id === s.activeFileId);
+    if (!file || file.deletedAt != null) return null;
+    if (file.kind && file.kind !== "markdown" && file.kind !== "text") return null;
+    // Paged reading opens on the first page with no page id set.
+    const page =
+      readingModeRef.current === "single"
+        ? null
+        : (activeHeadingIdRef.current ?? fileSubtopics(file)[0]?.id ?? null);
+    return {
+      fileId: file.id,
+      name: file.name,
+      points: insertionPoints(file, page),
+      blocked: isEditorOpen(file.id)
+        ? `“${file.name}” is open in the editor. Choose Done or Cancel there first, then insert.`
+        : undefined,
+      base: hashText(file.content),
+    };
+  }, []);
+
+  /**
+   * The one way rough work reaches a document, after the reader confirmed it.
+   * Checked again here: the document may have changed, or opened in the
+   * editor, while the dialog was up. It is then an ordinary edit of the
+   * document, with an Undo for exactly this insertion.
+   */
+  const insertRoughWork = useCallback(
+    (request: InsertRequest) => {
+      const file = filesRef.current.find((f) => f.id === request.fileId);
+      const refuse = (message: string) =>
+        toast.error(message, { id: "rough-insert", description: "Nothing was inserted." });
+      if (!file || file.deletedAt != null) return refuse("That document is no longer open.");
+      if (isEditorOpen(file.id))
+        return refuse(`“${file.name}” is open in the editor. Choose Done or Cancel there first.`);
+      if (hashText(file.content) !== request.base)
+        return refuse(`“${file.name}” changed while the dialog was open. Try again.`);
+
+      const before = file.content;
+      const { content, span } = insertIntoDocument(before, request.markdown, request.point.offset);
+      handleContentChange(file.id, content);
+
+      // Show where it went.
+      if (mobileNavigation) setNotesOpen(false);
+      if (readingModeRef.current !== "single") {
+        const page = pageAt({ content, name: file.name }, span.start);
+        if (page && page !== activeHeadingIdRef.current) handleSelect(file.id, page);
+      }
+      setPendingSaved({ fileId: file.id, text: "", span });
+
+      toast.success(`Inserted into “${file.name}”`, {
+        id: "rough-insert",
+        action: {
+          label: "Undo",
+          onClick: () => {
+            const now = filesRef.current.find((f) => f.id === file.id);
+            // Undone only while the document is exactly as the insertion left it.
+            if (!now || now.content !== content || isEditorOpen(file.id)) {
+              toast.error("The document has changed since, so this can't be undone here.", {
+                id: "rough-insert",
+              });
+              return;
+            }
+            handleContentChange(file.id, before);
+          },
+        },
+      });
+    },
+    // handleSelect is redefined every render; calling the latest one is correct.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [handleContentChange, mobileNavigation],
+  );
+
+  const roughDirtyChange = useCallback(
+    (dirty: boolean) => {
+      roughDirtyRef.current = dirty;
+      syncEditorDirty();
+    },
+    [syncEditorDirty],
+  );
+
   // ---- recovered drafts ----
   //
   // Edits journalled by a tab that has since gone (closed, crashed, killed)
@@ -2123,10 +2679,12 @@ flowchart LR
     let alive = true;
     void liveSessions().then((live) => {
       if (!alive || workspaceIdRef.current !== id) return;
-      const { offer, stale } = recoverableDrafts(entries, snapshotRef.current.files, {
-        session: journal.session,
-        live,
-      });
+      // Scratchpads are journalled beside documents, under ids of their own.
+      const { offer, stale } = recoverableDrafts(
+        entries,
+        [...snapshotRef.current.files, ...scratchpadDrafts(snapshotRef.current.scratchpads)],
+        { session: journal.session, live },
+      );
       for (const entry of stale) journal.discard(id, entry.fileId);
       setRecovered(offer.map((entry) => ({ ...entry, asCopy: entry.changedSince })));
     });
@@ -2144,11 +2702,66 @@ flowchart LR
     [journal],
   );
 
+  /**
+   * Rough work typed but never stored. Restored into its pad when the pad
+   * still holds what the text was typed against; otherwise as a new pad, so a
+   * version saved since is never overwritten.
+   */
+  const restoreRecoveredScratchpad = useCallback(
+    (workspaceId: string, entry: DraftEntry, padId: string) => {
+      const current = snapshotRef.current.scratchpads.find((pad) => pad.id === padId);
+      const inPlace = !!current && hashText(current.content) === entry.base;
+      let target: Scratchpad;
+      if (inPlace) {
+        target = editScratchpad(current, entry.text);
+        setScratchpads((prev) => prev.map((pad) => (pad.id === padId ? target : pad)));
+      } else {
+        const title = entry.fileName.replace(/ \(rough work\)$/, "");
+        target = {
+          ...renameScratchpad(
+            createScratchpad(snapshotRef.current.scratchpads, null),
+            `${title} (recovered)`,
+          ),
+          content: entry.text,
+          fileId: current?.fileId ?? null,
+          ...(current?.fileName ? { fileName: current.fileName } : {}),
+        };
+        setScratchpads((prev) => [...prev, target]);
+      }
+      markDirty();
+      // Re-owned by this tab until the write holding it commits (`settle`).
+      journal.stage({
+        workspaceId,
+        fileId: scratchpadDraftId(target.id),
+        fileName: `${target.title} (rough work)`,
+        text: entry.text,
+        base: inPlace && current ? hashText(current.content) : hashText(""),
+      });
+      if (target.id !== padId) journal.discard(workspaceId, entry.fileId);
+      journal.flush();
+      setRecovered((list) => list.filter((e) => e.fileId !== entry.fileId));
+      setActivePadId(target.id);
+      setNotesTab("rough");
+      setNotesOpen(true);
+      toast.success(
+        inPlace
+          ? `Restored your rough work in “${target.title}”.`
+          : "Your rough work was restored as a new scratchpad.",
+      );
+    },
+    [journal, markDirty],
+  );
+
   const restoreRecovered = useCallback(
     (fileId: string) => {
       const id = workspaceIdRef.current;
       const entry = recovered.find((e) => e.fileId === fileId);
       if (!id || !entry) return;
+      const padId = scratchpadOfDraft(fileId);
+      if (padId) {
+        restoreRecoveredScratchpad(id, entry, padId);
+        return;
+      }
       const current = snapshotRef.current.files.find((f) => f.id === fileId);
       // Checked again now rather than trusted from when the offer was made:
       // restoring in place must never overwrite a version saved since.
@@ -2197,7 +2810,14 @@ flowchart LR
           : "Your edits were restored as a copy.",
       );
     },
-    [recovered, handleContentChange, journal, markDirty, setActiveFileId],
+    [
+      recovered,
+      handleContentChange,
+      journal,
+      markDirty,
+      setActiveFileId,
+      restoreRecoveredScratchpad,
+    ],
   );
 
   useEffect(() => {
@@ -2246,6 +2866,7 @@ flowchart LR
     () =>
       mutationRef.current !== savedMutationRef.current ||
       editorDirtyRef.current ||
+      roughDirtyRef.current ||
       officeDirtyPanes.current.size > 0,
     [],
   );
@@ -2269,7 +2890,7 @@ flowchart LR
         officeDirtyPanes.current.size > 0 ||
         !!saveErrorRef.current ||
         workspaceConflictRef.current ||
-        (editorDirtyRef.current && !journalled),
+        ((editorDirtyRef.current || roughDirtyRef.current) && !journalled),
     });
   }, [hasUnsavedWork, journal, persistNow]);
 
@@ -2376,6 +2997,8 @@ flowchart LR
       setFiles([]);
       setFolders([]);
       setSaved([]);
+      setNotes([]);
+      setScratchpads([]);
       setSaveStatus("idle");
     } finally {
       setResolvingConflict(false);
@@ -2486,6 +3109,10 @@ flowchart LR
         setFolders((prev) => prev.filter((folder) => !plan.removeFolderIds.has(folder.id)));
         setSaved((prev) => prev.filter((item) => !plan.removeFileIds.has(item.fileId)));
         setHighlights((prev) => prev.filter((item) => !plan.removeFileIds.has(item.fileId)));
+        setNotes((prev) => prev.filter((item) => !plan.removeFileIds.has(item.fileId)));
+        setScratchpads((prev) =>
+          prev.filter((pad) => pad.fileId === null || !plan.removeFileIds.has(pad.fileId)),
+        );
         // A moved document must not stay open in a pane pointing at a file this
         // workspace no longer has.
         setPaneLayout((prev) => closeFileEverywhere(prev, [...plan.removeFileIds]));
@@ -2593,7 +3220,7 @@ flowchart LR
         if (!finalName) return; // reader cancelled the rename — import nothing
         ws.name = finalName;
 
-        room = await reserveStorage(storedBytes(ws.files), openWorkspace);
+        room = await reserveStorage(storedRecordBytes(ws), openWorkspace);
         if (!(await persistNow(true))) return;
         await persistence.serial(() => persistence.putWorkspace(ws));
         room.release();
@@ -2913,51 +3540,6 @@ flowchart LR
     }
   }, []);
 
-  // Rows for the Saved list: newest first, each carrying the name of the file it
-  // came from. Stars whose file is gone are dropped rather than shown as dead
-  // rows — removing a file already removes its content.
-  const savedEntries: SavedEntry[] = useMemo(
-    () =>
-      saved
-        .map((item) => {
-          const file = files.find((f) => f.id === item.fileId);
-          return file ? { ...item, fileName: file.name } : null;
-        })
-        .filter(Boolean as unknown as (v: SavedEntry | null) => v is SavedEntry)
-        .sort((a, b) => b.createdAt - a.createdAt),
-    [saved, files],
-  );
-
-  // The header star saves whatever page the reader is on: the current section
-  // when one is selected, otherwise the document itself.
-  const activePageDraft = useCallback((): SavedDraft | null => {
-    if (!activeFile) return null;
-    if (!activeHeadingId) {
-      return { kind: "file", title: activeFile.name };
-    }
-    const chunks = fileSubtopics(activeFile);
-    const chunk = chunks.find((c) => c.id === activeHeadingId);
-    return {
-      kind: "section",
-      title: chunk?.title ?? activeFile.name,
-      headingId: activeHeadingId,
-      subtopicId: activeHeadingId,
-    };
-  }, [activeFile, activeHeadingId]);
-
-  const activePageSaved = activeFile
-    ? findSaved(saved, {
-        fileId: activeFile.id,
-        kind: activeHeadingId ? "section" : "file",
-        headingId: activeHeadingId ?? undefined,
-      })
-    : undefined;
-
-  const toggleActivePageSaved = useCallback(() => {
-    const draft = activePageDraft();
-    if (activeFile && draft) toggleSaved(activeFile.id, draft);
-  }, [activeFile, activePageDraft, toggleSaved]);
-
   // ---- props for the viewer, held to stable identities ----
   //
   // Each of these used to be built inline in the JSX below. A `.filter()` or a
@@ -2971,11 +3553,6 @@ flowchart LR
     [highlights, activeFile],
   );
 
-  const activeFileSaved = useMemo(
-    () => (activeFile ? saved.filter((s) => s.fileId === activeFile.id) : EMPTY_SAVED),
-    [saved, activeFile],
-  );
-
   const addHighlightToActive = useCallback(
     (hl: Omit<Highlight, "id" | "fileId">) => {
       if (activeFile) addHighlight(hl, activeFile.id);
@@ -2983,11 +3560,11 @@ flowchart LR
     [addHighlight, activeFile],
   );
 
-  const toggleSavedOnActive = useCallback(
-    (draft: SavedDraft) => {
-      if (activeFile) toggleSaved(activeFile.id, draft);
+  const copyToNotesFromActive = useCallback(
+    (draft: NoteDraft) => {
+      if (activeFile) addNote(activeFile.id, draft);
     },
-    [toggleSaved, activeFile],
+    [addNote, activeFile],
   );
 
   const shareActiveFile = useCallback(() => {
@@ -3003,10 +3580,6 @@ flowchart LR
     (fileId: string) => handleSelect(fileId, undefined),
     [handleSelect],
   );
-
-  const toggleActiveDocumentSaved = useCallback(() => {
-    if (activeFile) toggleSaved(activeFile.id, { kind: "file", title: activeFile.name });
-  }, [toggleSaved, activeFile]);
 
   // The collapsed rail's "New folder" — the expanded sidebar asks for the name
   // itself, so the rail has to do the same before it can create one.
@@ -3067,19 +3640,171 @@ flowchart LR
     return section ? { title: section.title, content: section.content } : null;
   }, [activeFile, activeHeadingId]);
 
-  // Opening a star: go to its file and page first, then hand the item to the
-  // viewer, which scrolls to the passage and flashes it once it has rendered.
-  const openSaved = useCallback(
-    async (item: SavedItem) => {
-      const target = item.headingId ?? item.subtopicId ?? undefined;
-      if (showSettings) await openFromHome(item.fileId, target);
-      else handleSelect(item.fileId, target);
-      setPendingSaved(item);
-      setDrawerOpen(false);
+  /**
+   * Open a passage the reader kept — a note's source, or a highlight — and
+   * flash it. Resolved against the document's Markdown first (see
+   * `resolveNoteSource`), so the right page opens even if the passage has
+   * moved, and a passage or document that is gone says so instead of opening
+   * somewhere unrelated.
+   */
+  const openPassage = useCallback(
+    async (fileId: string, source: NoteSource, fallbackName: string) => {
+      const file = filesRef.current.find((f) => f.id === fileId);
+      const status = resolveNoteSource({ source }, file);
+      const name = file?.name ?? fallbackName;
+      if (status.kind === "missing-document") {
+        toast.info("The source document is no longer in this workspace.", {
+          id: "note-source",
+          description: "The note keeps its own copy of the passage.",
+        });
+        return;
+      }
+      if (status.kind === "binned") {
+        toast.info(`“${name}” is in the Bin.`, {
+          id: "note-source",
+          description: "Restore it from Settings ▸ Storage to follow this link.",
+        });
+        return;
+      }
+      // On a phone the sheet covers the very passage being opened.
+      if (mobileNavigation) setNotesOpen(false);
+      const target = status.kind === "found" ? status.subtopicId : (status.target ?? undefined);
+      if (showSettings) await openFromHome(fileId, target);
+      else handleSelect(fileId, target);
+      if (status.kind === "missing-passage") {
+        toast.info("This passage is no longer in the document.", {
+          id: "note-source",
+          description: target ? "Opened the section it came from." : undefined,
+        });
+        return;
+      }
+      // Stored offsets are only a hint, and only in the space they were
+      // measured in: the page they came from, or the whole document.
+      const sameSpace =
+        !status.moved &&
+        (source.subtopicId === undefined) === (readingModeRef.current === "single");
+      setPendingSaved({
+        fileId,
+        text: source.quote,
+        prefix: source.prefix,
+        suffix: source.suffix,
+        start: sameSpace ? source.start : undefined,
+        // The exact file span, when the note's source anchor still holds.
+        span: status.span,
+      });
     },
-    // handleSelect is redefined every render; calling the latest one is correct.
+    [mobileNavigation, showSettings, openFromHome, handleSelect],
+  );
+
+  /** A note's source link: its passage, or the scratchpad it was saved from. */
+  const openNoteSource = useCallback(
+    (note: Note) => {
+      // A note saved from rough work links to its scratchpad, not a passage.
+      if (note.origin) {
+        const padId = note.origin.scratchpadId;
+        if (!snapshotRef.current.scratchpads.some((pad) => pad.id === padId)) {
+          toast.info("That scratchpad was deleted.", {
+            id: "note-source",
+            description: "The note keeps its own copy of the work.",
+          });
+          return;
+        }
+        setActivePadId(padId);
+        setNotesTab("rough");
+        return;
+      }
+      void openPassage(note.fileId, note.source, note.fileName);
+    },
+    [openPassage],
+  );
+
+  /** A highlight in the Notes list: open the document on the mark itself. */
+  const openHighlight = useCallback(
+    (highlight: Highlight) => void openPassage(highlight.fileId, highlightSource(highlight), ""),
+    [openPassage],
+  );
+
+  // What the panel shows about each note's source, by file id.
+  const filesById = useMemo(() => new Map(files.map((file) => [file.id, file])), [files]);
+  const noteFileName = useCallback((fileId: string) => filesById.get(fileId)?.name, [filesById]);
+  const noteSourceState = useCallback(
+    (fileId: string): NoteSourceState => {
+      const file = filesById.get(fileId);
+      return !file ? "missing" : file.deletedAt != null ? "binned" : "live";
+    },
+    [filesById],
+  );
+  // A highlight's page, for its line in the Notes list. Not the preamble's:
+  // that page is titled with the document's own name, already shown.
+  const highlightSection = useCallback(
+    (highlight: Highlight) => {
+      const file = filesById.get(highlight.fileId);
+      if (!file || !highlight.subtopicId || highlight.subtopicId === "preamble") return undefined;
+      return fileSubtopics(file).find((chunk) => chunk.id === highlight.subtopicId)?.title;
+    },
+    [filesById],
+  );
+  const sortedNotes = useMemo(() => sortNotes(notes), [notes]);
+  const writing = useMemo(() => ({ notes, scratchpads }), [notes, scratchpads]);
+
+  const readerFileForPads = useMemo(
+    () =>
+      activeFile && activeFile.deletedAt == null
+        ? { id: activeFile.id, name: activeFile.name }
+        : null,
+    // Only its identity and name matter here, not every edit to its text.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [openFromHome, showSettings],
+    [activeFile?.id, activeFile?.name, activeFile?.deletedAt],
+  );
+  const compute = useMemo<ComputeProps>(
+    () => ({
+      onAddToRoughWork: appendToRoughWork,
+      insertTarget: roughInsertTarget,
+      onInsert: insertRoughWork,
+    }),
+    [appendToRoughWork, roughInsertTarget, insertRoughWork],
+  );
+
+  const roughWork = useMemo<RoughWorkProps>(
+    () => ({
+      scratchpads: sortScratchpads(scratchpads, readerFileForPads?.id ?? null),
+      activeId: activePadId,
+      onSelect: setActivePadId,
+      currentFile: readerFileForPads,
+      fileName: noteFileName,
+      sourceState: noteSourceState,
+      onCreate: createPad,
+      onChange: changePad,
+      onRename: renamePad,
+      onDuplicate: duplicatePad,
+      onClear: clearPad,
+      onDelete: deletePad,
+      onLink: linkPad,
+      onOpenDocument: openPadDocument,
+      onSaveAsNote: savePadAsNote,
+      insertTarget: roughInsertTarget,
+      onInsert: insertRoughWork,
+      onDirtyChange: roughDirtyChange,
+    }),
+    [
+      scratchpads,
+      readerFileForPads,
+      activePadId,
+      noteFileName,
+      noteSourceState,
+      createPad,
+      changePad,
+      renamePad,
+      duplicatePad,
+      clearPad,
+      deletePad,
+      linkPad,
+      openPadDocument,
+      savePadAsNote,
+      roughInsertTarget,
+      insertRoughWork,
+      roughDirtyChange,
+    ],
   );
 
   const goHome = useCallback(() => navigate({ to: "/" }), [navigate]);
@@ -3360,6 +4085,20 @@ flowchart LR
     },
     [switchWorkspace, showSettings, openFromHome, handleSelect, searchQuery],
   );
+  // Search markers belong to the open search: they mark the query whose hit
+  // was opened, for as long as the panel is open and still holds that query.
+  // They used to outlive both — closing search, clearing it or typing another
+  // word left the old word marked all over every document opened after.
+  // Closing drops the opened query outright, so reopening search (or going
+  // Back to an entry that recorded it) never brings stale markers back.
+  useEffect(() => {
+    if (!searchOpen) setHighlightQuery(null);
+  }, [searchOpen]);
+  const markerQuery =
+    searchOpen && highlightQuery && highlightQuery.trim() === searchQuery.trim()
+      ? highlightQuery
+      : null;
+
   const searchPanelState: SearchPanelState | null = searchOpen
     ? {
         query: searchQuery,
@@ -3379,20 +4118,6 @@ flowchart LR
       }
     : null;
 
-  const savedPage = showSaved ? (
-    <LazyBoundary>
-      <SavedPage
-        saved={savedEntries}
-        highlights={highlights}
-        fileName={(fileId) => filesRef.current.find((f) => f.id === fileId)?.name ?? null}
-        onOpenSaved={openSaved}
-        onRemoveSaved={removeSaved}
-        onOpenHighlight={(hl) => handleSelect(hl.fileId, hl.subtopicId || undefined)}
-        onRemoveHighlight={removeHighlight}
-      />
-    </LazyBoundary>
-  ) : null;
-
   // Settings is a dialog over the reader rather than a page of its own, so the
   // document stays visible behind it and closing it returns you to exactly what
   // you were reading. `/settings` stays a real route so the deep link still
@@ -3403,6 +4128,17 @@ flowchart LR
    * sidebar is unmounted on a phone once the drawer closes, and the move must
    * survive that — it is the reader's documents in flight.
    */
+  const binDialog = (
+    <MoveToBinDialog
+      request={binRequest}
+      onCancel={() => setBinRequest(null)}
+      onConfirm={() => {
+        if (binRequest) binNow(binRequest.fileIds, binRequest.folderIds);
+        setBinRequest(null);
+      }}
+    />
+  );
+
   const moveDialog = (
     <MoveToWorkspaceDialog
       open={pendingMove !== null}
@@ -3426,21 +4162,8 @@ flowchart LR
         onDeleteWorkspace={deleteWorkspace}
         onNewWorkspace={newWorkspace}
         onClearStorage={clearAllStorage}
-        saved={savedEntries}
-        onOpenSaved={openSaved}
-        onRemoveSaved={removeSaved}
-        onClearSaved={() => {
-          setSaved([]);
-          markDirty();
-        }}
-        highlights={highlights}
-        onRemoveHighlight={removeHighlight}
-        onClearHighlights={() => {
-          setHighlights([]);
-          markDirty();
-        }}
-        onNavigate={openFromHome}
         files={files}
+        writing={writing}
         onOpenWorkspace={openWorkspaceFromHome}
         theme={theme}
         onSetTheme={setTheme}
@@ -3596,6 +4319,7 @@ flowchart LR
                   onSelect={handleSelect}
                   onAddFiles={() => inputRef.current?.click()}
                   onRemoveFile={moveToBin}
+                  onRemoveSelection={removeSelection}
                   onDownloadFile={downloadFile}
                   onDownloadFiles={downloadFiles}
                   onMoveToWorkspace={workspaces.length > 1 ? setPendingMove : undefined}
@@ -3615,12 +4339,10 @@ flowchart LR
                   onMoveFileToFolder={moveFileToFolder}
                   onMoveFolderToFolder={moveFolderToFolder}
                   onReorderFile={reorderFile}
+                  onReorderFolder={reorderFolder}
                   onSortByName={sortFilesByName}
                   view={sidebarView}
                   onView={setSidebarView}
-                  saved={savedEntries}
-                  onOpenSaved={openSaved}
-                  onRemoveSaved={removeSaved}
                   theme={theme}
                   onCycleTheme={cycleTheme}
                   currentWorkspaceName={workspaceNameRef.current}
@@ -3645,7 +4367,13 @@ flowchart LR
                   currentWorkspaceId={workspaceId}
                   onSwitchWorkspace={switchWorkspace}
                   docked
-                  saveIndicator={saveState ? <SaveIndicator state={saveState} /> : null}
+                  // Quiet while things are fine — an icon whose tooltip
+                  // explains it — and spelled out only when a save failed.
+                  saveIndicator={
+                    saveState ? (
+                      <SaveIndicator state={saveState} compact={saveState !== "error"} />
+                    ) : null
+                  }
                   onOpenSearch={() => setSearchOpen(true)}
                   onToggleSidebar={toggleSidebar}
                   search={searchPanelState}
@@ -3653,41 +4381,36 @@ flowchart LR
               </div>
 
               <div
-                className="absolute inset-y-0 left-0 flex w-14 flex-col items-center gap-4 border-r border-border bg-background py-3 z-20 transition-opacity duration-200"
+                // Same padding and button class as the expanded sidebar's
+                // top row, so the toggle, and every icon, is the same size in
+                // the same place in both states.
+                className="absolute inset-y-0 left-0 z-20 flex w-14 flex-col items-center gap-0.5 border-r border-border bg-background py-2.5 transition-opacity duration-200"
                 style={{
                   opacity: sidebarCollapsed ? 1 : 0,
                   pointerEvents: sidebarCollapsed ? "auto" : "none",
                 }}
               >
+                {/* The panel glyph, not a hamburger: it is the same control as
+                  the expanded sidebar's collapse button, in the same spot. */}
                 <button
                   onClick={() => setSidebarCollapsed(false)}
-                  className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className={CHROME_BUTTON}
                   aria-label="Expand sidebar"
                   title="Expand sidebar"
                 >
-                  <Menu className="h-4 w-4" />
+                  <PanelLeft className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => {
                     setSidebarCollapsed(false);
                     setSearchOpen(true);
                   }}
-                  className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className={CHROME_BUTTON}
                   aria-label="Search docs"
-                  title="Search docs"
+                  title={`Search docs (${modKeyLabel}K)`}
                 >
                   <Search className="h-4 w-4" />
                 </button>
-                {saveState && (
-                  <span
-                    // The rail stays mounted behind the expanded sidebar;
-                    // only the visible copy of the status is read out.
-                    aria-hidden={!sidebarCollapsed}
-                    className="flex h-8 w-8 items-center justify-center"
-                  >
-                    <SaveIndicator state={saveState} compact />
-                  </span>
-                )}
                 {/* The same three ways to add as the expanded sidebar offers —
                   the rail used to jump straight to the file picker, which was
                   the one option of the three you could not undo by closing a
@@ -3699,12 +4422,25 @@ flowchart LR
                   onCreateBoard={() => createBoardFile(null)}
                   onCreateFolder={promptNewFolderFromRail}
                   onUpload={() => inputRef.current?.click()}
-                  buttonClassName="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  buttonClassName={CHROME_BUTTON}
                 />
                 <div className="flex-1" />
+                {/* Status sits with the workspace it describes, as it does in
+                  the expanded footer — not among the actions, where a lone
+                  check mark read as one more button. */}
+                {saveState && (
+                  <span
+                    // The rail stays mounted behind the expanded sidebar;
+                    // only the visible copy of the status is read out.
+                    aria-hidden={!sidebarCollapsed}
+                    className="flex h-8 w-8 items-center justify-center"
+                  >
+                    <SaveIndicator state={saveState} compact />
+                  </span>
+                )}
                 <button
                   onClick={() => openSettings()}
-                  className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className={CHROME_BUTTON}
                   aria-label="Settings"
                   title="Settings"
                 >
@@ -3769,6 +4505,7 @@ flowchart LR
                     onSelect={handleSelect}
                     onAddFiles={() => inputRef.current?.click()}
                     onRemoveFile={moveToBin}
+                    onRemoveSelection={removeSelection}
                     onDownloadFile={downloadFile}
                     onDownloadFiles={downloadFiles}
                     onMoveToWorkspace={workspaces.length > 1 ? setPendingMove : undefined}
@@ -3788,12 +4525,10 @@ flowchart LR
                     onMoveFileToFolder={moveFileToFolder}
                     onMoveFolderToFolder={moveFolderToFolder}
                     onReorderFile={reorderFile}
+                    onReorderFolder={reorderFolder}
                     onSortByName={sortFilesByName}
                     view={sidebarView}
                     onView={setSidebarView}
-                    saved={savedEntries}
-                    onOpenSaved={openSaved}
-                    onRemoveSaved={removeSaved}
                     theme={theme}
                     onCycleTheme={cycleTheme}
                     currentWorkspaceName={workspaceNameRef.current}
@@ -3838,42 +4573,36 @@ flowchart LR
             binary-document viewers suspend here. The Markdown reader has its own
             placeholder (MarkdownViewerLazy), so a first open keeps the column's
             layout; a failed download of any of them lands here. */}
-            <ConversionContext.Provider
-              value={{
-                files,
-                runningId: conversion.runningId,
-                onConvert: conversion.start,
-                onCancel: conversion.cancel,
-                onOpen: handleSelect,
-              }}
-            >
-              <LazyBoundary
-                loading={<main className="min-w-0 flex-1" aria-busy />}
-                failed={<ChunkFailedNotice />}
-                resetKey={`${activeFileId}:${showSaved}`}
+            <EditFileContext.Provider value={editFile}>
+              <ConversionContext.Provider
+                value={{
+                  files,
+                  runningId: conversion.runningId,
+                  onConvert: conversion.start,
+                  onCancel: conversion.cancel,
+                  onOpen: handleSelect,
+                }}
               >
-                {/* In split view the column is pinned to the viewport and each pane
+                <LazyBoundary
+                  loading={<main className="min-w-0 flex-1" aria-busy />}
+                  failed={<ChunkFailedNotice />}
+                  resetKey={activeFileId}
+                >
+                  {/* In split view the column is pinned to the viewport and each pane
                 scrolls itself. Without a real height here the group resolves
                 `h-full` against an auto-height parent, every pane grows to its
                 content, and the *window* ends up doing the scrolling — which is
                 why the panes used to move together. */}
-                <main
-                  className={
-                    paneLayout.panes.length > 1 && !showSaved
-                      ? "flex min-h-0 w-0 min-w-0 flex-1 flex-col overflow-hidden h-[calc(100dvh-var(--header-h,3.5rem))]"
-                      : "min-w-0 flex-1 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:pb-0"
-                  }
-                >
-                  {!showSaved &&
-                    paneLayout.panes.length === 1 &&
-                    activeFile &&
-                    conversionActions(activeFile)}
-                  {/* Saved is a page, not an overlay: it takes the content column
-                  instead of stacking on top of whatever document was open. */}
-                  {showSaved ? (
-                    savedPage
-                  ) : paneLayout.panes.length > 1 ? (
-                    /* Split view. Each pane carries its own tab strip and its own
+                  <main
+                    className={
+                      paneLayout.panes.length > 1
+                        ? "flex min-h-0 w-0 min-w-0 flex-1 flex-col overflow-hidden h-[calc(100dvh-var(--header-h,3.5rem))]"
+                        : "min-w-0 flex-1 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:pb-0"
+                    }
+                  >
+                    {paneLayout.panes.length === 1 && activeFile && conversionActions(activeFile)}
+                    {paneLayout.panes.length > 1 ? (
+                      /* Split view. Each pane carries its own tab strip and its own
                    document; the focused pane is what the rest of the app means
                    by "the active file", so nothing outside here has to know
                    panes exist.
@@ -3885,199 +4614,267 @@ flowchart LR
                    window narrowed with a split already open used to land
                    exactly there. Below the width where two columns still read,
                    the panes stack instead. */
-                    <ResizablePanelGroup
-                      orientation={splitStacks ? "vertical" : "horizontal"}
-                      className="h-full"
-                    >
-                      {paneLayout.panes.map((pane, index) => {
-                        const paneFile = files.find((f) => f.id === pane.activeTabId) ?? null;
-                        const paneKind = paneFile
-                          ? (paneFile.kind ?? getDocumentKind(paneFile.name, paneFile.mimeType))
-                          : null;
-                        const paneIsBoard = paneKind === "board";
-                        return (
-                          <Fragment key={pane.id}>
-                            {index > 0 && <ResizableHandle withHandle />}
-                            <ResizablePanel
-                              defaultSize={`${Math.floor(100 / paneLayout.panes.length)}%`}
-                              minSize="20%"
-                            >
-                              <div
-                                onMouseDown={() => focusPane(pane.id)}
-                                className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+                      <ResizablePanelGroup
+                        orientation={splitStacks ? "vertical" : "horizontal"}
+                        className="h-full"
+                      >
+                        {paneLayout.panes.map((pane, index) => {
+                          const paneFile = files.find((f) => f.id === pane.activeTabId) ?? null;
+                          const paneKind = paneFile
+                            ? (paneFile.kind ?? getDocumentKind(paneFile.name, paneFile.mimeType))
+                            : null;
+                          const paneIsBoard = paneKind === "board";
+                          return (
+                            <Fragment key={pane.id}>
+                              {index > 0 && <ResizableHandle withHandle />}
+                              <ResizablePanel
+                                defaultSize={`${Math.floor(100 / paneLayout.panes.length)}%`}
+                                minSize="20%"
                               >
-                                {/* No tab strip. The open documents live in the
+                                <div
+                                  onMouseDown={() => focusPane(pane.id)}
+                                  className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+                                >
+                                  {/* No tab strip. The open documents live in the
                                 sidebar; a pane is just a column of reading, and
                                 the only chrome it carries is a thin header
                                 saying which document it holds and how to close
                                 it. */}
-                                <div
-                                  className={`flex h-9 shrink-0 items-center gap-2 border-b px-3 ${
-                                    pane.id === paneLayout.focusedPaneId
-                                      ? "border-border bg-background"
-                                      : "border-border/60 bg-muted/20"
-                                  }`}
-                                >
-                                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
-                                    {paneFile ? paneFile.name.replace(/\.[^.]+$/, "") : "Empty"}
-                                  </span>
-                                  <button
-                                    onClick={() => closePane(pane.id)}
-                                    aria-label="Close this pane"
-                                    title="Close this pane"
-                                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                  <div
+                                    className={`flex h-9 shrink-0 items-center gap-2 border-b px-3 ${
+                                      pane.id === paneLayout.focusedPaneId
+                                        ? "border-border bg-background"
+                                        : "border-border/60 bg-muted/20"
+                                    }`}
                                   >
-                                    <X className="h-3.5 w-3.5" />
-                                  </button>
+                                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
+                                      {paneFile ? paneFile.name.replace(/\.[^.]+$/, "") : "Empty"}
+                                    </span>
+                                    <button
+                                      onClick={() => closePane(pane.id)}
+                                      aria-label="Close this pane"
+                                      title="Close this pane"
+                                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                  <div
+                                    className={
+                                      paneIsBoard
+                                        ? "min-h-0 min-w-0 flex-1 overflow-hidden"
+                                        : "min-h-0 min-w-0 flex-1 overflow-y-auto px-4"
+                                    }
+                                  >
+                                    {paneFile && conversionActions(paneFile)}
+                                    {paneFile ? (
+                                      <PaneDocument
+                                        file={paneFile}
+                                        files={files}
+                                        highlights={highlights}
+                                        workspaceFolders={folders}
+                                        onImportAttachments={importAttachments}
+                                        workspaceId={workspaceId}
+                                        workspaceRevision={workspaceRevision}
+                                        workspaceName={workspaceNameRef.current}
+                                        onContentChange={handleContentChange}
+                                        onDocumentSave={handleDocumentSave}
+                                        onEditorDirtyChange={(dirty) => {
+                                          if (dirty) officeDirtyPanes.current.add(pane.id);
+                                          else officeDirtyPanes.current.delete(pane.id);
+                                          syncEditorDirty();
+                                        }}
+                                        onRenameFile={renameFile}
+                                        onAddHighlight={addHighlight}
+                                        onUpdateHighlight={updateHighlight}
+                                        onRemoveHighlight={removeHighlight}
+                                        onRepairHighlights={repairHighlights}
+                                        onOpenArtifact={openEmbeddedArtifact}
+                                        readingMode={readingMode}
+                                        contentWidth={contentWidth}
+                                        // An edit request belongs to the column the
+                                        // reader is working in, not to every column
+                                        // showing that document. `revealInPane` has
+                                        // already moved focus to the pane holding the
+                                        // file, so this is that pane — and the same
+                                        // document deliberately opened side by side
+                                        // with itself no longer drops both copies
+                                        // into the editor at once.
+                                        startInEditFileId={
+                                          pane.id === paneLayout.focusedPaneId
+                                            ? autoEditFileId
+                                            : null
+                                        }
+                                        mathPreferences={mathPreferences}
+                                        onStartInEditConsumed={consumeStartInEdit}
+                                        // Only the pane showing the document a jump
+                                        // names is told about it.
+                                        activeSubtopicId={
+                                          paneFile.id === activeFileId ? activeHeadingId : null
+                                        }
+                                        highlightQuery={
+                                          paneFile.id === activeFileId ? markerQuery : null
+                                        }
+                                        pendingSearch={
+                                          pendingSearch?.fileId === paneFile.id
+                                            ? pendingSearch
+                                            : null
+                                        }
+                                        onSearchShown={clearPendingSearch}
+                                        // Only the focused pane takes a jump, so
+                                        // the same document open twice scrolls once.
+                                        pendingSaved={
+                                          pendingSaved?.fileId === paneFile.id &&
+                                          pane.id === paneLayout.focusedPaneId
+                                            ? pendingSaved
+                                            : null
+                                        }
+                                        onSavedShown={clearPendingSaved}
+                                        onCopyToNotes={addNote}
+                                        onToggleNotes={toggleNotes}
+                                        notesOpen={notesOpen}
+                                      />
+                                    ) : (
+                                      <NothingHere compact />
+                                    )}
+                                  </div>
                                 </div>
-                                <div
-                                  className={
-                                    paneIsBoard
-                                      ? "min-h-0 min-w-0 flex-1 overflow-hidden"
-                                      : "min-h-0 min-w-0 flex-1 overflow-y-auto px-4"
-                                  }
-                                >
-                                  {paneFile && conversionActions(paneFile)}
-                                  {paneFile ? (
-                                    <PaneDocument
-                                      file={paneFile}
-                                      files={files}
-                                      saved={saved}
-                                      highlights={highlights}
-                                      workspaceFolders={folders}
-                                      onImportAttachments={importAttachments}
-                                      workspaceId={workspaceId}
-                                      workspaceRevision={workspaceRevision}
-                                      workspaceName={workspaceNameRef.current}
-                                      onContentChange={handleContentChange}
-                                      onDocumentSave={handleDocumentSave}
-                                      onEditorDirtyChange={(dirty) => {
-                                        if (dirty) officeDirtyPanes.current.add(pane.id);
-                                        else officeDirtyPanes.current.delete(pane.id);
-                                        syncEditorDirty();
-                                      }}
-                                      onRenameFile={renameFile}
-                                      onAddHighlight={addHighlight}
-                                      onUpdateHighlight={updateHighlight}
-                                      onRemoveHighlight={removeHighlight}
-                                      onRepairHighlights={repairHighlights}
-                                      onToggleSaved={toggleSaved}
-                                      onRemoveSaved={removeSaved}
-                                      onOpenArtifact={openEmbeddedArtifact}
-                                      readingMode={readingMode}
-                                      contentWidth={contentWidth}
-                                      // An edit request belongs to the column the
-                                      // reader is working in, not to every column
-                                      // showing that document. `revealInPane` has
-                                      // already moved focus to the pane holding the
-                                      // file, so this is that pane — and the same
-                                      // document deliberately opened side by side
-                                      // with itself no longer drops both copies
-                                      // into the editor at once.
-                                      startInEditFileId={
-                                        pane.id === paneLayout.focusedPaneId ? autoEditFileId : null
-                                      }
-                                      mathPreferences={mathPreferences}
-                                      onStartInEditConsumed={consumeStartInEdit}
-                                      // Only the pane showing the document a jump
-                                      // names is told about it.
-                                      activeSubtopicId={
-                                        paneFile.id === activeFileId ? activeHeadingId : null
-                                      }
-                                      highlightQuery={
-                                        paneFile.id === activeFileId ? highlightQuery : null
-                                      }
-                                      pendingSearch={
-                                        pendingSearch?.fileId === paneFile.id ? pendingSearch : null
-                                      }
-                                      onSearchShown={clearPendingSearch}
-                                    />
-                                  ) : (
-                                    <p className="px-2 py-16 text-center text-sm text-muted-foreground">
-                                      Nothing open in this pane. Drag a tab here, or pick a document
-                                      from the sidebar.
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            </ResizablePanel>
-                          </Fragment>
-                        );
-                      })}
-                    </ResizablePanelGroup>
-                  ) : activeFile &&
-                    (activeFile.kind === "markdown" ||
-                      activeFile.kind === "text" ||
-                      !activeFile.kind) ? (
-                    <MarkdownViewer
-                      file={activeFile}
-                      prevFile={prevFile}
-                      nextFile={nextFile}
-                      onNav={navFromViewer}
-                      activeSubtopicId={activeHeadingId}
-                      highlightQuery={highlightQuery}
-                      onContentChange={handleContentChange}
-                      onEditorDirtyChange={(dirty) => {
-                        editorDirtyRef.current = dirty;
-                        syncEditorDirty();
-                      }}
-                      startInEditFileId={autoEditFileId}
-                      onStartInEditConsumed={consumeStartInEdit}
-                      nextReadingMin={nextReadingMinutes}
-                      isBookmarked={!!activePageSaved}
-                      onToggleBookmark={toggleActivePageSaved}
-                      highlights={activeFileHighlights}
-                      onAddHighlight={addHighlightToActive}
-                      onUpdateHighlight={updateHighlight}
-                      onRemoveHighlight={removeHighlight}
-                      onRepairHighlights={repairHighlights}
-                      saved={activeFileSaved}
-                      onToggleSaved={toggleSavedOnActive}
-                      onRemoveSaved={removeSaved}
-                      pendingSaved={pendingSaved?.fileId === activeFile.id ? pendingSaved : null}
-                      onSavedShown={clearPendingSaved}
-                      pendingSearch={pendingSearch?.fileId === activeFile.id ? pendingSearch : null}
-                      onSearchShown={clearPendingSearch}
-                      onHome={goHome}
-                      onRenameFile={renameActiveFile}
-                      onShareFile={shareActiveFile}
-                      onAskAi={aiEnabled ? askAiFromSelection : undefined}
-                      readingMode={readingMode}
-                      contentWidth={contentWidth}
-                      mathPreferences={mathPreferences}
-                      workspaceId={workspaceId}
-                      workspaceRevision={workspaceRevision}
-                      workspaceFiles={files}
-                      workspaceFolders={folders}
-                      onImportAttachments={importAttachments}
-                      workspaceName={workspaceNameRef.current}
-                      onOpenArtifact={openEmbeddedArtifact}
-                    />
-                  ) : activeFile ? (
-                    <DocumentViewer
-                      key={activeFile.id}
-                      onDocumentSave={handleDocumentSave}
-                      onEditorDirtyChange={(dirty) => {
-                        editorDirtyRef.current = dirty;
-                        if (dirty) officeDirtyPanes.current.add("main");
-                        else officeDirtyPanes.current.delete("main");
-                        syncEditorDirty();
-                      }}
-                      file={activeFile}
-                      isBookmarked={!!findSaved(saved, { fileId: activeFile.id, kind: "file" })}
-                      onToggleBookmark={toggleActiveDocumentSaved}
-                      prevFile={prevFile}
-                      nextFile={nextFile}
-                      onNavFile={navToFile}
-                      onContentChange={handleContentChange}
-                      startInEditFileId={autoEditFileId}
-                      onStartInEditConsumed={consumeStartInEdit}
-                    />
-                  ) : null}
-                </main>
-              </LazyBoundary>
-            </ConversionContext.Provider>
+                              </ResizablePanel>
+                            </Fragment>
+                          );
+                        })}
+                      </ResizablePanelGroup>
+                    ) : activeFile &&
+                      (activeFile.kind === "markdown" ||
+                        activeFile.kind === "text" ||
+                        !activeFile.kind) ? (
+                      <MarkdownViewer
+                        file={activeFile}
+                        prevFile={prevFile}
+                        nextFile={nextFile}
+                        onNav={navFromViewer}
+                        activeSubtopicId={activeHeadingId}
+                        highlightQuery={markerQuery}
+                        onContentChange={handleContentChange}
+                        onEditorDirtyChange={(dirty) => {
+                          editorDirtyRef.current = dirty;
+                          syncEditorDirty();
+                        }}
+                        startInEditFileId={autoEditFileId}
+                        onStartInEditConsumed={consumeStartInEdit}
+                        nextReadingMin={nextReadingMinutes}
+                        highlights={activeFileHighlights}
+                        onAddHighlight={addHighlightToActive}
+                        onUpdateHighlight={updateHighlight}
+                        onRemoveHighlight={removeHighlight}
+                        onRepairHighlights={repairHighlights}
+                        pendingSaved={pendingSaved?.fileId === activeFile.id ? pendingSaved : null}
+                        onSavedShown={clearPendingSaved}
+                        pendingSearch={
+                          pendingSearch?.fileId === activeFile.id ? pendingSearch : null
+                        }
+                        onSearchShown={clearPendingSearch}
+                        onHome={goHome}
+                        onRenameFile={renameActiveFile}
+                        onShareFile={shareActiveFile}
+                        onAskAi={aiEnabled ? askAiFromSelection : undefined}
+                        onCopyToNotes={copyToNotesFromActive}
+                        onToggleNotes={toggleNotes}
+                        notesOpen={notesOpen}
+                        readingMode={readingMode}
+                        contentWidth={contentWidth}
+                        mathPreferences={mathPreferences}
+                        workspaceId={workspaceId}
+                        workspaceRevision={workspaceRevision}
+                        workspaceFiles={files}
+                        workspaceFolders={folders}
+                        onImportAttachments={importAttachments}
+                        workspaceName={workspaceNameRef.current}
+                        onOpenArtifact={openEmbeddedArtifact}
+                      />
+                    ) : activeFile ? (
+                      <DocumentViewer
+                        key={activeFile.id}
+                        onDocumentSave={handleDocumentSave}
+                        onEditorDirtyChange={(dirty) => {
+                          editorDirtyRef.current = dirty;
+                          if (dirty) officeDirtyPanes.current.add("main");
+                          else officeDirtyPanes.current.delete("main");
+                          syncEditorDirty();
+                        }}
+                        file={activeFile}
+                        prevFile={prevFile}
+                        nextFile={nextFile}
+                        onNavFile={navToFile}
+                        onContentChange={handleContentChange}
+                        onRenameFile={renameFile}
+                        startInEditFileId={autoEditFileId}
+                        onStartInEditConsumed={consumeStartInEdit}
+                      />
+                    ) : (
+                      <NothingHere />
+                    )}
+                  </main>
+                </LazyBoundary>
+              </ConversionContext.Provider>
+            </EditFileContext.Provider>
+
+            {/* Notes, docked beside the reading column on a wide screen so they
+                stay in view while reading. Narrower screens get a sheet below. */}
+            {notesOpen && !mobileNavigation && (
+              <aside className="sticky top-0 h-dvh w-80 shrink-0 border-l border-border bg-background xl:w-88">
+                <LazyBoundary>
+                  <NotesPanel
+                    variant="docked"
+                    notes={sortedNotes}
+                    fileName={noteFileName}
+                    sourceState={noteSourceState}
+                    onOpenSource={openNoteSource}
+                    onUpdate={updateNote}
+                    onRemove={removeNote}
+                    highlights={highlights}
+                    highlightSection={highlightSection}
+                    onOpenHighlight={openHighlight}
+                    onRemoveHighlight={removeHighlightFromNotes}
+                    onClose={closeNotes}
+                    freshId={freshNoteId}
+                    mathRenderer={mathPreferences.renderer}
+                    tab={notesTab}
+                    onTabChange={setNotesTab}
+                    roughWork={roughWork}
+                    compute={compute}
+                  />
+                </LazyBoundary>
+              </aside>
+            )}
           </div>
+
+          {mobileNavigation && (
+            <BottomSheet open={notesOpen} onOpenChange={setNotesOpen} title="Notes">
+              <LazyBoundary>
+                <NotesPanel
+                  variant="sheet"
+                  notes={sortedNotes}
+                  fileName={noteFileName}
+                  sourceState={noteSourceState}
+                  onOpenSource={openNoteSource}
+                  onUpdate={updateNote}
+                  onRemove={removeNote}
+                  highlights={highlights}
+                  highlightSection={highlightSection}
+                  onOpenHighlight={openHighlight}
+                  onRemoveHighlight={removeHighlightFromNotes}
+                  onClose={closeNotes}
+                  freshId={freshNoteId}
+                  mathRenderer={mathPreferences.renderer}
+                  tab={notesTab}
+                  onTabChange={setNotesTab}
+                  roughWork={roughWork}
+                  compute={compute}
+                />
+              </LazyBoundary>
+            </BottomSheet>
+          )}
 
           <input
             ref={inputRef}
@@ -4112,6 +4909,7 @@ flowchart LR
 
           {settingsDialog}
           {moveDialog}
+          {binDialog}
 
           {dragOverlay}
           {shareDialog}

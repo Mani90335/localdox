@@ -1,4 +1,275 @@
-Latest update — 2026-09-29 (B03 optional-feature bundle budgets and shared KaTeX)
+Latest update — 2026-10-02 (Math Compute: graduate-level math with an on-device SymPy engine)
+
+The Compute tab gets a second engine for calculus, linear algebra,
+probability and random variables, statistics, transforms and ODEs: SymPy 1.14
+on Pyodide 314.0.7, in a Web Worker, downloaded (10.9 MB) only after the reader
+agrees, then offline. The basic engine still answers what it can; anything
+else is routed to SymPy. Details: documentation/math-compute-advanced.md.
+
+- Why: probing the basic engine at this level gave wrong answers (d²/dx² x⁴ =
+  "dx²", Σk = 50015001, Σ1/n² off in the 4th digit, Monte Carlo integrals, 3×3
+  inverse crash), not just gaps.
+- Notation: several statements (`X ~ N(0, 4)`, `let A = …`, `assume x > 0`,
+  ODE conditions `y(0) = 1`), LaTeX or extended plain text; every
+  distribution's parameter convention is stated in the result.
+- Advanced tools (Calculus, Matrices, Probability, Statistics, Transforms) for
+  operations with settings; results carry `lhs` statements, Given rows and a
+  SymPy badge into Copy, rough work and insertion.
+- Security: input is parsed in JavaScript to allow-listed MathJSON and built
+  into SymPy objects in Python; nothing typed is ever evaluated as Python
+  (tested on both sides). Supply chain: wheels verified against the pinned
+  package's lock-file SHA-256; published lock trimmed to sympy + mpmath.
+- Robustness found while testing: Pyodide hangs (no rejection) on a
+  WebAssembly response without `application/wasm` (Vite preview): the worker
+  now compiles from bytes, and the client fails a load after 180 s instead of
+  spinning; a 30 s compute limit terminates the worker.
+
+Tests: tests/compute-advanced.test.ts (13, real SymPy in Node),
+compute-client (13), tests/e2e/compute-advanced.spec.ts (5; 10/10 with
+--repeat-each=2), bundle journey `advanced` (11,034 KiB gzip incl. the basic
+engine; ceiling 12,000). Unit 574 pass / 0 fail (576, 2 skipped). E2E on a
+private-port production build: compute-advanced, compute, rough-work, notes,
+addressing, bundle-journeys 37/37. tsc: only the pre-existing __root.tsx
+error. eslint: no errors.
+
+Previous update — 2026-10-01 (Math Compute: an on-device math engine in the Notes panel)
+
+The Notes panel has a third tab, **Compute**: Evaluate, Simplify, Numeric
+value and Solve for an unknown, on LaTeX or plain text, in a Web Worker, and
+offline once used. Results show their input, operation, exact value, decimal
+and conditions, and reach rough work or a document only through explicit
+actions (Copy, Add to rough work, Insert into document… with the Rough work
+insert dialog). Details: documentation/math-compute.md.
+
+- Engine: @cortex-js/compute-engine 0.58.0 (MIT), already installed as
+  MathLive's pinned dependency, now a direct dependency at the same version.
+  It is bundled only into `compute.worker` (291.0 KiB gzip). The compute
+  journey costs 292.3 KiB (ceiling 320), and the Notes panel chunk grows
+  6.2 KiB gzip. A build check asserts the engine is in no page chunk.
+- `services/compute/`: `input.ts` (strict plain-text → LaTeX; ambiguous names,
+  inequalities, environments refused with reasons), `engine.ts` (routing,
+  exact-vs-decimal rules, verified factored forms, domain notes, checked
+  solutions), `polynomial.ts` (rational form + Aberth roots + verified
+  multiplicity: polynomial and rational equations solved completely, poles
+  excluded), `compute-client.ts` (queue, LRU cache, 8 s hard limit over the
+  engine's 4 s one, cancellation by terminating the worker, failed-load and
+  no-Worker states), `result-markdown.ts`.
+- Engine gaps found and covered by our own layer, each a unit test: its
+  `solve` returns nothing for x³+x+1=0 and (x²−1)/(x−1)=0, ∞ for 1/x=0, and
+  only 3 for |x|=3; its `Together` gets 1/x + 1/(x−1) wrong; its `Factor`
+  gives (x√x−1)(x√x+1) for x³−1; and it reads `sqrt(8)` as 8·q·r·s·t.
+
+Tests: tests/compute-engine.test.ts (14, real engine; every result rendered by
+KaTeX), tests/compute-client.test.ts (9), tests/e2e/compute.spec.ts (5;
+15/15 with --repeat-each=3), and the bundle journey plus a worker-only check. Unit
+557 pass / 0 fail (559 total, 2 skipped). E2E on a private-port production
+build: compute, rough-work, notes, addressing, bundle-journeys 31/31. While
+the engine computes 100000! (~1 s), the page records no long task; the test
+proves its observer works with a 120 ms block first. tsc: only the pre-existing
+__root.tsx error. eslint: no errors (12 existing warnings in DocsApp).
+
+Previous update — 2026-10-01 (Rough work: math scratchpads in the Notes panel)
+
+The Notes panel has two tabs, **Notes** and **Rough work**. A scratchpad is
+private working space for equations and intermediate steps: Markdown with
+`$…$`/`$$…$$`, the editor's toolbar and shortcuts, the MathLive keyboard, and a
+live preview drawn by the notes' idle-time renderer. It never touches a
+document unless the reader confirms an insertion. Details:
+documentation/rough-work.md.
+
+- Model `src/lib/workspace/rough-work.ts`: `Scratchpad { id, title, content,
+  fileId | null, fileName?, createdAt, updatedAt }` on
+  `WorkspaceRecord.scratchpads`. Optional document association (new pads link
+  to the open document; Unlink/Link in the menu), kept after the document is gone.
+- Actions: New, Rename, Duplicate, Link/Unlink, Clear contents (confirmation
+  dialog, then Undo), Delete (Undo), Save (selection) as note (the note carries
+  `origin` and links back to the pad), Insert (selection) into document. The
+  insert dialog shows what goes in and where (end of this page / end of the
+  document). It re-checks at Insert (document unchanged, not open in the editor:
+  `editor/open-editors.ts`), lands on and flashes the exact span, and offers Undo.
+- Persistence: autosave (500 ms pause + workspace write), draft journal under
+  `rough:<padId>` with crash recovery into the pad, two-tab merge, backup
+  import/export (validated), linked pads follow a moved document, never in
+  share links.
+- Storage accounting now counts notes and rough work (`recordTextBytes`) in
+  summary totals, lazy re-measure, the open workspace, backup imports and
+  Settings ▸ Storage.
+- Bugs found by the new e2e tests and fixed before landing: an outside change
+  applied in a layout effect let the journal stage stale text, which a reload
+  offered back over restored work (now synced during render); and the journal's
+  base hash was frozen at open, so post-autosave drafts restored as copies.
+
+Tests: tests/rough-work.test.ts (18), tests/e2e/rough-work.spec.ts (8, also
+16/16 with --repeat-each=2). Unit 534 pass / 0 fail (536 total). E2E on a
+private-port production build: rough-work, notes, durability, editing, math,
+persistence, storage-budget, storage-persistence, addressing,
+mobile-navigation 58/59; the one failure (mobile drawer close) fails the same on
+a HEAD build. Bundle journeys 10/10. tsc: only the pre-existing __root.tsx
+error. eslint: nothing new in any touched file.
+
+Previous update — 2026-10-01 (Source addressing: search hits, Inspect source and note links land on the exact occurrence; search in tables and diagrams fixed)
+
+Every rendered block now carries its span in the file's Markdown
+(`data-src="start:end"`, stamped by `rehypeSourceAddress` through segments and
+paged-mode stripping). Page ↔ file mapping is done per block by aligning its
+text with its projected source (`lib/markdown/source-address.ts`,
+`dom-address.ts`). Details: documentation/source-addressing.md.
+
+Bug, reproduced first: in a document with a table and a Mermaid diagram, all 4
+table and diagram search hits for "widget" flashed the intro paragraph's
+"widget". The diagram's SVG labels and stylesheet broke the occurrence count,
+and the line fallback couldn't find tab-joined table rows or diagram source.
+Now each hit maps line + occurrence → file span (`searchHitSpan`, counted as the
+index counts) → page range. A diagram hit lands on the label showing the word,
+or on the diagram.
+
+- Inspect source and Copy code use the selection's address: exact for
+  repeated phrases and table cells. Text search remains the fallback.
+- Notes store a source anchor (span + 32-char head/tail); `relocateAnchor`
+  survives edits elsewhere in the file. Older notes use the quote as before.
+- Equations and drawn fences are atomic, wrapped in `display: contents`
+  elements carrying their span.
+- Also fixed, in its own commit: the selection menu ran off the bottom of the window when
+  selecting near it (a document's last lines), hiding Save/Highlight/Copy to
+  notes. A layout effect now keeps it on screen.
+
+Measured, one page with about 2,300 stamped blocks: fully rendered at 391 ms
+with stamping vs 373 ms without (medians, within run-to-run noise of
+363–402 ms), same long frames.
+
+Tests: tests/source-address.test.ts (7), tests/e2e/addressing.spec.ts (3). Unit
+516 pass / 0 fail (518 total). E2E on a private-port production build: search,
+highlighting, editing, math, diagram ×3, long-markdown, viewers, persistence,
+durability 57/57; notes + addressing 6/6; test:bundles 10/10. tsc and eslint:
+nothing new (pre-existing __root.tsx, import-schema, CodeBlock, document-utils
+issues unchanged).
+
+Previous update — 2026-10-01 (Notes panel: copy a selection as clean Markdown, keep it as a snapshot, follow it back to its source)
+
+Select text in a Markdown document → **Copy selection to notes**. The passage
+is kept as Markdown in a Notes panel: docked right of the reading column at
+≥1024px, a bottom sheet below that. The source document is never modified.
+Details: documentation/notes-panel.md.
+
+What changed:
+- Model `src/lib/workspace/notes.ts`: `Note { id, fileId, fileName, content,
+  source: quote anchor, createdAt, updatedAt }`, stored as
+  `WorkspaceRecord.notes`. Notes are snapshots: only an explicit edit changes
+  them, and they outlive their source document.
+- Clean copy `src/lib/markdown/selection-markdown.ts`: walks the DOM between
+  the selection's boundary points, drops viewer chrome, emits GFM (lists, task
+  boxes, tables with header, fenced code with language, callouts) and the
+  LaTeX source of any equation touched.
+- Source links: `resolveNoteSource` finds the quote in the Markdown (exact
+  matches only: whole quote, then lines of ≥20 chars) and opens the page it is
+  on *now*. The viewer then flashes it via the existing star jump
+  (`pendingSaved`, now `PassageTarget`; split panes now receive it too). A gone
+  passage opens its heading with a toast; a binned or deleted source says so.
+- Persistence: autosave, 3-way merge (no live-file filter), backup
+  export/import (validated; no version bump), and cross-workspace move. Never
+  included in share links (they upload to an external host).
+- `locateInSource` gained `{ exactOnly }`. Inspect's behavior is unchanged.
+
+Found in the browser, not by unit tests: the math sanitizer leaves KaTeX's
+annotation as bare text inside `<math>` (handled), and `Selection.toString()`
+doesn't match the `textContent` index across equations (the quote now comes
+from `textBetween`).
+
+Tests:
+- tests/notes.test.ts (25): clean copy, snapshot semantics, search, anchors
+  (moved, repeated, crossed math, broken, binned, missing), and storage (backup
+  round trip, validation, IndexedDB, two-tab merge, cross-workspace move).
+- tests/e2e/notes.spec.ts (2): select → copy → stored Markdown → reload →
+  search → follow from page 1 back to the flashed passage on page 2; the phone
+  sheet.
+- Run: `npm test` 501 pass / 0 fail (503 total; the other 2 are skips); tsc
+  clean except the pre-existing src/routes/__root.tsx error (also on HEAD with a
+  frozen-lockfile install); eslint 0 new errors or warnings (import-schema.ts's
+  3 Prettier errors are on HEAD). Production build e2e, private port: notes,
+  highlighting, persistence, durability, editing, math, long-markdown,
+  storage-persistence, search, bundle-journeys all passed; `test:bundles` 10/10.
+
+Follow-up, same day: equations and diagrams drawn in the panel at no cost to
+the document. Notes read the reader's render caches first; misses typeset in
+`requestIdleCallback` (`services/math/idle-typeset.ts`, `renderMathIdle`),
+never charged to the 12 ms per-task budget. Only equations and diagrams on
+screen are drawn (one shared IntersectionObserver), and the panel's first
+render waits for idle. Diagrams copy as `mermaid`/`mindmap` fences through a
+WeakMap registry (`lib/markdown/diagram-sources.ts`) and draw from the
+`renderMermaid` cache with per-instance SVG ids. Measured, 300-equation note,
+production build: opening the panel went from 130/69/72 ms frames to none;
+expanding and scrolling all 300: none; reload with the panel open: none (as
+with it closed, down from 53–60 ms). +8 unit tests
+(tests/notes-rendering.test.ts), +1 e2e; reader math/diagram/editing/long
+document e2e 39/39; `test:bundles` 10/10.
+
+Known limits: embeds/media copy as nothing; local images copy as alt text;
+MathJax-only equations draw in a note only if the document drew them this
+session; panel diagrams use Mermaid's theme, not the reader's semantic
+colours; an empty workspace has no viewer to open the panel from.
+
+Previous update — 2026-09-29 (D01 part 1 merged with upstream D02/B03/B05: other workspaces are read without bodies and without resetting the open workspace's save cache)
+
+Merged upstream/main (eb5424b: D02 Blob bodies, B03 bundle budgets, B05
+fonts) into main, which held D01 part 1's first version (2ab5273, entry
+below). Details: documentation/workspace-entries.md.
+
+Conflict and decision:
+- Both sides changed storage and both called their layout IndexedDB v3. D01
+  moved base64 bodies into a separate `file-bodies` store. D02 turned bodies
+  into Blobs inside the file rows. IndexedDB hands back a Blob as a handle
+  without reading its bytes, so D02 alone brought a cross-workspace search
+  from +264 MB heap to +3 MB. The separate store added nothing on top, so the
+  merge keeps D02's layout and drops it.
+- D01's API and callers stay: `getWorkspaceEntries` (no bodies, doesn't
+  replace the write cache), `getFile`, search reading at most two workspaces
+  at a time, the picker listing from entries, and link resolution reading only
+  the matched file. `listWorkspaces()` stays removed.
+- Database version 4: a database from the interim build (v3 with
+  `file-bodies`) gets each body folded back into its row as a Blob, in one
+  upgrade transaction. D02's v3 needs no work. Without this, those databases
+  would have opened as D02's v3 with their PDFs and images empty.
+- Conflicted tests and docs: took upstream's editing and storage-budget e2e
+  specs and storage-budget.md (my body-store joins no longer apply), and put
+  media.spec's seed back to its original form.
+
+Measured (bench/d01-workspace-bodies.mjs, now counting Blob sizes; open
+workspace = note + 5 MB image, another = 4 × 25 MB PDFs; search all
+workspaces, then rename the note; 5 alternating rounds, medians):
+| Build                | Heap during search | Search → hit | Next save writes |
+| Before D02 (88cb82c) | +264 MB            | 372 ms       | 7 MB             |
+| D02 only (eb5424b)   | +3 MB              | 248 ms       | 5.25 MB          |
+| This merge           | +3 MB              | 247 ms       | 0.01 MB          |
+First open (v2 fixture, including migration to Blobs) was 3.6 s on both
+builds, D02's migration decoding ≈140 MB of base64. Reopening took 55–100 ms.
+
+Tests:
+- tests/workspace-entries.test.ts (replaces workspace-bodies.test.ts, 9
+  cases): interim v3 → v4 fold restores exact bytes as Blobs and drops the
+  store; an aborted fold leaves v3 intact; D02's v3 opens with Blob ids
+  unchanged; entries carry no bodies; reading another workspace's entries
+  keeps the next save at one row (swapping in `getWorkspace` makes it fail:
+  2 rows); getFile; a cross-workspace link reads exactly one row.
+- tests/e2e/search.spec.ts: "searching all workspaces leaves the open
+  workspace's next save at one file". It fails on the D02-only build (it also
+  writes scan.png) and passes on the merge. It replaces the previous
+  "largest read" check, which Blob handles made meaningless.
+- Unit suite 476 passed, 0 failed, 2 skipped. Typecheck and production build
+  pass. ESLint on changed files: clean.
+- Full browser suite on the merged production build (private port 4741):
+  171 passed, 1 skipped, 3 failed. All three fail on upstream's build too:
+  sharing.spec's two link checks hard-code port 4175, and mobile-navigation
+  "close button and backdrop dismiss the drawer" fails on eb5424b as well.
+- Chrome via DevTools MCP, merged build: a seeded interim v3 database (note +
+  image in `file-bodies`) opened as v4. The store was gone, the image was back
+  in its row as an 85-byte Blob body and rendered. No console errors or
+  warnings.
+
+Limits: the open workspace is still loaded whole. Its bodies are Blob handles
+now, but loading them only when a viewer asks isn't verified end to end.
+A move still rewrites the whole destination workspace. Chromium only.
+
+Previous update — 2026-09-29 (B03 optional-feature bundle budgets and shared KaTeX)
 
 Completed B03 (Package 6). Measured production downloads by user journey,
 including worker scripts and conversion WASM. Added repeatable size ceilings
@@ -105,6 +376,91 @@ can change layout when they arrive; this change removes unused work without
 claiming a CLS or latency improvement. Custom/Google font lifecycle changes,
 package dependency cleanup and broader optional-bundle work remain separate.
 
+Previous update — 2026-09-29 (D01 part 1, first version: superseded by the D01 + D02 merge entry above)
+
+Superseded: this version's separate body store (and its DB v3) was dropped
+when D02 merged. D02's Blob bodies made it unnecessary. The API and caller
+changes below were kept; the latest update has the final design and numbers.
+
+Starts D01 (Package 6). Details: documentation/workspace-storage-layout.md.
+
+What was wrong (measured on HEAD 88cb82c's production build):
+- Each file row held its whole binary as a base64 data URL, and IndexedDB
+  can't read part of a row. So "Search all workspaces", the attachment picker
+  and link resolution (`![](Library/photo.png)`) loaded every PDF and image of
+  every workspace they looked at, just for names and text. Search started all
+  those reads at once.
+- That full read of another workspace also replaced the open workspace's write
+  cache. The open workspace's next save then rewrote every file, images
+  included.
+- bench/d01-workspace-bodies.mjs (open workspace = 10 KB note + 5 MB image;
+  other workspace = 4 × 25 MB PDFs, ≈140 MB stored; 5 alternating rounds per
+  build, each build on its own Nitro server, medians): turning on "Search all
+  workspaces" made IndexedDB hand back 139.8 MB and grew the JS heap by 264 MB.
+  Renaming the note afterwards wrote 7 MB.
+
+What changed:
+- IndexedDB v3 adds a `file-bodies` store keyed like `files`
+  ([workspaceId, id]). File rows no longer carry `data`.
+- persistence.ts: `getWorkspace` joins rows and bodies (unchanged result).
+  New `getWorkspaceEntries(id)` reads rows only and leaves the write cache
+  alone. New `getFile(workspaceId, fileId)` reads one file with its body.
+  Writes put a body only when `data` changed, so renaming, filing or binning a
+  PDF rewrites its row, not the PDF. Removing a file or workspace, or clearing
+  storage, removes the bodies in the same transaction. Storage totals for
+  older summary rows count bodies too. The unused `listWorkspaces()`, which
+  read every workspace in full at once, is gone.
+- Migration: the upgrade moves each body out of its row with a cursor, one row
+  at a time, in the single versionchange transaction. An abort leaves v2
+  intact and the next open retries. v1 databases go straight to v3.
+- use-search-index.ts reads other workspaces with `getWorkspaceEntries`, at
+  most two at a time, and skips a queued read that's no longer wanted.
+  AttachmentPicker lists from entries and doesn't re-read the open workspace.
+  resolveWorkspaceArtifact matches paths on entries, then reads only the
+  matched file with `getFile`.
+
+Measured after (same bench, same fixture):
+| Search all workspaces, then rename the note | Before   | After   |
+| Bytes IndexedDB handed back for the search  | 139.8 MB | < 5 KB  |
+| JS heap growth during the search            | +264 MB  | +3 MB   |
+| Toggle → other workspace's hit shown        | 372 ms   | 247 ms  |
+| Bytes written by the next save (a rename)   | 7 MB     | 0.01 MB |
+Cost: the one-time migration made the first open after updating slower,
+112 → 312 ms median for this 140 MB database. Reopening afterwards took
+55–100 ms on both builds.
+
+Tests:
+- tests/workspace-bodies.test.ts (new, 11 cases): an aborted v2 → v3 upgrade
+  leaves v2 rows and bodies intact, and the retry reads back identical; rows
+  lose `data`; entries never touch the body store; another workspace's entries
+  keep the open workspace's saves at one row; rename or bin rewrites the row
+  only; changed, cleared and dropped bodies; getFile; a cross-workspace link
+  reads exactly one body; legacy totals include bodies; delete and clear
+  remove bodies.
+- tests/e2e/search.spec.ts: "searching all workspaces never reads another
+  workspace's images from storage". It checks the largest value any IndexedDB
+  read returns, so it doesn't depend on the layout. On HEAD's build it fails
+  (1,398,576 characters: the 1 MiB image); it passes after.
+- e2e helpers that read or seed raw storage now join `file-bodies`
+  (editing, storage-budget, media specs). tests/persistence.test.ts opens the
+  database at the current version; tests/media.test.ts also stubs the new
+  reads.
+- Unit suite: 469 passed, 0 failed, 2 skipped (471). Typecheck and production build pass. ESLint on changed
+  files: 3 errors, all Prettier line-width errors on lines this change doesn't
+  touch (HEAD had 15 in the same files).
+- Browser: the 6 storage-related specs, 35/35 on the new build. Full suite:
+  157 passed, 1 skipped, 3 failed on a private port (4741). All three also fail on HEAD's build: sharing.spec's two link checks hard-code port 4175, and mobile-navigation "close button and backdrop dismiss the drawer" (rerun A/B: fails identically on HEAD 88cb82c).
+- Checked in Chrome via DevTools MCP on the production build: a seeded v2
+  database with a note embedding an image opened as v3. `files` rows had no
+  `data`, the body was in `file-bodies`, the image rendered (naturalWidth 16)
+  and survived a reload. No console errors or warnings.
+
+Limits: the open workspace is still loaded whole, bodies included, into React
+state. PLAN.md's gate ("opening a 10 KB note in a workspace with 100 MB of
+PDFs loads no PDF bodies") needs bodies loaded on demand by the viewers. That
+is D01 part 2, with D02 (Blob records, which would live in this store). A move
+still reads the destination workspace in full and rewrites all of its files.
+Chromium only; no Safari, Firefox or real devices.
 
 Previous update — 2026-09-29 (R05 interactive examples, part 2: compiled in a worker, cached, playground edits settle first)
 
@@ -2696,7 +3052,7 @@ Pending (not started, or started but not committed)
 - Package 3 is now complete: A03 and A10 (above), A11's persistent-storage request and backup reminder, and A11's offline shell, cached/downloadable capabilities and offline-readiness state (latest update).
 - Package 4 is now complete: A06 (2026-09-28 update above) and A07 (latest update). Its latency budget on a 1,000-document corpus is not yet measured.
 - Package 5: R03's PDF keyboard isolation is done (R03 update above), A08's PDF zoom pixel budget is done (A08 update above), A04's diagram mode parity and bounded Stepped stage is done (A04 update above), and R03's lazy outline resolution and bounded Contents tree is done (latest update), so R03 is complete. R04 is done: the spreadsheet viewer work (worker parsing/filtering/sorting, lazy sheets, visible-column rendering) and the bounded import queue with per-file failures and Cancel (latest update). R01 (diagram players: coarse React updates, no frames while unseen, reduced motion) is done (latest update). A05 (3,000-section Markdown) is done (latest update; fold latency and the 4× CPU tasks are listed as limits there). R02 (one Mermaid job at a time, byte-budgeted diagram and scene caches, mindmaps and other heavy main-thread diagrams held as source until the reader asks) is done (latest update). Package 5 is now complete.
-- Package 6: B01 is done (B01 update above), D03 is done (D03 update above) and B02 is done (latest update: small startup shell; 338 → 220.8 KB gzip, still above the 200 KiB target, with zod in persistence as the next lever). B03 (per-journey optional bundles) and D01–D02 (loading whole workspaces, binary storage) remain.
+- Package 6 is now complete: B01, D03, B02 (updates above), B03 (per-journey optional bundle budgets, shared KaTeX), D02 (Blob bodies in IndexedDB) and D01 part 1 (latest update: other workspaces are read without bodies and without replacing the open workspace's write cache; the next save after a cross-workspace search writes 0.01 MB instead of 5.25 MB). Still open from D01: loading the open workspace's bodies only when a viewer asks (not verified end to end), and moves rewriting the whole destination workspace.
 - Package 7: A09 is done (A09 update above); broader UX items remain pending.
 - Package 2 is now complete (A01, D04, D06).
 - Package 8: R06 is done. B04 is done (B04 update above). A12 is done. R05 is done: its math half (math typeset in the reader again, a per-task typesetting budget, a byte-bounded cache, MathJax published for production) and its interactive-JSX half (React examples run, in a self-contained sandboxed frame; Babel in a worker, a compile cache, playground edits settle first; updates above). B05 is done (unused Inter loading and offline assets removed after measuring actual requests; latest update). Lint debt and CI budget enforcement remain.

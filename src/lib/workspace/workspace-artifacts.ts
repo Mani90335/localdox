@@ -1,7 +1,7 @@
 import type { MdFile } from "../markdown/markdown-utils.ts";
 import { getDocumentKind } from "../markdown/document-utils.ts";
 import { parseHeadings, splitIntoSubtopics } from "../markdown/markdown-utils.ts";
-import { persistence, type WorkspaceRecord } from "./persistence.ts";
+import { persistence, type FileEntry, type PersistedFile } from "./persistence.ts";
 
 export interface ResolvedArtifact {
   file: MdFile;
@@ -48,7 +48,7 @@ export const ViewerRegistry = {
   ["json"],
   ["md", "markdown", "mdx", "txt"],
   ["mmd", "mermaid"],
-  ["excalidraw"],
+  ["board", "excalidraw"],
   ["png", "jpg", "jpeg", "webp", "gif", "svg"],
   ["mp4", "webm", "mov", "mp3", "wav", "ogg", "m4a"],
   ["html", "htm"],
@@ -56,7 +56,7 @@ export const ViewerRegistry = {
   ViewerRegistry.register({ extensions, label: extensions[0].toUpperCase() }),
 );
 
-function hydrateFile(file: WorkspaceRecord["files"][number]): MdFile {
+function hydrateFile(file: PersistedFile): MdFile {
   const kind = file.kind ?? getDocumentKind(file.name, file.mimeType);
   const textOutline = kind === "markdown" || kind === "text";
   return {
@@ -67,7 +67,11 @@ function hydrateFile(file: WorkspaceRecord["files"][number]): MdFile {
   };
 }
 
-/** Current in-memory files take precedence over persisted autosave snapshots. */
+/**
+ * Current in-memory files take precedence over persisted autosave snapshots.
+ * Stored workspaces are searched by name and path without their binary
+ * bodies; only the one file a reference resolves to is read in full.
+ */
 export async function resolveWorkspaceArtifact(
   reference: string,
   currentWorkspaceId?: string | null,
@@ -78,29 +82,38 @@ export async function resolveWorkspaceArtifact(
   sourceFile?: MdFile,
 ): Promise<ResolvedArtifact | null> {
   const clean = decodeReference(reference).trim();
+  // An entry from `currentFiles` is already complete; any other is read in
+  // full now.
+  const complete = async (
+    workspaceId: string,
+    workspaceName: string,
+    entry: FileEntry,
+  ): Promise<ResolvedArtifact | null> => {
+    if (workspaceId === currentWorkspaceId && currentFiles)
+      return { file: entry as MdFile, workspaceId, workspaceName };
+    const file = await persistence.getFile(workspaceId, entry.id);
+    return file ? { file: hydrateFile(file), workspaceId, workspaceName } : null;
+  };
   const stable = /^@([^/]+)\/(.+)$/.exec(clean);
   if (stable) {
     if (stable[1] === currentWorkspaceId && currentFiles) {
       const file = currentFiles.find((item) => item.id === stable[2] && !item.deletedAt);
       return file ? { file, workspaceId: stable[1], workspaceName: currentWorkspaceName } : null;
     }
-    const workspace = await persistence.getWorkspace(stable[1]);
-    const file = workspace?.files.find((item) => item.id === stable[2] && !item.deletedAt);
-    return file && workspace
-      ? { file: hydrateFile(file), workspaceId: workspace.id, workspaceName: workspace.name }
-      : null;
+    const workspace = await persistence.getWorkspaceEntries(stable[1]);
+    const entry = workspace?.files.find((item) => item.id === stable[2] && !item.deletedAt);
+    return entry && workspace ? complete(workspace.id, workspace.name, entry) : null;
   }
   // Most media is in memory already. Avoid cloning every uploaded file from
   // IndexedDB once for every image/player in the document.
   const current =
     currentWorkspaceId && (!currentFiles || !currentFolders)
-      ? await persistence.getWorkspace(currentWorkspaceId)
+      ? await persistence.getWorkspaceEntries(currentWorkspaceId)
       : null;
   const folders = currentFolders ?? current?.folders ?? [];
-  const files = currentFiles ?? current?.files.map(hydrateFile) ?? [];
+  const files: FileEntry[] = currentFiles ?? current?.files ?? [];
   const local = findReferencedFile(clean, files, folders, sourceFile);
-  if (local && currentWorkspaceId)
-    return { file: local, workspaceId: currentWorkspaceId, workspaceName: currentWorkspaceName };
+  if (local && currentWorkspaceId) return complete(currentWorkspaceId, currentWorkspaceName, local);
   // A repeated local name needs a path; don't silently pick a file elsewhere.
   if (
     !clean.includes("/") &&
@@ -113,22 +126,24 @@ export async function resolveWorkspaceArtifact(
   const qualified = summaries
     .filter((ws) => clean.toLowerCase().startsWith(ws.name.toLowerCase() + "/"))
     .sort((a, b) => b.name.length - a.name.length);
-  const matches: ResolvedArtifact[] = [];
+  const matches: { entry: FileEntry; workspaceId: string; workspaceName: string }[] = [];
   for (const summary of qualified.length
     ? qualified
     : summaries.filter((ws) => ws.id !== currentWorkspaceId)) {
-    const workspace = await persistence.getWorkspace(summary.id);
-    if (!workspace) continue;
-    const candidates = summary.id === currentWorkspaceId ? files : workspace.files.map(hydrateFile);
-    const file = findReferencedFile(
+    const isCurrent = summary.id === currentWorkspaceId;
+    const workspace = isCurrent ? null : await persistence.getWorkspaceEntries(summary.id);
+    if (!isCurrent && !workspace) continue;
+    const entry = findReferencedFile(
       qualified.length ? clean.slice(summary.name.length + 1) : clean,
-      candidates,
-      summary.id === currentWorkspaceId ? folders : (workspace.folders ?? []),
+      workspace?.files ?? files,
+      workspace ? (workspace.folders ?? []) : folders,
     );
-    if (file) matches.push({ file, workspaceId: summary.id, workspaceName: summary.name });
+    if (entry) matches.push({ entry, workspaceId: summary.id, workspaceName: summary.name });
   }
   // Ambiguous names must be qualified; never silently attach another file.
-  return matches.length === 1 ? matches[0] : null;
+  if (matches.length !== 1) return null;
+  const [match] = matches;
+  return complete(match.workspaceId, match.workspaceName, match.entry);
 }
 
 export function clearArtifactResolutionCache() {

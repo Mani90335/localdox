@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import JSZip from "jszip";
+import { exportFile, openExportMenu } from "./sidebar-menu";
 
 const picture = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30"><rect width="40" height="30" fill="blue"/></svg>',
@@ -21,10 +22,9 @@ function recording() {
   buffer.writeUInt32LE(1600, 40);
   return buffer;
 }
+/** ⋮ ▸ Export ▸ Web page: a ZIP when there are local attachments, else HTML. */
 async function download(page: Page) {
-  const pending = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Download HTML + Media", exact: true }).click();
-  const result = await pending;
+  const result = await exportFile(page, "Web page (.html)");
   return { name: result.suggestedFilename(), bytes: await readFile((await result.path())!) };
 }
 async function storedFiles(page: Page) {
@@ -196,9 +196,7 @@ test("attachment picker imports into the workspace, inserts a durable reference,
       mimeType: "text/markdown",
       buffer: Buffer.from("# Attachments\n\nHello."),
     });
-  await expect(
-    page.getByRole("button", { name: "Download HTML + Media", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Attachments", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Options", exact: true }).first().click();
   await page.getByText("Edit", { exact: true }).click();
   await page.locator("#markdown-source").focus();
@@ -214,14 +212,10 @@ test("attachment picker imports into the workspace, inserts a durable reference,
   await expect.poll(async () => (await storedFiles(page)).length).toBe(2);
   await page.reload();
   await expect(page.getByRole("img", { name: "uploaded.svg", exact: true })).toBeVisible();
-  expect((await download(page)).name).toBe("attach.zip");
-  const pending = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export", exact: true }).click();
-  await page.getByRole("menuitem", { name: /Web page/ }).click();
-  const menuDownload = await pending;
-  expect(menuDownload.suggestedFilename()).toBe("attach.zip");
-  const menuZip = await JSZip.loadAsync(await readFile((await menuDownload.path())!));
-  expect(Object.keys(menuZip.files).some((name) => name.endsWith("uploaded.svg"))).toBe(true);
+  const exported = await download(page);
+  expect(exported.name).toBe("attach.zip");
+  const zip = await JSZip.loadAsync(exported.bytes);
+  expect(Object.keys(zip.files).some((name) => name.endsWith("uploaded.svg"))).toBe(true);
 });
 
 test("missing attachments report an error and do not emit a broken export", async ({ page }) => {
@@ -234,8 +228,12 @@ test("missing attachments report an error and do not emit a broken export", asyn
       buffer: Buffer.from("# Missing\n\n![Missing clip](missing.webm)"),
     });
   await expect(page.getByText(/Couldn’t find missing.webm/)).toBeVisible();
-  await page.getByRole("button", { name: "Download HTML + Media", exact: true }).click();
+  const menu = await openExportMenu(page);
+  const downloads: string[] = [];
+  page.on("download", (download) => downloads.push(download.suggestedFilename()));
+  await menu.getByRole("button", { name: "Web page (.html)", exact: true }).click();
   await expect(page.getByText(/Could not export: attachment/)).toBeVisible();
+  expect(downloads).toEqual([]);
 });
 
 test("nested folders and cross-workspace Markdown embeds render and bundle their own media", async ({

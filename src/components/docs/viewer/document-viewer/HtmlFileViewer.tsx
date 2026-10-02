@@ -30,8 +30,6 @@ const HTML_AUTOSAVE_MS = 600;
  */
 export function HtmlFileViewer({
   file,
-  isBookmarked,
-  onToggleBookmark,
   prevFile,
   nextFile,
   onNavFile,
@@ -105,12 +103,11 @@ export function HtmlFileViewer({
   return (
     <ViewerFrame
       file={file}
-      isBookmarked={isBookmarked}
-      onToggleBookmark={onToggleBookmark}
       prevFile={prevFile}
       nextFile={nextFile}
       onNavFile={onNavFile}
       onOpenPalette={onOpenPalette}
+      editing={editing}
       action={
         editing ? (
           // The editing session's own controls, the way the JSON editor does

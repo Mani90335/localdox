@@ -94,11 +94,14 @@ test("legacy embeds are left untouched inside fenced, indented and inline code",
 });
 
 test("in-memory attachments resolve without reading or cloning workspace storage", async () => {
-  const get = persistence.getWorkspace;
+  const { getWorkspace, getWorkspaceEntries, getFile } = persistence;
   const list = persistence.listWorkspaceSummaries;
-  persistence.getWorkspace = async () => {
-    throw new Error("Unexpected storage read");
-  };
+  persistence.getWorkspace =
+    persistence.getWorkspaceEntries =
+    persistence.getFile =
+      async () => {
+        throw new Error("Unexpected storage read");
+      };
   persistence.listWorkspaceSummaries = async () => {
     throw new Error("Unexpected summary read");
   };
@@ -122,7 +125,7 @@ test("in-memory attachments resolve without reading or cloning workspace storage
       "pic",
     );
   } finally {
-    persistence.getWorkspace = get;
+    Object.assign(persistence, { getWorkspace, getWorkspaceEntries, getFile });
     persistence.listWorkspaceSummaries = list;
   }
 });

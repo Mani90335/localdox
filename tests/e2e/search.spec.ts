@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { confirmMoveToBin } from "./sidebar-menu";
 
 async function openSearch(page: Page, query: string) {
   await page
@@ -80,6 +81,9 @@ for (const fallback of [false, true]) {
     await expect(other.getByText("constant restored", { exact: true })).toBeVisible();
     await other.getByRole("button", { name: "Options", exact: true }).first().click();
     await other.getByText("Move to Bin", { exact: true }).click();
+    // It is the document on screen there, so binning it asks first.
+    await confirmMoveToBin(other);
+    await expect(other.getByText("Nothing here", { exact: true })).toBeVisible();
     await expect(results).toContainText('No results for "constant"');
     await expect(page.getByPlaceholder("Search all documents...")).toHaveValue("constant");
   });
@@ -255,14 +259,14 @@ const archive = {
 
 /** alpha.md in the first workspace, then "Archive" imported and current, so
  *  alpha.md is only reachable through "Search all workspaces". */
-async function twoWorkspaces(page: Page) {
+async function twoWorkspaces(page: Page, backup = archive) {
   await upload(page);
   await page.goto("/settings");
   await page.getByRole("tab", { name: "Workspace" }).click();
   await page.locator('input[type="file"][accept="application/json,.json"]').setInputFiles({
     name: "archive.json",
     mimeType: "application/json",
-    buffer: Buffer.from(JSON.stringify(archive)),
+    buffer: Buffer.from(JSON.stringify(backup)),
   });
   await expect
     .poll(() =>
@@ -315,6 +319,52 @@ test("other workspaces are indexed again after search is closed and reopened", a
   await expect(results.getByRole("button", { name: /^alpha\.md/ })).toBeVisible();
   await page.getByPlaceholder("Search all documents...").fill("shelved");
   await expect(results.getByRole("button", { name: /^archived\.md/ })).toBeVisible();
+});
+
+test("searching all workspaces leaves the open workspace's next save at one file", async ({
+  page,
+}) => {
+  // Archive (the open workspace) also holds an image.
+  const scan = {
+    id: "scan",
+    name: "scan.png",
+    kind: "image",
+    mimeType: "image/png",
+    content: "",
+    data: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAHUlEQVR4nGP4z8BAEmIY1TCqYVTDqIZRDcNWAwCvRf8BjqzjYQAAAABJRU5ErkJggg==",
+    addedAt: 1,
+  };
+  await twoWorkspaces(page, {
+    ...archive,
+    workspace: { ...archive.workspace, files: [...archive.workspace.files, scan] },
+  });
+  await page.evaluate(() => {
+    const w = window as unknown as { fileWrites: string[] };
+    w.fileWrites = [];
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value, ...args) {
+      if (this.name === "files") w.fileWrites.push((value as { name: string }).name);
+      return put.call(this, value, ...args);
+    };
+  });
+  const writes = () =>
+    page.evaluate(() => (window as unknown as { fileWrites: string[] }).fileWrites);
+  // Indexing alpha.md reads the other workspace; that must not make the open
+  // one forget what it last saved.
+  const results = page.locator("aside");
+  await openSearch(page, "constant");
+  await setAllWorkspaces(page, true);
+  await expect(results.getByRole("button", { name: /^alpha\.md/ })).toBeVisible();
+  await expect(results.getByText(/Indexing \d+ other workspace/)).toHaveCount(0);
+  await page.getByRole("button", { name: "Close search" }).click();
+
+  await page.getByRole("button", { name: "Options", exact: true }).first().click();
+  await page.getByText("Edit", { exact: true }).click();
+  await page.getByRole("textbox", { name: "Document name" }).fill("kept.md");
+  await page.getByRole("textbox", { name: "Document name" }).press("Enter");
+  await expect.poll(writes).toContain("kept.md");
+  await page.waitForTimeout(1000);
+  expect(await writes()).toEqual(["kept.md"]);
 });
 
 test("turning all-workspaces off while another workspace is indexing settles the indicator", async ({
@@ -479,4 +529,63 @@ test("search lists exactly the occurrences of the query and lands on the one cli
 
   // And back, into the fenced code.
   expect(await jumpTo(page, result(3))).toEqual({ text: "needle", after: " = 1;" });
+});
+
+test("search markers leave the page once the search is cleared, changed or closed", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .locator('input[type="file"]')
+    .first()
+    .setInputFiles({
+      name: "markers.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from("# Topic\n\nalpha beta gamma alpha\n\nMore alpha here, and beta.\n"),
+    });
+  await expect(page.getByRole("heading", { name: "Topic", exact: true })).toBeVisible();
+  const markers = () =>
+    page.evaluate(
+      () => [...((CSS as unknown as HighlightRegistry).highlights.get("dc-query") ?? [])].length,
+    );
+  const field = page.getByPlaceholder("Search all documents...");
+  const firstHit = page.locator("aside button[title]:has(mark)").first();
+
+  // Opening a hit marks every occurrence of the query.
+  await openSearch(page, "alpha");
+  await firstHit.click();
+  await expect.poll(markers).toBe(3);
+
+  // Clearing the query takes them off the page.
+  await field.fill("");
+  await expect.poll(markers).toBe(0);
+
+  // So does searching for something else, until one of its hits is opened.
+  await field.fill("alpha");
+  await firstHit.click();
+  await expect.poll(markers).toBe(3);
+  await field.fill("beta");
+  await expect.poll(markers).toBe(0);
+  await firstHit.click();
+  await expect.poll(markers).toBe(2);
+
+  // Closing the search clears them, and reopening it doesn't bring them back.
+  await page.getByRole("button", { name: "Close search" }).click();
+  await expect.poll(markers).toBe(0);
+  await page
+    .locator("button:visible")
+    .filter({ has: page.locator("svg.lucide-search") })
+    .first()
+    .click();
+  await expect(field).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(await markers()).toBe(0);
+
+  // Escape closes the search the same way.
+  await field.fill("alpha");
+  await firstHit.click();
+  await expect.poll(markers).toBe(3);
+  await field.focus();
+  await page.keyboard.press("Escape");
+  await expect.poll(markers).toBe(0);
 });

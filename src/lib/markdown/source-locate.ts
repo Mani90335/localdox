@@ -11,7 +11,7 @@ export interface SourceSpan {
   end: number;
 }
 
-interface Projection {
+export interface Projection {
   /** Plain text as the reader sees it. */
   text: string;
   /** map[i] = index in the original source of text[i]. */
@@ -44,7 +44,14 @@ function matchBracket(line: string, open: number): number {
  * Strip markdown syntax from `src`, recording where every surviving character
  * came from. Inline code and fenced blocks keep their contents (they render as
  * text); images, link targets and emphasis markers are dropped.
+ *
+ * Exported for source addressing (source-address.ts), which projects one
+ * block's source at a time to line it up with that block's rendered text.
  */
+export function projectSource(src: string): Projection {
+  return project(src);
+}
+
 function project(src: string): Projection {
   const chars: string[] = [];
   const map: number[] = [];
@@ -211,6 +218,12 @@ export function locateInSource(
   source: string,
   selection: string,
   prefer?: { from: number; to: number },
+  /**
+   * Accept only a match of the whole selection. The fallbacks below land the
+   * editor caret *near* lost text, which is right for Inspect but would make a
+   * note's source link claim a passage still exists when it does not.
+   */
+  { exactOnly = false }: { exactOnly?: boolean } = {},
 ): SourceSpan | null {
   const needle = compact(selection).text;
   if (!needle) return null;
@@ -257,6 +270,7 @@ export function locateInSource(
 
   const exact = search(needle);
   if (exact !== -1) return spanFor(exact, needle.length);
+  if (exactOnly) return null;
 
   // Selections that cross a rendered boundary we didn't model (a table row, a
   // stripped heading) won't match whole. Anchor on the longest prefix that does

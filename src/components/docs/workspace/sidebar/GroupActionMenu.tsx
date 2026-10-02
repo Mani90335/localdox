@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MoreVertical, CheckSquare, Share2, Download, Trash2 } from "lucide-react";
+import { MoreVertical, CheckSquare, Share2, Download, Trash2, FolderInput } from "lucide-react";
 import { modKeyLabel } from "@/lib/platform/keyboard";
 import { isOutsideMenu, MenuPanel } from "./menu-primitives";
 
@@ -7,6 +7,7 @@ export function GroupActionMenu({
   onShare,
   onMoveToBin,
   onDownload,
+  onMoveToWorkspace,
   onCancel,
   onSelectAll,
   allSelected,
@@ -14,6 +15,8 @@ export function GroupActionMenu({
   onShare?: () => void;
   onMoveToBin: () => void;
   onDownload?: () => void;
+  /** Move the selection — folders included — into another workspace. */
+  onMoveToWorkspace?: () => void;
   onCancel: () => void;
   onSelectAll: () => void;
   allSelected: boolean;
@@ -89,6 +92,19 @@ export function GroupActionMenu({
             >
               <Download className="h-3 w-3" />
               Download Selected
+            </button>
+          )}
+          {onMoveToWorkspace && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                onMoveToWorkspace();
+              }}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-foreground hover:bg-accent"
+            >
+              <FolderInput className="h-3 w-3" />
+              Move to Workspace…
             </button>
           )}
           {/* One removal, not two. Binning is reversible for thirty days, so

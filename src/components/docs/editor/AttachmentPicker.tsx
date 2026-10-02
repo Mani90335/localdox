@@ -43,8 +43,12 @@ export function AttachmentPicker({
       const summaries = await persistence.listWorkspaceSummaries();
       const result: Attachment[] = [];
       for (const summary of summaries) {
-        const workspace = await persistence.getWorkspace(summary.id);
         const current = summary.id === context.workspaceId;
+        // Names and folders only; the open workspace's are already in memory.
+        const workspace =
+          current && context.workspaceFiles && context.workspaceFolders
+            ? undefined
+            : await persistence.getWorkspaceEntries(summary.id);
         const files = current
           ? (context.workspaceFiles ?? workspace?.files ?? [])
           : (workspace?.files ?? []);

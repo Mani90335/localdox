@@ -1,4 +1,5 @@
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
+import { openExportMenu } from "./sidebar-menu";
 
 const shortcuts = ["ArrowRight", "ArrowLeft", "PageDown", "PageUp", "Home", "End", "=", "+", "-"];
 
@@ -44,12 +45,18 @@ test("PDF shortcuts leave toolbar and menu keyboard input alone", async ({ page 
     await expect(pageNumber, `toolbar ${key}`).toHaveValue("1");
     await expect(page.getByTitle("Reset zoom", { exact: true })).toHaveText("100%");
   }
-  await page.getByRole("button", { name: "Export", exact: true }).click();
-  await page.keyboard.press("End");
-  await settle(page);
-  await expect(page.getByRole("menu")).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: /^Original file/ })).toBeFocused();
+  const menu = await openExportMenu(page);
+  const original = menu.getByRole("button", { name: "Original file", exact: true });
+  await original.focus();
+  for (const key of shortcuts) {
+    await page.keyboard.press(key);
+    await settle(page);
+    await expect(pageNumber, `menu ${key}`).toHaveValue("1");
+  }
+  await expect(menu).toBeVisible();
+  await expect(original).toBeFocused();
   await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
   await expect(pageNumber).toHaveValue("1");
   await page.getByRole("button", { name: "Search in document", exact: true }).click();
   const search = page.getByRole("textbox", { name: "Search in document", exact: true });

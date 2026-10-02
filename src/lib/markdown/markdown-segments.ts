@@ -51,6 +51,13 @@ export interface MarkdownSegments {
   sizes: number[];
   /** Zero-based source line adjustment, excluding prepended definitions. */
   lineOffsets?: number[];
+  /** Where each segment's own text starts in the original document. */
+  starts: number[];
+  /**
+   * Characters of shared definitions copied to the front of every segment, so
+   * offset `o` in segment `s` is offset `starts[s] + o - prefix` in the document.
+   */
+  prefix: number;
   /**
    * The base slugs each segment's headings claimed, in order, written by
    * `rehypeSegmentSlug` as the segment renders.
@@ -91,7 +98,13 @@ const HTML_LONE_TAG =
  * split safely, come back as a single segment holding the source unchanged.
  */
 export function splitMarkdownSegments(source: string): MarkdownSegments {
-  const whole = (): MarkdownSegments => ({ sources: [source], sizes: [source.length], slugs: [] });
+  const whole = (): MarkdownSegments => ({
+    sources: [source],
+    sizes: [source.length],
+    starts: [0],
+    prefix: 0,
+    slugs: [],
+  });
   if (source.length < SEGMENT_MIN_DOCUMENT || FOOTNOTE_DEFINITION.test(source)) return whole();
 
   const lines = source.split("\n");
@@ -203,14 +216,26 @@ export function splitMarkdownSegments(source: string): MarkdownSegments {
   const shared = definitions.length ? definitions.join("\n") + "\n\n" : "";
   const sources: string[] = [];
   const sizes: number[] = [];
+  const starts: number[] = [];
+  let lineStart = 0;
+  let line = 0;
   for (let s = 0; s < cuts.length; s++) {
+    while (line < cuts[s]) lineStart += lines[line++].length + 1;
     const body = lines.slice(cuts[s], cuts[s + 1] ?? lines.length).join("\n");
     sources.push(shared + body);
     sizes.push(body.length);
+    starts.push(lineStart);
   }
 
   const sharedLines = shared ? shared.split("\n").length - 1 : 0;
-  return { sources, sizes, slugs: [], lineOffsets: cuts.map((line) => line - sharedLines) };
+  return {
+    sources,
+    sizes,
+    starts,
+    prefix: shared.length,
+    slugs: [],
+    lineOffsets: cuts.map((line) => line - sharedLines),
+  };
 }
 
 interface HastNode {

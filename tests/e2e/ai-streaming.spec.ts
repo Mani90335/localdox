@@ -94,7 +94,9 @@ async function askFreeform(page: Page, question = "What is this?") {
       getSelection()!.addRange(range);
       el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
-  await page.getByRole("button", { name: "Ask AI", exact: true }).click();
+  await page.getByRole("button", { name: "More highlight actions" }).click();
+  await page.getByRole("menuitem", { name: "AI", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Ask AI", exact: true }).click();
   const box = panel(page).getByPlaceholder("Ask anything about the content…");
   await box.fill(question);
   await box.press("Enter");

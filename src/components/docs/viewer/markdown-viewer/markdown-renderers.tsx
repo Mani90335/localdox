@@ -16,10 +16,8 @@ import { MarkdownMedia } from "../MarkdownMedia";
 import { MarkdownRenderContext, type MarkdownRenderContextValue } from "./contexts";
 import { TaskContext, SegmentLineContext } from "./contexts";
 import { HeadingLink } from "./HeadingLink";
-import { SavableBlock } from "./SavableBlock";
 import { CodeBlock } from "./CodeBlock";
 import { Callout } from "./Callout";
-import { extractText } from "./extract-text";
 
 // The viewer's markdown renderers, assembled into react-markdown's
 // `components` map by `markdown-components.ts`. Props are passed through
@@ -93,35 +91,9 @@ export function MarkdownParagraph(props: Props<"p">) {
   return <p {...props}>{props.children}</p>;
 }
 
-export function MarkdownBlockquote(props: Props<"blockquote">) {
-  return (
-    <SavableBlock blockType="quote">
-      <Callout {...props} />
-    </SavableBlock>
-  );
-}
+export const MarkdownBlockquote = (props: Props<"blockquote">) => <Callout {...props} />;
 
-export function MarkdownPre(props: Props<"pre">) {
-  const codeEl = Array.isArray(props.children) ? props.children[0] : props.children;
-  const code = isValidElement<{ className?: unknown; children?: ReactNode }>(codeEl)
-    ? codeEl.props
-    : null;
-  const isMermaid = typeof code?.className === "string" && /language-mermaid/.test(code.className);
-  return (
-    <SavableBlock
-      blockType="code"
-      className={isMermaid ? "docs-savable-mermaid" : "docs-savable-code"}
-      // A diagram puts the save action in its own control tray, so the
-      // star is not drawn floating beside it. Its rendered text is the
-      // stylesheet Mermaid injects rather than anything the reader sees,
-      // so the source is what identifies it.
-      renderOwnSaveAction={isMermaid}
-      identity={isMermaid ? extractText(code?.children).trim() : undefined}
-    >
-      <CodeBlock {...props} />
-    </SavableBlock>
-  );
-}
+export const MarkdownPre = (props: Props<"pre">) => <CodeBlock {...props} />;
 
 export function MarkdownImage(props: Props<"img"> & { "data-media"?: string }) {
   const { file, media, openLightbox } = useRenderContext();
@@ -138,14 +110,12 @@ export function MarkdownImage(props: Props<"img"> & { "data-media"?: string }) {
     );
   }
   return (
-    <SavableBlock blockType="image" as="span" identity={src} className="inline-block">
-      <img
-        {...props}
-        loading="lazy"
-        onClick={() => openLightbox({ src, alt: props.alt })}
-        className="cursor-zoom-in"
-      />
-    </SavableBlock>
+    <img
+      {...props}
+      loading="lazy"
+      onClick={() => openLightbox({ src, alt: props.alt })}
+      className="cursor-zoom-in"
+    />
   );
 }
 
@@ -210,11 +180,9 @@ export function MarkdownLink(props: Props<"a">) {
 
 export function MarkdownTable(props: Props<"table">) {
   return (
-    <SavableBlock blockType="table" className="docs-savable-table">
-      <div className="docs-table-wrap">
-        <table {...props} />
-      </div>
-    </SavableBlock>
+    <div className="docs-table-wrap">
+      <table {...props} />
+    </div>
   );
 }
 

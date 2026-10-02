@@ -95,11 +95,11 @@ test("CSV editing preserves strings, quotes pasted cells, cancels, and persists 
     Buffer.from("Code,Name\r\n001,Apples\r\n002,Pears\r\n"),
     "text/csv",
   );
-  await page.getByRole("button", { name: "Edit spreadsheet", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Cell A2", exact: true })).toHaveValue("001");
   await page.getByRole("textbox", { name: "Cell B2", exact: true }).fill('Fresh, "apples"');
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.getByRole("button", { name: "Edit spreadsheet", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Cell B2", exact: true })).toHaveValue("Apples");
   await page.getByRole("textbox", { name: "Cell B2", exact: true }).fill('Fresh, "apples"');
   await page.getByRole("textbox", { name: "Cell A3", exact: true }).evaluate((node) => {
@@ -117,7 +117,7 @@ test("CSV editing preserves strings, quotes pasted cells, cancels, and persists 
   expect(saved.content).toContain("004,Plums");
   expect(saved.size).toBe(Buffer.byteLength(saved.content));
   await page.reload();
-  await page.getByRole("button", { name: "Edit spreadsheet", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Cell B2", exact: true })).toHaveValue(
     'Fresh, "apples"',
   );
@@ -140,7 +140,7 @@ test("XLSX updates original cells across sheets and retains package parts", asyn
   zip.file("custom/preserve.txt", "Unrelated package data");
   const bytes = await zip.generateAsync({ type: "nodebuffer" });
   await upload(page, "edit.xlsx", bytes);
-  await page.getByRole("button", { name: "Edit spreadsheet", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Cell C2", exact: true })).toHaveValue("=B2*2");
   expect(await page.locator('input[aria-label^="Cell "]').count()).toBeLessThan(200);
   await page.getByRole("textbox", { name: "Cell B4", exact: true }).fill("99");
@@ -150,7 +150,7 @@ test("XLSX updates original cells across sheets and retains package parts", asyn
   await expect
     .poll(async () => (await storedFile(page, "edit.xlsx"))?.bytes)
     .not.toEqual(Array.from(bytes));
-  await expect(page.getByRole("button", { name: "Edit spreadsheet", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
   await expect
     .poll(async () => {
       const file = await storedFile(page, "edit.xlsx");
@@ -187,7 +187,7 @@ test("DOCX text edits retain runs, tables, and other ZIP entries", async ({ page
   );
   zip.file("word/preserved.txt", "keep exactly");
   await upload(page, "edit.docx", await zip.generateAsync({ type: "nodebuffer" }));
-  await page.getByRole("button", { name: "Edit document", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Paragraph 1", exact: true })).toHaveValue(
     "Hello world",
   );
@@ -197,7 +197,7 @@ test("DOCX text edits retain runs, tables, and other ZIP entries", async ({ page
     .getByRole("textbox", { name: "Paragraph 3", exact: true })
     .fill("New text\nSecond line");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Edit document", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
   await expect
     .poll(async () => {
       const saved = await storedFile(page, "edit.docx");
@@ -215,7 +215,7 @@ test("DOCX text edits retain runs, tables, and other ZIP entries", async ({ page
   expect(body).toContain("w:br");
   expect(await result.file("word/preserved.txt")!.async("string")).toBe("keep exactly");
   await page.reload();
-  await page.getByRole("button", { name: "Edit document", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Paragraph 1", exact: true })).toHaveValue(
     "Hello new world",
   );
@@ -233,7 +233,7 @@ test("wide sheets keep the DOM bounded and keyboard navigation crosses virtual c
     ),
     "text/csv",
   );
-  await page.getByRole("button", { name: "Edit spreadsheet", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   const first = page.getByRole("textbox", { name: "Cell A1", exact: true });
   await expect(first).toHaveValue("Column 0");
   expect(await page.locator('input[aria-label^="Cell "]').count()).toBeLessThan(600);
@@ -259,7 +259,7 @@ test("a shared formula save error keeps the draft and original workbook", async 
   );
   const bytes = await zip.generateAsync({ type: "nodebuffer" });
   await upload(page, "formula.xlsx", bytes);
-  await page.getByRole("button", { name: "Edit spreadsheet", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("textbox", { name: "Cell A2", exact: true }).fill("42");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("shared or array formula");

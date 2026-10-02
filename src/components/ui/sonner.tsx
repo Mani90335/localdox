@@ -1,9 +1,15 @@
+import { createPortal } from "react-dom";
 import { Toaster as Sonner } from "sonner";
+import { usePortalContainer } from "@/hooks/use-portal-container";
 
 type ToasterProps = React.ComponentProps<typeof Sonner>;
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  return (
+  // Sonner renders in place, which is <body>: invisible behind an element in
+  // fullscreen. Follow the fullscreen element there so an export's "done" or
+  // "failed" still reaches the reader. See `usePortalContainer`.
+  const container = usePortalContainer();
+  const toaster = (
     <Sonner
       className="toaster group"
       toastOptions={{
@@ -18,6 +24,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       {...props}
     />
   );
+  return container ? createPortal(toaster, container) : toaster;
 };
 
 export { Toaster };

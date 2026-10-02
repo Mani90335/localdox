@@ -46,7 +46,7 @@ function ValueText({ value }: { value: unknown }) {
   if (typeof value === "string")
     return <span style={{ color: "var(--code-string)" }}>&quot;{value}&quot;</span>;
   if (typeof value === "number") return <span style={{ color: "var(--code-number)" }}>{String(value)}</span>;
-  if (typeof value === "boolean") return <span className="text-purple-300">{String(value)}</span>;
+  if (typeof value === "boolean") return <span className="text-purple-700 dark:text-purple-300">{String(value)}</span>;
   if (value === null) return <span style={{ color: "var(--code-punct)" }}>null</span>;
   return <span className="text-foreground">{String(value)}</span>;
 }

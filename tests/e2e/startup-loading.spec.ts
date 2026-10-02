@@ -16,7 +16,8 @@ test.skip(!process.env.PLAYWRIGHT_PRODUCTION, "Requires the production bundle");
 test.use({ serviceWorkers: "block" });
 
 const MARKERS = {
-  reader: "Download HTML + Media",
+  // The Markdown reader's highlight menu; no other chunk carries this label.
+  reader: "More highlight actions",
   editor: "Editing — changes save automatically",
   parser: "Cannot close document, a token",
   panes: "data-separator",
@@ -133,7 +134,8 @@ test("Inspect source selects the passage in an editor that wasn't loaded yet", a
     selection.addRange(range);
     el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
   });
-  await page.getByRole("button", { name: "Inspect source", exact: true }).click();
+  await page.getByRole("button", { name: "More highlight actions" }).click();
+  await page.getByRole("menuitem", { name: "Inspect source", exact: true }).click();
 
   // The selection is applied once the editor has arrived, not dropped because
   // it wasn't there when edit mode began.

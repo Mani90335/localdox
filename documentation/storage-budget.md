@@ -45,6 +45,10 @@ original bytes, so it counts twice. A file's `size` field is never used: it is
 what was picked from disk, it goes stale after an edit, and in backups and
 links it is only a claim made by the sender.
 
+Text the reader writes that lives on the workspace record itself — note content,
+scratchpad titles and content — counts too, as UTF-8 (`recordTextBytes`; see
+rough-work.md). `storedRecordBytes(record)` is documents plus that text.
+
 Every import asks one question before it writes anything:
 
 ```

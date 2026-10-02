@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { exportFile } from "./sidebar-menu";
 
 // Dev serves individual modules; this regression concerns production chunking.
 test.skip(!process.env.PLAYWRIGHT_PRODUCTION, "Requires the production bundle");
@@ -59,9 +60,7 @@ test("reading defers the renderer, exports load it once, and editing still works
   expect(await rendererScripts()).toEqual([]);
 
   const downloadHTML = async () => {
-    const pending = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Download HTML + Media", exact: true }).click();
-    const download = await pending;
+    const download = await exportFile(page, "Web page (.html)");
     expect(download.suggestedFilename()).toBe("lazy-export.html");
     expect(await download.failure()).toBeNull();
     return readFile((await download.path())!, "utf8");

@@ -21,6 +21,11 @@ export interface Highlight {
   suffix?: string;
   /** Set when the highlighted text no longer exists in the document at all. */
   orphaned?: boolean;
+  /**
+   * When it was made, so it takes its place among notes in the Notes list.
+   * Absent on highlights made before they carried a time.
+   */
+  createdAt?: number;
 }
 
 /** Palette + the CSS ::highlight() group name each color maps to. Mirrors the

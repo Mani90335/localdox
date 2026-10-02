@@ -6,7 +6,13 @@ import { withMermaid } from "./mermaid-runtime";
 import { useSvgViewport } from "./use-svg-viewport";
 import { useStageVisibility } from "./use-stage-visibility";
 import { MAX_STAGE_RATIO, MIN_STAGE_RATIO } from "./stage-ratio";
-import { TRAY_GUTTER, ZOOM_LIMIT, quoteErEntities, widthCap } from "./mermaid-diagram-helpers";
+import {
+  TRAY_GUTTER,
+  ZOOM_LIMIT,
+  centredBoxCap,
+  quoteErEntities,
+  widthCap,
+} from "./mermaid-diagram-helpers";
 import { ZoomControls } from "./ZoomControls";
 
 // The animator stretches its SVG to the full box and lets preserveAspectRatio
@@ -159,13 +165,7 @@ export function AnimatorStage({
   }, [fill, loading, reset]);
 
   return (
-    <div
-      className="group/stage relative h-full w-full"
-      // A tall diagram is capped to a screenful and so ends up narrower than the
-      // column. The wrapper narrows with it, so the control row stays anchored
-      // to the picture's own corner rather than floating out in the margin.
-      style={fill || !ratio ? undefined : { maxWidth: widthCap(ratio), marginInline: "auto" }}
-    >
+    <div className="group/stage relative h-full w-full">
       {/* Flow runs continuously and frames itself; zoom is the only thing left
           worth reaching for, so it is all this tray carries. */}
       <div
@@ -210,10 +210,11 @@ export function AnimatorStage({
                 aspectRatio: `1 / ${ratio ?? 0.42}`,
                 paddingBottom: TRAY_GUTTER,
                 // A tall diagram would otherwise grow past a screenful. The
-                // wrapper caps the width in the same proportion, so this height
-                // cap is only a backstop and never letterboxes the picture.
+                // width is capped in the same proportion, so this height cap is
+                // only a backstop and never letterboxes the picture.
                 maxHeight: "min(32rem, 70vh)",
                 minHeight: "9rem",
+                ...centredBoxCap(ratio ? widthCap(ratio) : undefined),
               }
         }
       />

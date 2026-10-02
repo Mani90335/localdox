@@ -6,11 +6,11 @@ import type { Highlight } from "@/lib/markdown/dom-highlighter";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { FolderRecord, ReadingMode } from "@/lib/workspace/persistence";
 import type { MathPreferences } from "@/services/math";
-import type { SavedDraft, SavedItem } from "@/lib/workspace/saved-items";
+import type { PassageTarget } from "@/lib/workspace/saved-items";
+import type { NoteDraft } from "@/lib/workspace/notes";
 import type { PendingSearch } from "@/lib/search/schema";
 
 const EMPTY_HIGHLIGHTS: Highlight[] = [];
-const EMPTY_SAVED: SavedItem[] = [];
 
 // Keep non-markdown readers out of the initial reading bundle, just as the
 // single-document path does in DocsApp. The Suspense boundary around the main
@@ -35,7 +35,6 @@ const DocumentViewer = lazy(() =>
 export function PaneDocument({
   file,
   files,
-  saved,
   highlights,
   workspaceId,
   workspaceRevision,
@@ -50,8 +49,6 @@ export function PaneDocument({
   onUpdateHighlight,
   onRemoveHighlight,
   onRepairHighlights,
-  onToggleSaved,
-  onRemoveSaved,
   onOpenArtifact,
   readingMode,
   contentWidth,
@@ -62,10 +59,14 @@ export function PaneDocument({
   highlightQuery = null,
   pendingSearch = null,
   onSearchShown,
+  pendingSaved = null,
+  onSavedShown,
+  onCopyToNotes,
+  onToggleNotes,
+  notesOpen,
 }: {
   file: MdFile;
   files: MdFile[];
-  saved: SavedItem[];
   highlights: Highlight[];
   workspaceId: string | null;
   workspaceRevision: string;
@@ -80,8 +81,6 @@ export function PaneDocument({
   onUpdateHighlight: (id: string, patch: Partial<Pick<Highlight, "color" | "label">>) => void;
   onRemoveHighlight: (id: string) => void;
   onRepairHighlights?: (patches: Array<{ id: string; patch: Partial<Highlight> }>) => void;
-  onToggleSaved: (fileId: string, draft: SavedDraft) => void;
-  onRemoveSaved: (id: string) => void;
   onOpenArtifact?: (fileId: string, workspaceId: string) => void;
   readingMode: ReadingMode;
   contentWidth?: number;
@@ -103,28 +102,29 @@ export function PaneDocument({
   highlightQuery?: string | null;
   pendingSearch?: PendingSearch | null;
   onSearchShown?: () => void;
+  /** A note source to scroll to — gated by the parent like a search hit. */
+  pendingSaved?: PassageTarget | null;
+  onSavedShown?: () => void;
+  onCopyToNotes?: (fileId: string, draft: NoteDraft) => void;
+  onToggleNotes?: () => void;
+  notesOpen?: boolean;
 }) {
   const fileHighlights = useMemo(() => {
     const mine = highlights.filter((hl) => hl.fileId === file.id);
     return mine.length > 0 ? mine : EMPTY_HIGHLIGHTS;
   }, [highlights, file.id]);
 
-  const fileSaved = useMemo(() => {
-    const mine = saved.filter((item) => item.fileId === file.id);
-    return mine.length > 0 ? mine : EMPTY_SAVED;
-  }, [saved, file.id]);
-
   const addHighlight = useCallback(
     (hl: Omit<Highlight, "id" | "fileId">) => onAddHighlight(hl, file.id),
     [onAddHighlight, file.id],
   );
-  const toggleSaved = useCallback(
-    (draft: SavedDraft) => onToggleSaved(file.id, draft),
-    [onToggleSaved, file.id],
-  );
   const renameFile = useCallback(
     (name: string) => onRenameFile(file.id, name),
     [onRenameFile, file.id],
+  );
+  const copyToNotes = useCallback(
+    (draft: NoteDraft) => onCopyToNotes?.(file.id, draft),
+    [onCopyToNotes, file.id],
   );
 
   // A split is a layout concern, not a document-type mode. Resolve the viewer
@@ -137,12 +137,11 @@ export function PaneDocument({
       <DocumentViewer
         key={file.id}
         file={file}
-        isBookmarked={fileSaved.some((item) => item.kind === "file")}
-        onToggleBookmark={() => onToggleSaved(file.id, { kind: "file", title: file.name })}
         prevFile={null}
         nextFile={null}
         onNavFile={() => {}}
         onContentChange={onContentChange}
+        onRenameFile={onRenameFile}
         onDocumentSave={onDocumentSave}
         onEditorDirtyChange={onEditorDirtyChange}
         fillAvailableHeight
@@ -167,21 +166,21 @@ export function PaneDocument({
       highlightQuery={highlightQuery}
       pendingSearch={pendingSearch}
       onSearchShown={onSearchShown}
+      pendingSaved={pendingSaved}
+      onSavedShown={onSavedShown}
+      onCopyToNotes={onCopyToNotes ? copyToNotes : undefined}
+      onToggleNotes={onToggleNotes}
+      notesOpen={notesOpen}
       onContentChange={onContentChange}
       onRenameFile={renameFile}
       startInEditFileId={startInEditFileId}
       onStartInEditConsumed={onStartInEditConsumed}
       nextReadingMin={null}
-      isBookmarked={fileSaved.some((item) => item.kind === "file")}
-      onToggleBookmark={() => onToggleSaved(file.id, { kind: "file", title: file.name })}
       highlights={fileHighlights}
       onAddHighlight={addHighlight}
       onUpdateHighlight={onUpdateHighlight}
       onRemoveHighlight={onRemoveHighlight}
       onRepairHighlights={onRepairHighlights}
-      saved={fileSaved}
-      onToggleSaved={toggleSaved}
-      onRemoveSaved={onRemoveSaved}
       readingMode={readingMode}
       contentWidth={contentWidth}
       mathPreferences={mathPreferences}

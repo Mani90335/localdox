@@ -14,28 +14,12 @@ import {
 } from "react";
 import { Eye } from "lucide-react";
 import { MarkdownSource, type MarkdownSourceHandle } from "./MarkdownSource";
-import { mathExpression, type FormatAction } from "@/lib/markdown/markdown-format";
-import { TOOLBAR_ITEMS } from "@/lib/markdown/markdown-toolbar-items";
+import { mathExpression, mathSeedFrom, type FormatAction } from "@/lib/markdown/markdown-format";
+import { toolbarShortcut } from "@/lib/markdown/markdown-toolbar-items";
 import { MarkdownToolbar } from "./MarkdownToolbar";
 import { DraftJournalContext } from "./draft-journal-context";
+import { markEditorOpen } from "./open-editors";
 import { hashText } from "@/lib/workspace/draft-journal";
-
-/**
- * What the math keyboard should open showing, given the text the reader had
- * selected: the LaTeX inside a `$...$` or `$$...$$` span if that's what was
- * selected (so re-opening an equation to edit it doesn't hand the dialog the
- * delimiters too), or the plain selection otherwise.
- */
-function mathSeedFrom(selected: string): { latex: string; display: boolean } {
-  const trimmed = selected.trim();
-  if (trimmed.startsWith("$$") && trimmed.endsWith("$$") && trimmed.length >= 4) {
-    return { latex: trimmed.slice(2, -2).trim(), display: true };
-  }
-  if (trimmed.startsWith("$") && trimmed.endsWith("$") && trimmed.length >= 2) {
-    return { latex: trimmed.slice(1, -1), display: false };
-  }
-  return { latex: trimmed, display: false };
-}
 
 const AUTOSAVE_MS = 600;
 
@@ -161,6 +145,9 @@ function MarkdownEditorImpl(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileId]);
 
+  // Changes made to this document from elsewhere wait while it is open here.
+  useEffect(() => markEditorOpen(fileId), [fileId]);
+
   useImperativeHandle(
     handleRef,
     () => ({
@@ -270,23 +257,10 @@ function MarkdownEditorImpl(
   // Capture formatting shortcuts before the editor's default key bindings.
   const onShortcut = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (!(event.metaKey || event.ctrlKey)) return;
-      const key = event.key.toLowerCase();
-      for (const item of TOOLBAR_ITEMS) {
-        if (!item.shortcut) continue;
-        const parts = item.shortcut.split("+");
-        if (parts.includes("Shift") !== event.shiftKey) continue;
-        if (parts.includes("Alt") !== event.altKey) continue;
-        // The last segment is the key itself. Compared case-insensitively, and
-        // against `event.code` digits too: Alt on macOS rewrites `key` into a
-        // symbol (⌥1 becomes "¡"), which would otherwise never match.
-        const wanted = parts[parts.length - 1].toLowerCase();
-        const matches = key === wanted || (/^\d$/.test(wanted) && event.code === `Digit${wanted}`);
-        if (!matches) continue;
-        event.preventDefault();
-        applyFormat(item.action);
-        return;
-      }
+      const item = toolbarShortcut(event);
+      if (!item) return;
+      event.preventDefault();
+      applyFormat(item.action);
     },
     [applyFormat],
   );

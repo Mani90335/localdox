@@ -6,7 +6,16 @@ import {
   convertedAnchorMap,
   convertedFootnotes,
 } from "@/services/doc-conversion";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { createPortal } from "react-dom";
 import { ProgressiveMarkdown } from "./markdown-viewer/ProgressiveMarkdown";
 import { markdownComponents } from "./markdown-viewer/markdown-components";
@@ -31,14 +40,14 @@ import {
   Files,
   Sparkles,
   BookOpen,
-  Star,
   Share,
   MoreHorizontal,
   Search,
   Crosshair,
   Code2,
-  Download,
   FileText,
+  NotebookPen,
+  ChevronRight,
 } from "lucide-react";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { ReadingMode } from "@/lib/workspace/persistence";
@@ -46,6 +55,7 @@ import { ReadingProgress } from "../navigation/ReadingProgress";
 import { MarkdownEditor, type MarkdownEditorHandle } from "../editor/MarkdownEditorLazy";
 import { isVideoUrl, VideoPlayer } from "@/lib/markdown/media-embeds";
 import { Lightbox } from "./Lightbox";
+import { cn } from "@/lib/utils";
 import { HL_COLORS, hlGroup, type Highlight } from "@/lib/markdown/dom-highlighter";
 import {
   getSelectionOffsets,
@@ -65,13 +75,19 @@ import {
 import { occurrenceOrdinal, parseRows } from "@/lib/search/rows";
 import type { PendingSearch } from "@/lib/search/schema";
 import { createHighlightPainter } from "@/lib/markdown/highlight-registry";
-import {
-  findSaved,
-  savedExcerpt,
-  type SavedDraft,
-  type SavedItem,
-} from "@/lib/workspace/saved-items";
+import type { PassageTarget } from "@/lib/workspace/saved-items";
+import type { NoteDraft } from "@/lib/workspace/notes";
 import { locateInSource, sourceLinesForSelection } from "@/lib/markdown/source-locate";
+import { selectionToMarkdown } from "@/lib/markdown/selection-markdown";
+import {
+  anchorSpan,
+  lineSpan,
+  searchHitSpan,
+  type SourceSpan,
+} from "@/lib/markdown/source-address";
+import { addressOfRange, queryRangeWithin, rangeOfAddress } from "@/lib/markdown/dom-address";
+import type { SourceAddressing } from "./markdown-viewer/ProgressiveMarkdown";
+import { diagramSourceOf } from "@/lib/markdown/diagram-sources";
 import { copyText } from "@/lib/workspace/share";
 import {
   fileSubtopics,
@@ -84,11 +100,9 @@ import { artifactReference, prepareWorkspaceEmbeds } from "@/lib/workspace/works
 import {
   CollapseContext,
   MarkdownRenderContext,
-  SavedContext,
   TaskContext,
   type CollapseContextValue,
   type MarkdownRenderContextValue,
-  type SavedContextValue,
 } from "./markdown-viewer/contexts";
 import { elementOf, flashPassage, scrollToPassage } from "./markdown-viewer/flash-passage";
 import { remarkInteractiveBlockMeta } from "./markdown-viewer/remark-interactive-block-meta";
@@ -103,11 +117,13 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ViewerHeader, ViewerPager } from "../navigation/ViewerHeader";
-import { ExportMenu } from "@/services/markdown-export/ExportMenu";
+import { EditButton } from "./EditButton";
 import { ESCAPE_DEPTH, useNavEscape } from "@/hooks/use-nav-history";
+import { usePortalContainer } from "@/hooks/use-portal-container";
 
 interface Props {
   file: MdFile;
@@ -133,8 +149,6 @@ interface Props {
   startInEditFileId?: string | null;
   onStartInEditConsumed?: () => void;
   nextReadingMin: number | null;
-  isBookmarked: boolean;
-  onToggleBookmark: () => void;
   highlights: Highlight[];
   onAddHighlight: (hl: Omit<Highlight, "id" | "fileId">) => void;
   onUpdateHighlight: (id: string, patch: Partial<Pick<Highlight, "color" | "label">>) => void;
@@ -144,16 +158,12 @@ interface Props {
    * highlights had to be re-located. Persisted, but not as an undoable step.
    */
   onRepairHighlights?: (patches: Array<{ id: string; patch: Partial<Highlight> }>) => void;
-  /** Saved items (stars) for this file. */
-  saved?: SavedItem[];
-  /** Star or unstar a section or a block (table, code fence, quote, image). */
-  onToggleSaved?: (draft: SavedDraft) => void;
-  onRemoveSaved?: (id: string) => void;
   /**
-   * A saved item the reader just opened from the Saved list: scroll to it and
-   * flash it once, then call `onSavedShown` so it isn't replayed on re-render.
+   * A passage the reader just opened from a note's source link: scroll to it
+   * and flash it once, then call `onSavedShown` so it isn't replayed on
+   * re-render.
    */
-  pendingSaved?: SavedItem | null;
+  pendingSaved?: PassageTarget | null;
   onSavedShown?: () => void;
   /**
    * A search hit the reader just opened from the palette: the line it matched,
@@ -193,9 +203,26 @@ interface Props {
   contentWidth?: number;
   /** Open the Ask AI panel prefilled from the current selection. */
   onAskAi?: (prefill: { selection: string; actionId?: string }) => void;
+  /** Keep the selection as a note. Hidden from the selection menu when omitted. */
+  onCopyToNotes?: (draft: NoteDraft) => void;
+  /** Show or hide the Notes panel; the header button is hidden when omitted. */
+  onToggleNotes?: () => void;
+  notesOpen?: boolean;
 }
 
 const stripExt = (name: string) => name.replace(/\.(md|markdown|mdx|txt)$/i, "");
+
+/**
+ * The first element at or under `element` that has a box. Addressed
+ * equations and diagrams are wrapped in `display: contents` elements, which
+ * can't be scrolled to or outlined themselves.
+ */
+function boxOf(element: Element): HTMLElement {
+  let current = element as HTMLElement;
+  while (getComputedStyle(current).display === "contents" && current.firstElementChild)
+    current = current.firstElementChild as HTMLElement;
+  return current;
+}
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
@@ -217,16 +244,11 @@ function MarkdownViewerImpl({
   startInEditFileId,
   onStartInEditConsumed,
   nextReadingMin,
-  isBookmarked,
-  onToggleBookmark,
   highlights,
   onAddHighlight,
   onUpdateHighlight,
   onRemoveHighlight,
   onRepairHighlights,
-  saved = [],
-  onToggleSaved,
-  onRemoveSaved,
   pendingSaved,
   onSavedShown,
   pendingSearch,
@@ -248,6 +270,9 @@ function MarkdownViewerImpl({
   onToggleReadingMode,
   contentWidth = 50,
   onAskAi,
+  onCopyToNotes,
+  onToggleNotes,
+  notesOpen = false,
 }: Props) {
   const singleMode = readingMode === "single";
   const containerRef = useRef<HTMLDivElement>(null);
@@ -340,26 +365,6 @@ function MarkdownViewerImpl({
     if (editMode) originalContentRef.current = liveContentRef.current;
   }, [editMode]);
 
-  const [exporting, setExporting] = useState(false);
-  const exportHTML = useCallback(async () => {
-    setExporting(true);
-    try {
-      const { downloadMarkdownHTML } = await import("@/services/markdown-export/media-bundle");
-      await downloadMarkdownHTML(file, {
-        workspaceId,
-        workspaceRevision,
-        workspaceFiles,
-        workspaceFolders,
-        workspaceName,
-        sourceFile: file,
-      });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not export this document.");
-    } finally {
-      setExporting(false);
-    }
-  }, [file, workspaceId, workspaceRevision, workspaceFiles, workspaceFolders, workspaceName]);
-
   // Back leaves the editor. Autosave has already written the draft, so this
   // drops nothing the reader typed.
   useNavEscape(editMode, () => setEditMode(false), ESCAPE_DEPTH.mode);
@@ -409,9 +414,11 @@ function MarkdownViewerImpl({
       if (next === content) break;
       content = next;
     }
+    // Characters stripped from the front: where the rendered page starts
+    // within the page's source, for source addressing.
+    const lead = activeChunk.content.length - content.length;
 
-    const prefixLength = activeChunk.content.length - content.length;
-    const lineOffset = activeChunk.content.slice(0, prefixLength).split("\n").length - 1;
+    const lineOffset = activeChunk.content.slice(0, lead).split("\n").length - 1;
 
     // Strip trailing horizontal rules
     while (true) {
@@ -420,9 +427,9 @@ function MarkdownViewerImpl({
       content = next;
     }
 
-    return { content: prepareWorkspaceEmbeds(content), lineOffset };
+    return { markdown: prepareWorkspaceEmbeds(content), lead, lineOffset };
   }, [activeChunk.content]);
-  const renderContent = renderPage.content;
+  const renderContent = renderPage.markdown;
 
   // Single-page mode renders the whole document at once. Content is left intact
   // so every heading keeps its anchor id for in-page section navigation.
@@ -438,7 +445,7 @@ function MarkdownViewerImpl({
   );
   const markdownSource = singleMode
     ? fullRender
-    : renderPage.content + (footnoteDefinitions ? "\n\n" + footnoteDefinitions : "");
+    : renderContent + (footnoteDefinitions ? "\n\n" + footnoteDefinitions : "");
 
   // Embeds preserve line breaks. Paging removes only a prefix/suffix, so line
   // addresses survive embeds, repeated task labels and progressive rendering.
@@ -463,6 +470,23 @@ function MarkdownViewerImpl({
     () => ({ lineOffset: taskLineOffset, toggle: toggleTask }),
     [taskLineOffset, toggleTask],
   );
+
+  // Where what is rendered sits in the file, so every rendered block carries
+  // its file span (lib/markdown/source-address.ts). A page's offset is found
+  // by walking the pages in order: an identical page earlier in the file must
+  // not be mistaken for this one.
+  const addressing = useMemo<SourceAddressing | undefined>(() => {
+    if (singleMode) return { file: file.content, rendered: markdownSource, base: 0 };
+    let cursor = 0;
+    for (const chunk of allChunks) {
+      const at = file.content.indexOf(chunk.content, cursor);
+      if (at === -1) return undefined;
+      if (chunk.id === activeChunk.id)
+        return { file: file.content, rendered: markdownSource, base: at + renderPage.lead };
+      cursor = at + chunk.content.length;
+    }
+    return undefined;
+  }, [singleMode, file.content, markdownSource, allChunks, activeChunk.id, renderPage.lead]);
 
   // Syntax highlighting and math typesetting are fetched only for documents
   // that contain code or math — see `useMarkdownPlugins`. Both plugin arrays
@@ -502,12 +526,22 @@ function MarkdownViewerImpl({
         prefix: string;
         suffix: string;
         x: number;
-        y: number;
+        /** The selection's box: the menu opens below it, or above when there's no room. */
+        top: number;
+        bottom: number;
         label: string;
+        /** The selection itself, kept for copying it as Markdown. */
+        range?: Range;
       }
-    | { mode: "edit"; hl: Highlight; x: number; y: number; label: string };
+    | { mode: "edit"; hl: Highlight; x: number; top: number; bottom: number; label: string };
   const [menu, setMenu] = useState<HlMenu | null>(null);
+  // Whether the AI actions are unfolded in the menu's More list. Kept while the
+  // reader stays on the document, so someone who uses AI often opens it once.
+  const [aiActionsOpen, setAiActionsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  // A selection inside a figure in full screen (a JSON tree) opens the menu
+  // there, since <body> is not painted while it is up.
+  const menuContainer = usePortalContainer();
 
   const openCreateMenu = (at?: { x: number; y: number }) => {
     // Offsets are relative to whatever is rendered in contentRef: the active
@@ -528,26 +562,31 @@ function MarkdownViewerImpl({
       prefix: ctx.prefix,
       suffix: ctx.suffix,
       x: at ? at.x : r ? r.left + r.width / 2 : window.innerWidth / 2,
-      y: at ? at.y : r ? r.top : 120,
+      top: r ? r.top : (at?.y ?? 120),
+      bottom: r ? r.bottom : (at?.y ?? 120),
       label: "",
+      // A copy, so typing a label (which clears the live selection) or
+      // clicking a button in the menu doesn't take it away.
+      range: range?.cloneRange(),
     });
   };
 
-  const openEditMenu = (hl: Highlight, x: number, y: number) => {
-    setMenu({ mode: "edit", hl, x, y, label: hl.label ?? "" });
+  const openEditMenu = (hl: Highlight, x: number, box: { top: number; bottom: number }) => {
+    setMenu({ mode: "edit", hl, x, top: box.top, bottom: box.bottom, label: hl.label ?? "" });
   };
 
-  // ---- saved items (stars) ----
-  //
-  // Offsets are measured against whatever `contentRef` renders: the active
-  // section in paged mode, the whole document in single mode. A section-scoped
-  // item records which page it came from so the two spaces never mix — the same
-  // rule persistent highlights follow.
-  const savedSubtopicId = singleMode ? undefined : activeChunk.id;
   // Sections the reader has wrapped up, by heading id. Cleared on a document
   // switch: the ids belong to the document that was open.
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
-  useEffect(() => setCollapsedSections(new Set()), [file.id]);
+  // Reset during render, on an actual switch only. An effect keyed on `file.id`
+  // also ran on mount, after the first commit: a fold made while a long
+  // document was still mounting could land before that effect flushed, and the
+  // "reset" then wiped it.
+  const [foldsFileId, setFoldsFileId] = useState(file.id);
+  if (foldsFileId !== file.id) {
+    setFoldsFileId(file.id);
+    setCollapsedSections(new Set());
+  }
 
   const collapseCtx = useMemo<CollapseContextValue>(
     () => ({
@@ -564,20 +603,7 @@ function MarkdownViewerImpl({
   );
   useSectionFolds(contentRef, collapsedSections, `${contentKey}:${editMode}`);
 
-  const savedCtx = useMemo<SavedContextValue>(
-    () => ({
-      containerRef: contentRef,
-      subtopicId: savedSubtopicId,
-      enabled: !!onToggleSaved && !editMode,
-      isSaved: (probe) => findSaved(saved, { fileId: file.id, ...probe }),
-      toggle: (draft) => onToggleSaved?.(draft),
-      remove: (id) => onRemoveSaved?.(id),
-      revision: markdownSource,
-    }),
-    [saved, savedSubtopicId, onToggleSaved, onRemoveSaved, editMode, file.id, markdownSource],
-  );
-
-  // Opening a saved item from the Saved list: once the target page is rendered,
+  // Opening a passage from a note's source link: once the target page is rendered,
   // scroll to the passage and flash it. Anchored by quote first (the document
   // may have been edited since it was saved), by stored offsets only as a hint.
   useEffect(() => {
@@ -594,7 +620,16 @@ function MarkdownViewerImpl({
         : null;
 
       let range: Range | null = null;
-      if (!heading && !image && pendingSaved.text) {
+      let atomic: Element | null = null;
+      // An addressed passage (a note's link) lands on exactly its span.
+      if (pendingSaved.span) {
+        const addressed = rangeOfAddress(container, pendingSaved.span, file.content);
+        if (addressed) {
+          atomic = addressed.atomic;
+          range = atomic ? null : addressed.range;
+        }
+      }
+      if (!range && !atomic && !heading && !image && pendingSaved.text) {
         const anchor = findAnchor(
           container,
           pendingSaved.text,
@@ -607,6 +642,7 @@ function MarkdownViewerImpl({
       }
 
       const target =
+        (atomic && boxOf(atomic)) ??
         heading ??
         image ??
         (range
@@ -621,7 +657,7 @@ function MarkdownViewerImpl({
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [pendingSaved, settled, renderContent, fullRender, onSavedShown]);
+  }, [pendingSaved, settled, renderContent, fullRender, onSavedShown, file.content]);
 
   // "Inspect" — the reader's answer to DevTools' inspect element. Take the
   // rendered text under the pointer, find where it lives in the markdown
@@ -662,7 +698,37 @@ function MarkdownViewerImpl({
   const [pendingSelect, setPendingSelect] = useState<{ start: number; end: number } | null>(null);
   const [inspectMissed, setInspectMissed] = useState(false);
 
+  /**
+   * The page range the open menu acts on: the selection kept when it opened,
+   * rebuilt from its offsets if a re-render replaced its nodes — or, for a
+   * highlight being edited, the range it is painted over.
+   */
+  const menuRange = (): Range | null => {
+    const container = contentRef.current;
+    if (!container || !menu) return null;
+    if (
+      menu.mode === "create" &&
+      menu.range &&
+      !menu.range.collapsed &&
+      container.contains(menu.range.commonAncestorContainer)
+    )
+      return menu.range;
+    if (menu.mode === "create") return buildRange(container, menu.start, menu.end);
+    return paintedHighlights.current.find((painted) => painted.hl.id === menu.hl.id)?.range ?? null;
+  };
+
+  /** The file span of the menu's range (lib/markdown/source-address.ts). */
+  const menuAddress = (): SourceSpan | null => {
+    const container = contentRef.current;
+    const range = menuRange();
+    return container && range ? addressOfRange(container, range, file.content) : null;
+  };
+
   const inspect = (text: string) => {
+    // The selection's own address, read off the rendered blocks: exact, even
+    // for a phrase the document repeats. The text search below is only for
+    // content the renderer couldn't address (converted HTML).
+    const addressed = menuAddress();
     // Paged mode renders one section, so prefer a match inside that section —
     // a phrase repeated elsewhere shouldn't hijack the jump.
     const chunkStart = singleMode ? -1 : file.content.indexOf(activeChunk.content);
@@ -670,7 +736,7 @@ function MarkdownViewerImpl({
       chunkStart >= 0 && !singleMode
         ? { from: chunkStart, to: chunkStart + activeChunk.content.length }
         : undefined;
-    const span = locateInSource(file.content, text, prefer);
+    const span = addressed ?? locateInSource(file.content, text, prefer);
 
     setMenu(null);
     window.getSelection()?.removeAllRanges();
@@ -679,15 +745,74 @@ function MarkdownViewerImpl({
     setPendingSelect(span ?? { start: Math.max(0, chunkStart), end: Math.max(0, chunkStart) });
   };
 
+  /**
+   * Keep the selection as a note: its content as clean Markdown (see
+   * selection-markdown.ts), plus a quote anchor to find it again by.
+   *
+   * The saved range is preferred; if a re-render has since replaced the nodes
+   * it pointed into, it is rebuilt from the offsets taken when the menu opened.
+   */
+  const copyToNotes = () => {
+    const container = contentRef.current;
+    if (!onCopyToNotes || !container || menu?.mode !== "create") return;
+    const range = menuRange();
+    const address = range ? addressOfRange(container, range, file.content) : null;
+    const content =
+      (range && selectionToMarkdown(range, container, diagramSourceOf)) || menu.text.trim();
+
+    // The heading the passage sits under. Paged mode strips each page's own
+    // title from the render (it is the masthead), so the page stands in for it.
+    let heading: HTMLElement | null = null;
+    if (range) {
+      for (const candidate of container.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")) {
+        const before =
+          candidate.contains(range.startContainer) ||
+          !!(
+            candidate.compareDocumentPosition(range.startContainer) &
+            Node.DOCUMENT_POSITION_FOLLOWING
+          );
+        if (!before) break;
+        if (candidate.id) heading = candidate;
+      }
+    }
+    const page = singleMode ? undefined : activeChunk;
+    onCopyToNotes({
+      content,
+      source: {
+        // From the same text index `findAnchor` searches when the note is
+        // followed back. `Selection.toString()` is layout-aware (it adds line
+        // breaks around KaTeX's spans), so it never matches that index exactly
+        // across an equation, and the jump would flash only a prefix.
+        quote: textBetween(container, menu.start, menu.end) || menu.text,
+        prefix: menu.prefix,
+        suffix: menu.suffix,
+        start: menu.start,
+        end: menu.end,
+        subtopicId: page?.id,
+        headingId: heading?.id ?? page?.id,
+        sectionTitle: heading?.textContent?.trim() || page?.title,
+        // Where in the file, which is what the link back follows first.
+        anchor: address ? anchorSpan(file.content, address) : undefined,
+      },
+    });
+    window.getSelection()?.removeAllRanges();
+    setMenu(null);
+  };
+
   const copySource = (text: string) => {
-    // Like Inspect, prefer the section currently on screen so repeated prose
-    // resolves to the source the reader actually highlighted.
+    // The selection's source lines, by address; failing that, like Inspect,
+    // by text, preferring the section on screen.
+    const addressed = menuAddress();
     const chunkStart = singleMode ? -1 : file.content.indexOf(activeChunk.content);
     const prefer =
       chunkStart >= 0 && !singleMode
         ? { from: chunkStart, to: chunkStart + activeChunk.content.length }
         : undefined;
-    const source = sourceLinesForSelection(file.content, text, prefer) ?? text;
+    const lines = addressed && lineSpan(file.content, addressed);
+    const source =
+      (lines && file.content.slice(lines.start, lines.end)) ??
+      sourceLinesForSelection(file.content, text, prefer) ??
+      text;
     void copyText(source);
     window.getSelection()?.removeAllRanges();
     setMenu(null);
@@ -914,8 +1039,33 @@ function MarkdownViewerImpl({
           e.clientY <= rect.bottom,
       );
     });
-    if (hit) openEditMenu(hit.hl, e.clientX, e.clientY);
+    if (hit) openEditMenu(hit.hl, e.clientX, hit.range.getBoundingClientRect());
   };
+
+  // Place the menu beside the selection, never on it, so the reader still sees
+  // what they picked: below by default, above when the selection sits near the
+  // bottom of the window (the last lines of a document, which can't scroll any
+  // higher). A selection taller than the window leaves no free side, so the
+  // menu is only kept on screen. Measured before paint, so it never appears in
+  // the wrong place first.
+  useLayoutEffect(() => {
+    const element = menuRef.current;
+    if (!menu || !element) return;
+    const gap = 8;
+    const margin = 8;
+    const { height } = element.getBoundingClientRect();
+    const below = menu.bottom + gap;
+    const above = menu.top - gap - height;
+    const top =
+      below + height + margin <= window.innerHeight
+        ? below
+        : above >= margin
+          ? above
+          : Math.max(margin, Math.min(below, window.innerHeight - height - margin));
+    // Measuring commits the first position, so the menu must not transition
+    // `top` (transition-none above), or a flip would slide it over the selection.
+    element.style.top = `${top}px`;
+  }, [menu]);
 
   // Close the menu on outside click / Escape (but keep it open while the reader
   // interacts with the popover itself).
@@ -924,7 +1074,9 @@ function MarkdownViewerImpl({
     const onDown = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenu(null);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenu(null);
+    // An Escape one of its dropdowns already handled (Radix marks it
+    // defaultPrevented) closes only that dropdown.
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && setMenu(null);
     window.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
     return () => {
@@ -949,6 +1101,12 @@ function MarkdownViewerImpl({
     // re-running when it clears would drop the reader out of the editor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file.id]);
+
+  /** The header's pencil: into the editor, caret at the top. */
+  const enterEditMode = useCallback(() => {
+    setEditMode(true);
+    setPendingSelect({ start: 0, end: 0 });
+  }, []);
 
   // Edit requested for the document already on screen — the sidebar's "Edit"
   // item, which now owns that action instead of a header button. The effect
@@ -1100,19 +1258,32 @@ function MarkdownViewerImpl({
       if (!container) return;
       const { query, text, occurrence, lineIndex } = pendingSearch;
       let range: Range | null = null;
-      if (query && lineIndex >= 0) {
+      let atomic: Element | null = null;
+      // The hit's own address: its line and occurrence, mapped to the file
+      // and then onto the page. Exact for a table cell or a repeated word; a
+      // hit in a diagram's source lands on the diagram, at the label that
+      // shows the word when there is one.
+      const span = searchHitSpan(file.content, lineIndex, text, query, occurrence);
+      const addressed = span && rangeOfAddress(container, span, file.content);
+      if (addressed) {
+        atomic = addressed.atomic;
+        range = atomic ? queryRangeWithin(atomic, query) : addressed.range;
+      }
+      // Unaddressed content (converted HTML): count occurrences as before.
+      if (!addressed && query && lineIndex >= 0) {
         const at = occurrenceOrdinal(searchRowsOnScreen(), query, lineIndex, occurrence);
         if (at) {
           const nth = nthQueryRange(container, query, at.ordinal);
           if (nth.count === at.total) range = nth.range;
         }
       }
-      range ??= text
-        ? firstQueryRangeInLine(container, text, query, occurrence)
-        : query
-          ? firstTextRange(container, query)
-          : null;
-      const target = elementOf(range);
+      if (!addressed)
+        range ??= text
+          ? firstQueryRangeInLine(container, text, query, occurrence)
+          : query
+            ? firstTextRange(container, query)
+            : null;
+      const target = range ? elementOf(range) : atomic && boxOf(atomic);
       const landed = range && rangeOffsets(container, range);
       const landedText = range?.toString();
       // The passage in the container's current DOM, should a re-render have
@@ -1122,14 +1293,23 @@ function MarkdownViewerImpl({
           ? buildRange(container, landed.start, landed.end)
           : null;
       if (range) scrollToPassage(range, () => (range.collapsed ? reanchor() : range));
-      // The same one-shot flash a saved item gets, for the same reason: on a
+      else target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      // The same one-shot flash a note source link gets, for the same reason: on a
       // dense page, arriving is not the same as seeing where you arrived.
       flashPassage(range, target, landed ? { container, reanchor } : undefined);
 
       onSearchShown?.();
     });
     return () => cancelAnimationFrame(frame);
-  }, [pendingSearch, settled, renderContent, fullRender, onSearchShown, searchRowsOnScreen]);
+  }, [
+    pendingSearch,
+    settled,
+    renderContent,
+    fullRender,
+    onSearchShown,
+    searchRowsOnScreen,
+    file.content,
+  ]);
 
   // Reading progress now lives in <ReadingProgress>, which writes the
   // percentage straight to its own DOM node. It used to be state up here, and
@@ -1233,24 +1413,28 @@ function MarkdownViewerImpl({
             </Select>
           )
         }
-        /* Starring lives on the document's own row in the sidebar, and editing
-           lives in that row's menu. What is left here is the one control that
-           changes how this view reads — and when even that does not apply this
-           must be `undefined`, not an empty wrapper, or the header has no way
-           to tell it is empty and reserves its height for nothing. */
+        /* Exporting lives in the document's own row in the sidebar, under
+           ⋮ ▸ Export, where every format is listed. What is left
+           here acts on the document on screen: edit it, or change how it
+           reads. In the editor this must be `undefined`, not an empty wrapper,
+           or the header has no way to tell it is empty and reserves its height
+           for nothing. */
         actions={
           !editMode ? (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void exportHTML()}
-                disabled={exporting}
-                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
-                title="Download a styled HTML page; uploaded attachments are bundled in a ZIP and web media stays online"
-              >
-                <Download className="h-4 w-4" />
-                {exporting ? "Exporting…" : "Download HTML + Media"}
-              </button>
+            <div className="flex items-center gap-1">
+              {onToggleNotes && (
+                <button
+                  onClick={onToggleNotes}
+                  aria-label="Notes"
+                  aria-pressed={notesOpen}
+                  title={notesOpen ? "Hide notes" : "Show notes"}
+                  className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11 ${
+                    notesOpen ? "bg-accent text-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  <NotebookPen className="h-4 w-4" />
+                </button>
+              )}
               {onToggleReadingMode && (
                 <button
                   onClick={onToggleReadingMode}
@@ -1264,20 +1448,7 @@ function MarkdownViewerImpl({
                   <Files className="h-4 w-4" />
                 </button>
               )}
-              {/* Export sits with the document rather than only in the sidebar
-                  row menu: while reading is when you want it, and on a phone
-                  that panel is closed. */}
-              <ExportMenu
-                file={file}
-                mediaContext={{
-                  workspaceId,
-                  workspaceRevision,
-                  workspaceFiles,
-                  workspaceFolders,
-                  workspaceName,
-                  sourceFile: file,
-                }}
-              />
+              <EditButton onEdit={enterEditMode} />
             </div>
           ) : undefined
         }
@@ -1296,69 +1467,21 @@ function MarkdownViewerImpl({
           createPortal(
             <div
               ref={menuRef}
-              className="fixed z-(--z-dropdown) w-64 -translate-x-1/2 rounded-lg border border-border bg-popover p-2 shadow-xl"
+              className="fixed z-(--z-dropdown) -translate-x-1/2 flex flex-col gap-1 rounded-xl border border-border bg-popover p-1.5 shadow-xl transition-none animate-in fade-in zoom-in-95 duration-100"
               style={{
-                top: Math.min(Math.max(56, menu.y - 12), window.innerHeight - 24),
-                left: Math.min(Math.max(132, menu.x), window.innerWidth - 132),
+                top: menu.bottom + 8,
+                left: Math.min(Math.max(160, menu.x), window.innerWidth - 160),
               }}
               onMouseDown={(e) => e.stopPropagation()}
             >
-              <div className="mb-2 flex items-center justify-between px-1">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  {menu.mode === "create" ? "Highlight" : "Edit highlight"}
-                </span>
-                <button
-                  onClick={() => setMenu(null)}
-                  className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-                  aria-label="Close"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-
-              {menu.mode === "create" && onAskAi && (
-                <div className="mb-2 border-b border-border pb-2">
-                  <div className="mb-1.5 flex items-center gap-1 px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    <Sparkles className="h-3 w-3" /> Ask AI
-                  </div>
-                  <div className="flex flex-wrap gap-1 px-1">
-                    {[
-                      { label: "Ask AI", action: undefined },
-                      { label: "Summarize", action: "summary" },
-                      { label: "Explain", action: "explain" },
-                      { label: "Notes", action: "notes" },
-                      { label: "Mermaid", action: "mermaid" },
-                      { label: "Rewrite", action: "rewrite" },
-                    ].map((item) => (
-                      <button
-                        key={item.label}
-                        onClick={() => {
-                          onAskAi({ selection: menu.text, actionId: item.action });
-                          window.getSelection()?.removeAllRanges();
-                          setMenu(null);
-                        }}
-                        className="rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="mb-2 flex items-center gap-1.5 px-1">
+              <div className="flex items-center gap-1">
+                {/* Colors */}
                 {HL_COLORS.map((color) => {
-                  const active = menu.mode === "edit" && menu.hl.color === color;
+                  const active = menu.mode === "edit" ? menu.hl.color === color : false;
                   return (
                     <button
                       key={color}
                       aria-label={`Highlight ${color}`}
-                      className={`h-6 w-6 rounded-full transition-transform hover:scale-110 ${
-                        active
-                          ? "ring-2 ring-foreground ring-offset-1 ring-offset-popover"
-                          : "border border-border/60"
-                      }`}
-                      style={{ backgroundColor: color }}
                       onClick={() => {
                         if (menu.mode === "create") {
                           onAddHighlight({
@@ -1377,15 +1500,157 @@ function MarkdownViewerImpl({
                         }
                         setMenu(null);
                       }}
+                      className={cn(
+                        "h-5 w-5 rounded-full border-2 border-transparent transition-transform hover:scale-110",
+                        active && "border-foreground",
+                      )}
+                      style={{ backgroundColor: color }}
                     />
                   );
                 })}
+
+                <div className="mx-1 h-4 w-px bg-border" />
+
+                {/* Actions */}
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(
+                      menu.mode === "create" ? menu.text : menu.hl.text,
+                    );
+                    setMenu(null);
+                  }}
+                  className="flex h-7 items-center justify-center rounded px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  title="Copy"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+
+                {menu.mode === "create" && onCopyToNotes && (
+                  <button
+                    onClick={copyToNotes}
+                    className="flex h-7 items-center justify-center rounded px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    title="Copy selection to notes"
+                  >
+                    <NotebookPen className="h-3.5 w-3.5" />
+                  </button>
+                )}
+
+                {menu.mode === "edit" && (
+                  <button
+                    onClick={() => {
+                      onRemoveHighlight(menu.hl.id);
+                      setMenu(null);
+                    }}
+                    className="flex h-7 items-center justify-center rounded px-1.5 text-destructive/80 hover:bg-destructive/10 hover:text-destructive"
+                    title="Remove highlight"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      aria-label="More highlight actions"
+                      className="flex h-7 items-center justify-center rounded px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  {/* Portalled to <body>, so it needs --z-menu to sit above this
+                      --z-dropdown popover; opening to the side keeps it from
+                      covering the highlight controls. */}
+                  <DropdownMenuContent
+                    side="right"
+                    align="start"
+                    sideOffset={8}
+                    className="z-(--z-menu)"
+                  >
+                    <DropdownMenuItem
+                      onClick={() => {
+                        inspect(menu.mode === "create" ? menu.text : menu.hl.text);
+                        setMenu(null);
+                      }}
+                    >
+                      <Crosshair /> Inspect source
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        copySource(menu.mode === "create" ? menu.text : menu.hl.text);
+                        setMenu(null);
+                      }}
+                    >
+                      <Code2 /> Copy code
+                    </DropdownMenuItem>
+                    {menu.mode === "create" && onAskAi && (
+                      <>
+                        <DropdownMenuSeparator />
+                        {/* A disclosure row, not a submenu: the actions unfold in
+                            place, and choosing the row keeps the menu open. */}
+                        <DropdownMenuItem
+                          aria-expanded={aiActionsOpen}
+                          onSelect={(e) => {
+                            e.preventDefault();
+                            setAiActionsOpen((open) => !open);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                              e.preventDefault();
+                              setAiActionsOpen(e.key === "ArrowRight");
+                            }
+                          }}
+                        >
+                          <Sparkles /> AI
+                          <ChevronRight
+                            className={cn(
+                              "ml-auto text-muted-foreground transition-transform duration-150",
+                              aiActionsOpen && "rotate-90",
+                            )}
+                          />
+                        </DropdownMenuItem>
+                        {aiActionsOpen &&
+                          [
+                            { label: "Ask AI", action: undefined },
+                            { label: "Summarize", action: "summary" },
+                            { label: "Explain", action: "explain" },
+                            { label: "Rewrite", action: "rewrite" },
+                            { label: "Notes", action: "notes" },
+                            { label: "Mermaid", action: "mermaid" },
+                          ].map((item) => (
+                            <DropdownMenuItem
+                              key={item.label}
+                              inset
+                              className="animate-in fade-in slide-in-from-top-1 duration-150"
+                              onClick={() => {
+                                onAskAi({ selection: menu.text, actionId: item.action });
+                                window.getSelection()?.removeAllRanges();
+                                setMenu(null);
+                              }}
+                            >
+                              {item.label}
+                            </DropdownMenuItem>
+                          ))}
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {menu.mode === "edit" && (
+                  <button
+                    onClick={() => setMenu(null)}
+                    className="flex h-7 items-center justify-center rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground ml-auto"
+                    aria-label="Close"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
               </div>
 
-              <div className="mb-2 flex items-center gap-1.5 rounded-md border border-border bg-background px-2">
-                <Tag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              {/* Optional Label Input if they want to add one quickly */}
+              <div className="flex items-center gap-1.5 rounded bg-muted/30 px-2 py-0.5 border border-transparent focus-within:border-border transition-colors">
+                <Tag className="h-3 w-3 text-muted-foreground" />
                 <input
-                  value={menu.label}
+                  value={menu.label || ""}
                   onChange={(e) => setMenu((m) => (m ? { ...m, label: e.target.value } : m))}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -1407,103 +1672,12 @@ function MarkdownViewerImpl({
                       setMenu(null);
                     }
                   }}
-                  placeholder="Add a label (optional)"
-                  className="w-full bg-transparent py-1.5 text-xs outline-none placeholder:text-muted-foreground"
+                  placeholder="Add a label..."
+                  className="w-full bg-transparent py-1 text-xs outline-none placeholder:text-muted-foreground/60"
                 />
               </div>
-
-              <div className="mb-2 grid grid-cols-2 gap-1">
-                <button
-                  onClick={() => inspect(menu.mode === "create" ? menu.text : menu.hl.text)}
-                  title="Open the editor with this text selected"
-                  className="flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-                >
-                  <Crosshair className="h-3.5 w-3.5" /> Inspect source
-                </button>
-                <button
-                  onClick={() => copySource(menu.mode === "create" ? menu.text : menu.hl.text)}
-                  title="Copy the source code behind this text"
-                  className="flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-                >
-                  <Code2 className="h-3.5 w-3.5" /> Copy code
-                </button>
-              </div>
-
-              <div className="flex items-center gap-1">
-                {/* Saving lives here rather than on a star pinned to every
-                    block: the reader has already told us what they care about
-                    by selecting it, and a selection can be any range — a
-                    paragraph, part of a table, a whole section — where a block
-                    star could only ever offer the block it sat on. */}
-                {savedCtx.enabled && menu.mode === "create" && (
-                  <button
-                    onClick={() => {
-                      savedCtx.toggle({
-                        kind: "block",
-                        blockType: "text",
-                        title: savedExcerpt(menu.text, 90),
-                        text: menu.text,
-                        subtopicId: savedCtx.subtopicId,
-                        start: menu.start,
-                        end: menu.end,
-                        prefix: menu.prefix,
-                        suffix: menu.suffix,
-                      });
-                      window.getSelection()?.removeAllRanges();
-                      setMenu(null);
-                    }}
-                    title="Save this selection"
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    <Star className="h-3.5 w-3.5" /> Save
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(
-                      menu.mode === "create" ? menu.text : menu.hl.text,
-                    );
-                    setMenu(null);
-                  }}
-                  className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </button>
-                {menu.mode === "edit" && (
-                  <button
-                    onClick={() => {
-                      onRemoveHighlight(menu.hl.id);
-                      setMenu(null);
-                    }}
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" /> Remove
-                  </button>
-                )}
-                {menu.mode === "create" && (
-                  <button
-                    onClick={() => {
-                      onAddHighlight({
-                        text: menu.text,
-                        color: HL_COLORS[0],
-                        label: menu.label.trim() || undefined,
-                        subtopicId: singleMode ? undefined : activeChunk.id,
-                        start: menu.start,
-                        end: menu.end,
-                        prefix: menu.prefix,
-                        suffix: menu.suffix,
-                      });
-                      window.getSelection()?.removeAllRanges();
-                      setMenu(null);
-                    }}
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-foreground px-2 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90"
-                  >
-                    Highlight
-                  </button>
-                )}
-              </div>
             </div>,
-            document.body,
+            menuContainer ?? document.body,
           )}
 
         {lightbox && <Lightbox {...lightbox} onClose={() => setLightbox(null)} />}
@@ -1601,29 +1775,28 @@ function MarkdownViewerImpl({
                 aria-busy={settled ? undefined : true}
               >
                 <MarkdownRenderContext.Provider value={renderCtx}>
-                  <SavedContext.Provider value={savedCtx}>
-                    <CollapseContext.Provider value={collapseCtx}>
-                      {/* Numbered from the whole document, not the page on
+                  <CollapseContext.Provider value={collapseCtx}>
+                    {/* Numbered from the whole document, not the page on
                           screen, so equation numbers and references stay put
                           as the reader pages through. */}
-                      <MathProvider
-                        source={file.content}
-                        preferences={mathPreferences}
-                        navigateToEquation={navigateToEquation}
-                      >
-                        <TaskContext.Provider value={taskContext}>
-                          <ProgressiveMarkdown
-                            source={markdownSource}
-                            urlTransform={mediaUrlTransform}
-                            remarkPlugins={remarkPlugins}
-                            rehypePlugins={rehypePlugins}
-                            components={markdownComponents}
-                            onRendered={setRenderedSource}
-                          />
-                        </TaskContext.Provider>
-                      </MathProvider>
-                    </CollapseContext.Provider>
-                  </SavedContext.Provider>
+                    <MathProvider
+                      source={file.content}
+                      preferences={mathPreferences}
+                      navigateToEquation={navigateToEquation}
+                    >
+                      <TaskContext.Provider value={taskContext}>
+                        <ProgressiveMarkdown
+                          addressing={addressing}
+                          source={markdownSource}
+                          urlTransform={mediaUrlTransform}
+                          remarkPlugins={remarkPlugins}
+                          rehypePlugins={rehypePlugins}
+                          components={markdownComponents}
+                          onRendered={setRenderedSource}
+                        />
+                      </TaskContext.Provider>
+                    </MathProvider>
+                  </CollapseContext.Provider>
                 </MarkdownRenderContext.Provider>
               </div>
             )}
