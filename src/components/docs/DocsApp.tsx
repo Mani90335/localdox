@@ -101,6 +101,7 @@ const SettingsPage = lazy(() =>
  *  opens the dialog. DocsApp is the route component, so it remounts on the way
  *  to /settings and nothing held inside it survives to be read at mount. */
 let pendingSettingsTab: "workspace" | undefined;
+let pendingSettingsFocus = false;
 const AskAiPanel = lazy(() =>
   import("@/services/ai/AskAiPanel").then((m) => ({ default: m.AskAiPanel })),
 );
@@ -486,6 +487,7 @@ export function DocsApp() {
   const location = useLocation();
   const navigate = useNavigate();
   const showSettings = location.pathname === "/settings";
+  const mountedSettingsRoute = useRef(showSettings);
   // Saved is a page of its own rather than a tab inside settings: it is
   // something the reader comes back to and reads, not a preference they set
   // once. Settings keeps only the clear-everything control.
@@ -3103,9 +3105,23 @@ flowchart LR
   const closeSettings = useCallback(() => {
     // Spent: the next plain open starts where it always did.
     pendingSettingsTab = undefined;
+    pendingSettingsFocus = true;
     if (navHistoryRef.current.canBack) navHistoryRef.current.back();
     else navigate({ to: "/" });
   }, [navigate]);
+
+  // Settings changes routes, so the invoking button can be replaced. Restore
+  // focus after the destination has mounted and finished loading its chrome.
+  useEffect(() => {
+    if (!pendingSettingsFocus || mountedSettingsRoute.current || showSettings || booting) return;
+    const opener = Array.from(
+      document.querySelectorAll<HTMLElement>('button[aria-label="Settings"]'),
+    ).find((button) => button.getClientRects().length > 0);
+    if (opener) {
+      opener.focus({ preventScroll: true });
+      pendingSettingsFocus = false;
+    }
+  }, [showSettings, booting]);
 
   // Put the app into a recorded destination. This is the inverse of `push`: it
   // restores the route, the document, the section, the search term and the

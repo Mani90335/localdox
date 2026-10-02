@@ -1,0 +1,71 @@
+/* The preview palettes stay independent of the selected app theme. */
+.settings-theme-preview {
+  --preview-background: oklch(1 0 0);
+  --preview-foreground: oklch(0.21 0.02 265);
+  --preview-rail: oklch(0.965 0.005 265);
+  --preview-line: oklch(0.86 0.008 265);
+  background: var(--preview-background);
+  color: var(--preview-foreground);
+  border-color: var(--preview-line);
+}
+
+.settings-theme-preview[data-theme-preview="dark"] {
+  --preview-background: oklch(0.19 0.025 265);
+  --preview-foreground: oklch(0.94 0.008 265);
+  --preview-rail: oklch(0.24 0.025 265);
+  --preview-line: oklch(0.36 0.025 265);
+}
+
+.settings-preview-rail {
+  background: var(--preview-rail);
+  border-color: var(--preview-line);
+}
+
+.settings-preview-line {
+  background: var(--preview-line);
+}
+
+.settings-panel[hidden] {
+  display: none;
+}
+
+.settings-panel :is(button, input, select, a):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.settings-panel {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .settings-overlay {
+    animation: settings-fade-in 150ms ease-out;
+  }
+
+  .settings-dialog {
+    animation: settings-fade-in 180ms ease-out;
+  }
+
+  .settings-panel[data-state="active"] {
+    animation: settings-fade-in 120ms ease-out;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-dialog *,
+  .settings-dialog *::before,
+  .settings-dialog *::after {
+    transition: none !important;
+  }
+}
+
+@keyframes settings-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
