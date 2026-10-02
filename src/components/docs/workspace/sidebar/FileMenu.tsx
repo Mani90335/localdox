@@ -125,7 +125,7 @@ export function FileMenu({
            remove) was unreachable there. `coarse:opacity-100` restores it, and
            the ::before pads the 24px glyph to a 44px target; growing the button
            itself would have re-flowed every row in the tree. */
-        className={`relative flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground coarse:before:absolute coarse:before:-inset-2.5 coarse:before:content-[''] ${open ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100 coarse:opacity-100"}`}
+        className={`relative flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:before:absolute coarse:before:-inset-2.5 coarse:before:content-[''] ${open ? "opacity-100" : "opacity-100 focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 coarse:opacity-100"}`}
         aria-label="Options"
       >
         <MoreVertical className="h-4 w-4" />

@@ -11,6 +11,11 @@ interface WorkspaceStripProps {
   currentId: string | null;
   onSelect: (id: string) => void;
   className?: string;
+  /**
+   * "sm" = bare 28px avatars with no visible label, for the sidebar footer's
+   * single row. The name stays as the button's accessible label and tooltip.
+   */
+  size?: "md" | "sm";
 }
 
 /**
@@ -24,7 +29,9 @@ export function WorkspaceStrip({
   currentId,
   onSelect,
   className = "",
+  size = "md",
 }: WorkspaceStripProps) {
+  const sm = size === "sm";
   const rowRef = useRef<HTMLDivElement>(null);
   useMouseScroll(rowRef);
   return (
@@ -32,7 +39,7 @@ export function WorkspaceStrip({
     // row back to the nearest avatar mid-gesture, so it is touch-only.
     <div
       ref={rowRef}
-      className={`flex select-none gap-3 overflow-x-auto px-0.5 py-1.5 [scrollbar-width:none] coarse:snap-x [&::-webkit-scrollbar]:hidden ${className}`}
+      className={`flex select-none ${sm ? "gap-1" : "gap-3"} overflow-x-auto px-0.5 py-1.5 [scrollbar-width:none] coarse:snap-x [&::-webkit-scrollbar]:hidden ${className}`}
     >
       {workspaces.map((ws) => {
         const isCurrent = ws.id === currentId;
@@ -44,13 +51,17 @@ export function WorkspaceStrip({
             title={ws.name}
             // Scaling from the bottom edge keeps the top of the avatar fixed on
             // hover, so it never grows up into whatever sits just above the row.
-            className="flex shrink-0 origin-bottom snap-start flex-col items-center gap-1.5 rounded-lg px-0.5 transition-transform duration-150 ease-out hover:scale-105 active:scale-95"
+            className={`flex shrink-0 origin-bottom snap-start flex-col items-center gap-1.5 rounded-lg px-0.5 transition-transform duration-150 ease-out hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-95 ${
+              sm ? "coarse:p-2" : ""
+            }`}
           >
             {/* ring-inset instead of an offset ring: every avatar keeps the
                 same h-11 footprint whether or not it's active, so the strip
                 stays uniform instead of the current one looking larger. */}
             <span
-              className={`flex h-11 w-11 items-center justify-center rounded-full bg-muted text-sm font-semibold uppercase transition-colors ${
+              className={`flex items-center justify-center rounded-full bg-muted font-semibold uppercase transition-colors ${
+                sm ? "h-7 w-7 text-2xs" : "h-11 w-11 text-sm"
+              } ${
                 isCurrent
                   ? "text-foreground ring-2 ring-inset ring-primary/60"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -59,9 +70,13 @@ export function WorkspaceStrip({
               {initials(ws.name)}
             </span>
             <span
-              className={`max-w-14 truncate text-2xs ${
-                isCurrent ? "font-medium text-foreground" : "text-muted-foreground"
-              }`}
+              className={
+                sm
+                  ? "sr-only"
+                  : `max-w-14 truncate text-2xs ${
+                      isCurrent ? "font-medium text-foreground" : "text-muted-foreground"
+                    }`
+              }
             >
               {ws.name}
             </span>

@@ -2,6 +2,7 @@ import { embedMediaFolderIds } from "@/lib/workspace/embed-media";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { isEditableTarget, hasModKey } from "@/lib/platform/keyboard";
 import {
+  ChevronDown,
   ChevronRight,
   Settings,
   GripVertical,
@@ -70,6 +71,15 @@ export const DEFAULT_VIEW: SidebarView = {
  */
 /** Context-menu rows styled like the sidebar's own menus (`MenuItem`). */
 const CONTEXT_ITEM = "gap-3 rounded-lg px-2.5 py-2 text-sm";
+
+/**
+ * The sidebar's icon buttons: one size and one quiet treatment for every
+ * control in its chrome, so they read as a single toolbar. The collapsed rail
+ * in `DocsApp` uses the same class, so a control looks the same in either
+ * state.
+ */
+export const CHROME_BUTTON =
+  "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-35 coarse:h-11 coarse:w-11";
 
 const VIEW_MODES: readonly SidebarView["mode"][] = ["all", "grouped"];
 const VIEW_LABEL: Record<SidebarView["mode"], string> = {
@@ -645,14 +655,14 @@ function SidebarImpl({
     return (
       <div
         key={folder.id}
-        className={`mb-1.5 rounded-lg ${isDropTarget ? "ring-2 ring-primary/60" : ""} ${
+        className={`mb-px rounded-lg ${isDropTarget ? "ring-2 ring-primary/60" : ""} ${
           draggingFolderId === folder.id ? "opacity-40" : ""
         }`}
         {...dropTargetProps(folder.id)}
       >
         <div
           data-sidebar-folder={folder.id}
-          className={`group flex items-center gap-1 rounded-lg px-1 ${
+          className={`group flex items-center gap-1 rounded-lg px-1 transition-colors duration-150 hover:bg-sidebar-accent/50 ${
             reorderActive ? "cursor-grab active:cursor-grabbing" : ""
           } ${dragFolderId === folder.id ? "opacity-40" : ""} ${
             isReorderTarget ? "ring-2 ring-primary/60" : ""
@@ -734,24 +744,29 @@ function SidebarImpl({
           )}
           <button
             onClick={() => toggleFolder(folder.id)}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-2 pl-2 pr-1.5 text-left coarse:min-h-11"
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1.5 pl-1 pr-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:min-h-11"
             aria-expanded={!collapsed}
+            title={`${folder.name} · ${count} item${count === 1 ? "" : "s"}`}
           >
             <ChevronRight
-              className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${
+              className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
                 collapsed ? "" : "rotate-90"
               }`}
               aria-hidden
             />
             {collapsed ? (
-              <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" aria-hidden />
+              <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
             ) : (
-              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" aria-hidden />
+              <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
             )}
-            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground/80">
+            <span className="ml-1 min-w-0 flex-1 truncate text-sm text-foreground/75">
               {folder.name}
             </span>
-            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{count}</span>
+            {/* Open, the folder's contents are its count. Closed, the number is
+                the only hint of what is inside. */}
+            {collapsed && count > 0 && (
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{count}</span>
+            )}
           </button>
           {selecting ? (
             folderSelected ? (
@@ -795,11 +810,11 @@ function SidebarImpl({
           )}
         </div>
         {!collapsed && (
-          <div className="ml-4 border-l border-border pl-1">
+          <div className="ml-[0.9rem] border-l border-border/60 pl-1.5">
             {subfolders.map((child) => renderFolder(child, depth + 1))}
             {items.map(renderFileRow)}
             {count === 0 && (
-              <p className="px-2 py-2 text-xs text-muted-foreground">Empty — drag a file here.</p>
+              <p className="px-2 py-1.5 text-xs text-muted-foreground">Drag files here</p>
             )}
           </div>
         )}
@@ -842,7 +857,7 @@ function SidebarImpl({
     const isDragging = dragActive && dragIndex === realIndex;
     const isDropTarget = dragActive && overIndex === realIndex && dragIndex !== realIndex;
     return (
-      <div key={file.id} className="mb-1.5">
+      <div key={file.id} className="mb-px">
         <div
           data-sidebar-file={file.id}
           draggable={dragActive || folderDragActive}
@@ -928,27 +943,21 @@ function SidebarImpl({
               if (selecting) toggleSelection(file.id);
               else onSelect(file.id);
             }}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-2 pl-2 pr-1.5 text-left coarse:min-h-11"
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md py-1.5 pl-2 pr-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:min-h-11"
             aria-current={current ? "page" : undefined}
+            /* The type and reading time used to be a column on every row —
+               "9m", "CSV", "JSON" — repeating what the coloured glyph already
+               says and squeezing every name into an earlier ellipsis. They are
+               a hover away now, with the full name the row truncates. */
+            title={`${file.name} · ${isTextual ? `${mins} min read` : meta.label}`}
           >
             {!selecting && <KindIcon className={`h-4 w-4 shrink-0 ${meta.tone}`} aria-hidden />}
             <span
               className={`min-w-0 flex-1 truncate text-sm ${
-                current ? "font-semibold text-foreground" : "font-medium text-foreground/80"
+                current ? "font-medium text-foreground" : "text-foreground/75"
               }`}
             >
               {title}
-            </span>
-            {/* Reading time where there is text to read, the file type where
-                there is not — this column used to render an empty span for
-                every binary file, leaving half the list with a ragged, unused
-                right edge and no indication of what those rows held. */}
-            <span
-              className={`shrink-0 text-2xs tabular-nums ${
-                current ? "text-muted-foreground" : "text-muted-foreground/60"
-              } ${isTextual ? "" : "font-semibold tracking-wider"}`}
-            >
-              {isTextual ? `${mins}m` : meta.label}
             </span>
           </button>
           {!selecting ? (
@@ -1004,63 +1013,53 @@ function SidebarImpl({
   return (
     <aside className="flex h-full flex-col">
       {docked ? (
-        <>
-          {/* Brand row: the product's name owns the top of the rail, with the
-              controls that act on the whole app — search and the collapse
-              toggle — sitting opposite it. */}
-          <div className="flex items-center gap-1 px-4 pt-4">
-            <span className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight text-foreground">
-              Localdox
-            </span>
-            {onOpenSearch && (
-              <button
-                onClick={onOpenSearch}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11"
-                aria-label="Search docs"
-                title="Search docs"
-              >
-                <Search className="h-4.5 w-4.5" />
-              </button>
-            )}
-            {onToggleSidebar && (
-              <button
-                onClick={onToggleSidebar}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11"
-                aria-label="Toggle sidebar"
-                title="Toggle sidebar"
-              >
-                <PanelLeft className="h-4.5 w-4.5" />
-              </button>
-            )}
-          </div>
-
-          {/* History controls. Back and forward act on the workspace as a whole
-              rather than on the open document, so they belong with the chrome
-              here rather than in the viewer's own header. */}
-          <div className="flex items-center gap-1 px-3 pt-2">
+        /* One row of chrome, not two. The collapse toggle comes first so it
+           sits exactly where the collapsed rail's expand button does: toggling
+           twice never moves the pointer. Back and forward act on the whole
+           workspace, so they ride beside it; search sits opposite. There is no
+           wordmark — the reader already knows which app they are in, and it
+           was the loudest thing in the column while doing nothing. The save
+           state moved to the footer, beside the workspace it describes. */
+        <div className="flex items-center gap-0.5 px-2.5 pt-2.5">
+          {onToggleSidebar && (
             <button
-              onClick={navHistory.back}
-              disabled={!navHistory.canBack}
-              aria-label={navHistory.backLabel}
-              title={navHistory.backLabel}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11 disabled:pointer-events-none disabled:opacity-40"
+              onClick={onToggleSidebar}
+              className={CHROME_BUTTON}
+              aria-label="Toggle sidebar"
+              title="Collapse sidebar"
             >
-              <ArrowLeft className="h-4 w-4" />
+              <PanelLeft className="h-4 w-4" />
             </button>
+          )}
+          <button
+            onClick={navHistory.back}
+            disabled={!navHistory.canBack}
+            aria-label={navHistory.backLabel}
+            title={navHistory.backLabel}
+            className={CHROME_BUTTON}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <button
+            onClick={navHistory.forward}
+            disabled={!navHistory.canForward}
+            aria-label={navHistory.forwardLabel}
+            title={navHistory.forwardLabel}
+            className={CHROME_BUTTON}
+          >
+            <ArrowRight className="h-4 w-4" />
+          </button>
+          {onOpenSearch && (
             <button
-              onClick={navHistory.forward}
-              disabled={!navHistory.canForward}
-              aria-label={navHistory.forwardLabel}
-              title={navHistory.forwardLabel}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11 disabled:pointer-events-none disabled:opacity-40"
+              onClick={onOpenSearch}
+              className={`ml-auto ${CHROME_BUTTON}`}
+              aria-label="Search docs"
+              title={`Search docs (${modKeyLabel}K)`}
             >
-              <ArrowRight className="h-4 w-4" />
+              <Search className="h-4 w-4" />
             </button>
-            {saveIndicator && (
-              <div className="ml-auto flex min-w-0 items-center pr-1">{saveIndicator}</div>
-            )}
-          </div>
-        </>
+          )}
+        </div>
       ) : null}
 
       {/* The list's own header: which view is showing, and the one control for
@@ -1068,18 +1067,22 @@ function SidebarImpl({
           buttons above; as a `+` beside the label they take no vertical space
           and sit next to the list they add to. */}
       {onView && !search && (
-        <div className="flex items-center gap-1 px-3 pb-1 pt-3">
+        <div className="flex items-center gap-1 pb-1 pl-3 pr-2.5 pt-4">
           <div ref={viewMenuRef} className="relative min-w-0 flex-1">
+            {/* Sized to its label rather than the full row, so the hover and
+                the click target describe the same thing: the picker. */}
             <button
               onClick={() => setViewMenuOpen((o) => !o)}
               aria-expanded={viewMenuOpen}
-              className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground coarse:min-h-11"
+              aria-haspopup="menu"
+              className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:min-h-11"
             >
               <span className="truncate">{VIEW_LABEL[view.mode]}</span>
-              <ChevronRight
+              <ChevronDown
                 className={`h-3.5 w-3.5 shrink-0 opacity-60 transition-transform ${
-                  viewMenuOpen ? "rotate-90" : ""
+                  viewMenuOpen ? "rotate-180" : ""
                 }`}
+                aria-hidden
               />
             </button>
 
@@ -1250,60 +1253,52 @@ function SidebarImpl({
         </ContextMenu>
       )}
 
-      <div className="flex items-center gap-2 border-t border-sidebar-border p-2">
-        {/* Settings apply to whichever workspace is open, so its trigger sits
-            fused to that workspace's own avatar rather than floating on its
-            own — the pairing reads as "settings for here". Everywhere else to
-            switch to lives in the strip beside it. */}
-        {currentWorkspace && (
-          // Same origin-bottom hover magnify as the strip's own avatars, so the
-          // current workspace doesn't sit dead while everything beside it
-          // responds to the pointer.
-          <div className="flex shrink-0 origin-bottom flex-col items-center gap-1.5 transition-transform duration-150 ease-out hover:scale-105">
-            <div className="flex items-center gap-0.5 rounded-full border border-primary/35 bg-sidebar-accent p-1">
-              <span
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-background text-xs font-semibold uppercase text-sidebar-foreground"
-                title={currentWorkspace.name}
-              >
-                {initials(currentWorkspace.name)}
-              </span>
-              <button
-                onClick={() => onOpenSettings()}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-sidebar-foreground"
-                aria-label={`Settings for ${currentWorkspace.name}`}
-                title="Settings"
-              >
-                <Settings className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <span className="max-w-19 truncate text-2xs font-medium text-sidebar-foreground">
+      {/* One row: where you are, whether it is safe, where else you could be,
+          and settings. It used to be a pill-shaped avatar with a fused gear
+          and the name in 10px type underneath — three stacked layers of chrome
+          to say "My workspace". The save state lives here because it is a
+          fact about this workspace, not about the open document. */}
+      <div className="flex items-center gap-1 border-t border-sidebar-border py-2 pl-2.5 pr-2.5">
+        {currentWorkspace ? (
+          <div className="flex min-w-0 flex-1 items-center gap-2 pl-0.5">
+            <span
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-2xs font-semibold uppercase text-sidebar-foreground ring-1 ring-inset ring-primary/40"
+              aria-hidden
+            >
+              {initials(currentWorkspace.name)}
+            </span>
+            <span
+              className="min-w-0 truncate text-sm font-medium text-foreground/90"
+              title={currentWorkspace.name}
+            >
               {currentWorkspace.name}
             </span>
+            {saveIndicator && <span className="flex shrink-0 items-center">{saveIndicator}</span>}
           </div>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-center">{saveIndicator}</div>
         )}
+        {/* The other workspaces stay one tap away — Arc-style instant
+            switching — but as small avatars in the same row rather than a
+            second band of labelled circles. Each keeps its name as its
+            accessible label and tooltip. */}
         {onSwitchWorkspace && otherWorkspaces.length > 0 && (
-          <>
-            {/* Full height of the row, so it divides the two groups (avatars
-                and names) rather than floating between avatar and label. */}
-            <div className="w-px shrink-0 self-stretch bg-sidebar-border" />
-            <WorkspaceStrip
-              workspaces={otherWorkspaces}
-              currentId={null}
-              onSelect={onSwitchWorkspace}
-              className="min-w-0 flex-1"
-            />
-          </>
+          <WorkspaceStrip
+            size="sm"
+            workspaces={otherWorkspaces}
+            currentId={null}
+            onSelect={onSwitchWorkspace}
+            className="min-w-0 max-w-[45%] shrink"
+          />
         )}
-        {!currentWorkspace && (
-          <button
-            onClick={() => onOpenSettings()}
-            className="shrink-0 rounded-md p-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-            aria-label="Settings"
-            title="Settings"
-          >
-            <Settings className="h-4 w-4" />
-          </button>
-        )}
+        <button
+          onClick={() => onOpenSettings()}
+          className={CHROME_BUTTON}
+          aria-label={currentWorkspace ? `Settings for ${currentWorkspace.name}` : "Settings"}
+          title="Settings"
+        >
+          <Settings className="h-4 w-4" />
+        </button>
       </div>
     </aside>
   );

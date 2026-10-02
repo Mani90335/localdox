@@ -59,7 +59,7 @@ export function FolderMenu({
           e.stopPropagation();
           setOpen((o) => !o);
         }}
-        className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground md:opacity-0 md:group-hover:opacity-100"
+        className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 coarse:opacity-100"
         aria-label="Folder options"
       >
         <MoreVertical className="h-4 w-4" />

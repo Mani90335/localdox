@@ -4,7 +4,7 @@ import { ensureEmbedMediaFolder } from "@/lib/workspace/embed-media";
 import type { DocumentUpdate } from "@/services/office-editing";
 import { Fragment, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { Menu, X, Search, Undo2, Settings } from "lucide-react";
+import { PanelLeft, X, Search, Undo2, Settings } from "lucide-react";
 
 import {
   ESCAPE_DEPTH,
@@ -12,7 +12,13 @@ import {
   useNavHistoryState,
   type NavEntry,
 } from "@/hooks/use-nav-history";
-import { Sidebar, AddMenu, DEFAULT_VIEW, type SidebarView } from "./workspace/Sidebar";
+import {
+  Sidebar,
+  AddMenu,
+  CHROME_BUTTON,
+  DEFAULT_VIEW,
+  type SidebarView,
+} from "./workspace/Sidebar";
 import { MarkdownViewer, preloadMarkdownViewer } from "./viewer/MarkdownViewerLazy";
 import { preloadMarkdownEditor } from "./editor/MarkdownEditorLazy";
 import { PaneDocument } from "./viewer/PaneDocument";
@@ -150,6 +156,7 @@ import {
   hasModKey,
   requestIdleCallbackSafe,
   cancelIdleCallbackSafe,
+  modKeyLabel,
 } from "@/lib/platform/keyboard";
 import {
   persistence,
@@ -4344,7 +4351,13 @@ flowchart LR
                   currentWorkspaceId={workspaceId}
                   onSwitchWorkspace={switchWorkspace}
                   docked
-                  saveIndicator={saveState ? <SaveIndicator state={saveState} /> : null}
+                  // Quiet while things are fine — an icon whose tooltip
+                  // explains it — and spelled out only when a save failed.
+                  saveIndicator={
+                    saveState ? (
+                      <SaveIndicator state={saveState} compact={saveState !== "error"} />
+                    ) : null
+                  }
                   onOpenSearch={() => setSearchOpen(true)}
                   onToggleSidebar={toggleSidebar}
                   search={searchPanelState}
@@ -4352,41 +4365,36 @@ flowchart LR
               </div>
 
               <div
-                className="absolute inset-y-0 left-0 flex w-14 flex-col items-center gap-4 border-r border-border bg-background py-3 z-20 transition-opacity duration-200"
+                // Same padding and button class as the expanded sidebar's
+                // top row, so the toggle, and every icon, is the same size in
+                // the same place in both states.
+                className="absolute inset-y-0 left-0 z-20 flex w-14 flex-col items-center gap-0.5 border-r border-border bg-background py-2.5 transition-opacity duration-200"
                 style={{
                   opacity: sidebarCollapsed ? 1 : 0,
                   pointerEvents: sidebarCollapsed ? "auto" : "none",
                 }}
               >
+                {/* The panel glyph, not a hamburger: it is the same control as
+                  the expanded sidebar's collapse button, in the same spot. */}
                 <button
                   onClick={() => setSidebarCollapsed(false)}
-                  className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className={CHROME_BUTTON}
                   aria-label="Expand sidebar"
                   title="Expand sidebar"
                 >
-                  <Menu className="h-4 w-4" />
+                  <PanelLeft className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => {
                     setSidebarCollapsed(false);
                     setSearchOpen(true);
                   }}
-                  className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className={CHROME_BUTTON}
                   aria-label="Search docs"
-                  title="Search docs"
+                  title={`Search docs (${modKeyLabel}K)`}
                 >
                   <Search className="h-4 w-4" />
                 </button>
-                {saveState && (
-                  <span
-                    // The rail stays mounted behind the expanded sidebar;
-                    // only the visible copy of the status is read out.
-                    aria-hidden={!sidebarCollapsed}
-                    className="flex h-8 w-8 items-center justify-center"
-                  >
-                    <SaveIndicator state={saveState} compact />
-                  </span>
-                )}
                 {/* The same three ways to add as the expanded sidebar offers —
                   the rail used to jump straight to the file picker, which was
                   the one option of the three you could not undo by closing a
@@ -4398,12 +4406,25 @@ flowchart LR
                   onCreateBoard={() => createBoardFile(null)}
                   onCreateFolder={promptNewFolderFromRail}
                   onUpload={() => inputRef.current?.click()}
-                  buttonClassName="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  buttonClassName={CHROME_BUTTON}
                 />
                 <div className="flex-1" />
+                {/* Status sits with the workspace it describes, as it does in
+                  the expanded footer — not among the actions, where a lone
+                  check mark read as one more button. */}
+                {saveState && (
+                  <span
+                    // The rail stays mounted behind the expanded sidebar;
+                    // only the visible copy of the status is read out.
+                    aria-hidden={!sidebarCollapsed}
+                    className="flex h-8 w-8 items-center justify-center"
+                  >
+                    <SaveIndicator state={saveState} compact />
+                  </span>
+                )}
                 <button
                   onClick={() => openSettings()}
-                  className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className={CHROME_BUTTON}
                   aria-label="Settings"
                   title="Settings"
                 >
