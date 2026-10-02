@@ -18,8 +18,7 @@ export interface PdfBookProps {
  * `import("pdfjs-dist")` to an effect — this lazy boundary alone is not
  * enough, since a static top-level `import("pdfjs-dist")` *inside*
  * `./PdfReader` would still make pdf.js a static edge in that module's own
- * graph once loaded. Belt and suspenders, exactly like `Board`'s
- * `useExcalidrawModule`.
+ * graph once loaded. Belt and suspenders.
  */
 const PdfReader = lazy(async () => {
   // Typed from the local `PdfBookProps` so both branches share one signature —
@@ -35,7 +34,7 @@ const PdfReader = lazy(async () => {
 function PdfBookPlaceholder() {
   return (
     <div
-      className="flex h-[calc(100dvh-7.5rem)] w-full items-center justify-center bg-muted/20"
+      className="flex h-[calc(100dvh-var(--app-chrome-h)-3.5rem)] w-full items-center justify-center bg-muted/20"
       role="status"
       aria-label="Loading PDF"
     >

@@ -22,7 +22,7 @@ import {
   readSvgViewBox,
 } from "./mermaid-performance";
 import { clampStageRatio, isTallStage, stageBoxStyle, type DiagramSize } from "./stage-ratio";
-import { TRAY_GUTTER, ZOOM_LIMIT, widthCap } from "./mermaid-diagram-helpers";
+import { TRAY_GUTTER, ZOOM_LIMIT, centredBoxCap, widthCap } from "./mermaid-diagram-helpers";
 import { ZoomControls } from "./ZoomControls";
 import { PerformanceDiagramImage } from "./PerformanceDiagramImage";
 import { StageSpinner } from "./StageStatus";
@@ -317,10 +317,7 @@ export function StaticStage({
   }
 
   return (
-    <div
-      className="group/stage relative h-full w-full"
-      style={fill || !ratio ? undefined : { maxWidth: widthCap(ratio), marginInline: "auto" }}
-    >
+    <div className="group/stage relative h-full w-full">
       {/* Pinned rather than hover-gated, unlike the zoom tray below: search
           and select are navigation the reader has to be able to find, and the
           isolation banner is state feedback that must stay visible while it
@@ -368,7 +365,14 @@ export function StaticStage({
         className={`overflow-hidden rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
           fill ? "h-full min-h-0 w-full" : "w-full box-content"
         }${colored ? " diagram-colored" : ""}`}
-        style={fill ? undefined : stageBoxStyle(ratio ?? 0.42, TRAY_GUTTER, size ?? undefined)}
+        style={
+          fill
+            ? undefined
+            : {
+                ...stageBoxStyle(ratio ?? 0.42, TRAY_GUTTER, size ?? undefined),
+                ...centredBoxCap(ratio ? widthCap(ratio) : undefined),
+              }
+        }
       />
       {picker && (
         <DiagramNodeColorPopover

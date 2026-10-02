@@ -1,13 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronRight,
-  Check,
-  CheckSquare,
   Columns2,
   FileText,
   Folder,
   FolderInput,
-  GripVertical,
   MoreVertical,
   Pencil,
   Share2,
@@ -37,9 +34,6 @@ export function FileMenu({
   onDownload,
   formats = ["original"],
   onShare,
-  reordering,
-  onToggleReorder,
-  onSelectMode,
 }: {
   /** Show this document in a column of its own, beside what is being read. */
   onAddToSplit?: () => void;
@@ -51,7 +45,14 @@ export function FileMenu({
   conversionDisabled?: boolean;
   hasMarkdownCopy?: boolean;
   onOpenMarkdown?: () => void;
-  onRename: () => void;
+  /**
+   * Absent for documents whose editor already carries a name field (Markdown
+   * and plain text): renaming lives where the document is being worked on,
+   * and a second route to it here was one more row to read past. Documents
+   * with no such editor — a PDF, an image — keep it, or they could never be
+   * renamed at all.
+   */
+  onRename?: () => void;
   /**
    * Send the document to the Bin. Recoverable for 30 days, which is why this
    * replaced both "Archive" and "Delete" — two ways to make a file go away,
@@ -73,9 +74,6 @@ export function FileMenu({
   onDownload?: (format: ExportFormat) => void;
   formats?: ExportFormat[];
   onShare?: () => void;
-  reordering?: boolean;
-  onToggleReorder?: () => void;
-  onSelectMode?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   // Which flyout is open beside the menu, and the row it hangs off.
@@ -127,7 +125,7 @@ export function FileMenu({
            remove) was unreachable there. `coarse:opacity-100` restores it, and
            the ::before pads the 24px glyph to a 44px target; growing the button
            itself would have re-flowed every row in the tree. */
-        className={`relative flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground coarse:before:absolute coarse:before:-inset-2.5 coarse:before:content-[''] ${open ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100 coarse:opacity-100"}`}
+        className={`relative flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:before:absolute coarse:before:-inset-2.5 coarse:before:content-[''] ${open ? "opacity-100" : "opacity-100 focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 coarse:opacity-100"}`}
         aria-label="Options"
       >
         <MoreVertical className="h-4 w-4" />
@@ -146,15 +144,17 @@ export function FileMenu({
               }}
             />
           )}
-          <MenuItem
-            icon={Pencil}
-            label="Rename"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-              onRename();
-            }}
-          />
+          {onRename && (
+            <MenuItem
+              icon={Pencil}
+              label="Rename"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                onRename();
+              }}
+            />
+          )}
           {onAddToSplit && (
             <MenuItem
               icon={Columns2}
@@ -189,32 +189,6 @@ export function FileMenu({
                 trailing={<ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
               />
             </>
-          )}
-
-          {/* How the list behaves — not about this document at all, so it sits
-              apart from the rows that are. */}
-          {(onToggleReorder || onSelectMode) && <MenuSeparator />}
-          {onToggleReorder && (
-            <MenuItem
-              icon={reordering ? Check : GripVertical}
-              label={reordering ? "Done reordering" : "Reorder"}
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onToggleReorder();
-              }}
-            />
-          )}
-          {onSelectMode && (
-            <MenuItem
-              icon={CheckSquare}
-              label="Select"
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                onSelectMode();
-              }}
-            />
           )}
 
           <MenuSeparator />

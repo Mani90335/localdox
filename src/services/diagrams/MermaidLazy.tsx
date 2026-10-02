@@ -1,4 +1,5 @@
-import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { registerDiagramSource } from "@/lib/markdown/diagram-sources";
 
 /**
  * Mermaid, loaded only when a document actually contains a diagram.
@@ -27,6 +28,12 @@ function DiagramPlaceholder({ targetRef }: { targetRef?: React.Ref<HTMLDivElemen
 export function MermaidBlock({ code, name }: { code: string; name?: string }) {
   const targetRef = useRef<HTMLDivElement>(null);
   const [nearViewport, setNearViewport] = useState(false);
+  // So a copied selection that crosses this diagram can carry its source.
+  // `display: contents` keeps the wrapper out of layout.
+  const register = useCallback(
+    (element: HTMLDivElement | null) => registerDiagramSource(element, "mermaid", code),
+    [code],
+  );
 
   useEffect(() => {
     const target = targetRef.current;
@@ -48,11 +55,15 @@ export function MermaidBlock({ code, name }: { code: string; name?: string }) {
     return () => observer.disconnect();
   }, []);
 
-  if (!nearViewport) return <DiagramPlaceholder targetRef={targetRef} />;
-
   return (
-    <Suspense fallback={<DiagramPlaceholder />}>
-      <Mermaid code={code} name={name} />
-    </Suspense>
+    <div ref={register} className="contents">
+      {!nearViewport ? (
+        <DiagramPlaceholder targetRef={targetRef} />
+      ) : (
+        <Suspense fallback={<DiagramPlaceholder />}>
+          <Mermaid code={code} name={name} />
+        </Suspense>
+      )}
+    </div>
   );
 }

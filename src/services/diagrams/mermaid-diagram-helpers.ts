@@ -1,9 +1,23 @@
+import type { CSSProperties } from "react";
 import { stageWidthCap } from "./stage-ratio";
 
 /** A tall stage takes the full column, so it gets no width cap at all. */
 export function widthCap(ratio: number): string | undefined {
   const cap = stageWidthCap(ratio);
   return cap ? `calc(${cap})` : undefined;
+}
+
+/**
+ * Cap and centre the *diagram box* — never the stage around it.
+ *
+ * The frame spans the text column, and the stage's control rows (search,
+ * select, isolation, zoom) are anchored to the stage's corners. Capping the
+ * stage itself dragged those rows into the middle of the frame along with the
+ * narrowed picture; capping only the box the diagram draws in keeps the
+ * picture proportioned and the controls in the frame's corners.
+ */
+export function centredBoxCap(cap: string | undefined): CSSProperties {
+  return cap ? { maxWidth: cap, marginInline: "auto" } : {};
 }
 
 // The control row floats over the diagram's bottom edge. Adding its height to

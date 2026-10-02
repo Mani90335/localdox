@@ -2,9 +2,9 @@ import { embedMediaFolderIds } from "@/lib/workspace/embed-media";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { isEditableTarget, hasModKey } from "@/lib/platform/keyboard";
 import {
+  ChevronDown,
   ChevronRight,
   Settings,
-  Trash2,
   GripVertical,
   Check,
   PanelLeft,
@@ -13,9 +13,19 @@ import {
   ArrowRight,
   Folder,
   FolderOpen,
+  CheckSquare,
+  X,
 } from "lucide-react";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { modKeyLabel } from "@/lib/platform/keyboard";
 import type { Highlight } from "@/lib/markdown/dom-highlighter";
-import { savedTypeLabel, type SavedEntry, type SavedItem } from "@/lib/workspace/saved-items";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import { readingMinutes } from "@/lib/markdown/markdown-utils";
 import { fileLabel, getDocumentKind, isEditableKind } from "@/lib/markdown/document-utils";
@@ -23,7 +33,7 @@ import { availableFormats, type ExportFormat } from "@/services/markdown-export"
 import { WorkspaceStrip, initials } from "./WorkspaceStrip";
 import { useNavHistory } from "@/hooks/use-nav-history";
 import { canConvertToMarkdown, latestMarkdownCopies } from "@/services/doc-conversion";
-import { kindIcon, kindMeta, savedIcon, savedByFile } from "./sidebar/file-glyphs";
+import { kindIcon, kindMeta } from "./sidebar/file-glyphs";
 import { isOutsideMenu, MenuItem, MenuPanel } from "./sidebar/menu-primitives";
 import { GroupActionMenu } from "./sidebar/GroupActionMenu";
 import { FileMenu } from "./sidebar/FileMenu";
@@ -37,15 +47,14 @@ export { AddMenu };
 
 /**
  * How the file list is presented in the sidebar.
- * - `mode` is driven by the chip row: All (flat), Grouped (by file type),
- *   or Saved (bookmarks only).
+ * - `mode` is driven by the chip row: All (flat) or Grouped (by file type).
  * - `sort`/`dir` are set from the three-dots menu. `manual` keeps the real
  *   file order so drag reordering stays meaningful.
  */
 export type SidebarView = {
   sort: "manual" | "name" | "date";
   dir: "asc" | "desc";
-  mode: "all" | "grouped" | "saved";
+  mode: "all" | "grouped";
 };
 export const DEFAULT_VIEW: SidebarView = {
   sort: "manual",
@@ -54,17 +63,28 @@ export const DEFAULT_VIEW: SidebarView = {
 };
 
 /**
- * The list's three views, in the order the picker offers them.
+ * The list's views, in the order the picker offers them.
  *
  * The Bin is not among them. It is not a way of looking at the workspace —
  * it holds documents that have left it — and it lives in Settings ▸ Storage,
  * beside the quota it is actually competing for.
  */
-const VIEW_MODES: readonly SidebarView["mode"][] = ["all", "grouped", "saved"];
+/** Context-menu rows styled like the sidebar's own menus (`MenuItem`). */
+const CONTEXT_ITEM = "gap-3 rounded-lg px-2.5 py-2 text-sm";
+
+/**
+ * The sidebar's icon buttons: one size and one quiet treatment for every
+ * control in its chrome, so they read as a single toolbar. The collapsed rail
+ * in `DocsApp` uses the same class, so a control looks the same in either
+ * state.
+ */
+export const CHROME_BUTTON =
+  "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-35 coarse:h-11 coarse:w-11";
+
+const VIEW_MODES: readonly SidebarView["mode"][] = ["all", "grouped"];
 const VIEW_LABEL: Record<SidebarView["mode"], string> = {
   all: "All files",
   grouped: "Grouped",
-  saved: "Saved",
 };
 
 /**
@@ -79,6 +99,13 @@ const FILE_DND = "application/x-localdox-file";
  * reorder drag, which carries no data at all, still matches neither.
  */
 const FOLDER_DND = "application/x-localdox-folder";
+/**
+ * Drag payload for moving a folder to another place in the list (reorder
+ * mode). Its own type so the folder drop targets, which re-parent on
+ * `FOLDER_DND`, ignore it — and so the drag carries data at all, which Firefox
+ * requires before it will start one.
+ */
+const FOLDER_REORDER_DND = "application/x-localdox-folder-order";
 
 interface Props {
   showEmbedMedia?: boolean;
@@ -90,12 +117,18 @@ interface Props {
   onSelect: (fileId: string, headingId?: string) => void;
   onAddFiles: () => void;
   onRemoveFile: (id: string) => void;
+  /**
+   * Bin a multi-selection in one go: the documents, plus any selected folders
+   * together with everything inside them. One call rather than a loop over
+   * `onRemoveFile`, so the parent can ask a single question when any of it is
+   * open on screen.
+   */
+  onRemoveSelection?: (selection: { fileIds: string[]; folderIds: string[] }) => void;
   onRenameFile: (id: string, newName: string) => void;
   /** Open a document in the editor. Only offered for editable text documents. */
   onEditFile?: (id: string) => void;
   onConvertFile?: (id: string) => void;
   convertingFileId?: string | null;
-  /** Star / unstar a whole document from its row menu. */
   /**
    * Folders the workspace has, flat. Files point at one through `folderId`;
    * anything unfiled stays at the top level under the folder rows.
@@ -114,20 +147,17 @@ interface Props {
   /** Deleting a folder keeps its documents — they return to the top level. */
   onDeleteFolder?: (id: string) => void;
   onMoveFileToFolder?: (fileId: string, folderId: string | null) => void;
-  /** Stars on documents, sections and blocks — the Saved chip. */
-  saved: SavedEntry[];
   currentWorkspaceName: string;
   canDeleteWorkspace: boolean;
   onRenameCurrentWorkspace: (name: string) => void;
   onDeleteCurrentWorkspace: () => void;
   onClearStorage: () => void;
   highlights: Highlight[];
-  /** Go to a saved item: its file, its page, then the passage itself. */
-  onOpenSaved: (item: SavedItem) => void;
-  onRemoveSaved: (id: string) => void;
   onRemoveHighlight: (id: string) => void;
   /** Open the isolated "highlights only" view for a file (text-based only). */
   onReorderFile?: (oldIndex: number, newIndex: number) => void;
+  /** Move a folder to `targetId`'s place in the list, beside it under the same parent. */
+  onReorderFolder?: (folderId: string, targetId: string) => void;
   onSortByName?: () => void;
   view?: SidebarView;
   onView?: (view: SidebarView) => void;
@@ -178,6 +208,7 @@ function SidebarImpl({
   onSelect,
   onAddFiles,
   onRemoveFile,
+  onRemoveSelection,
   onRenameFile,
   onEditFile,
   onConvertFile,
@@ -191,17 +222,15 @@ function SidebarImpl({
   onDeleteFolder,
   onMoveFileToFolder,
   onMoveFolderToFolder,
-  saved: allSaved,
   currentWorkspaceName,
   canDeleteWorkspace,
   onRenameCurrentWorkspace,
   onDeleteCurrentWorkspace,
   onClearStorage,
   highlights,
-  onOpenSaved,
-  onRemoveSaved,
   onRemoveHighlight,
   onReorderFile,
+  onReorderFolder,
   onSortByName,
   view = DEFAULT_VIEW,
   onView,
@@ -217,6 +246,7 @@ function SidebarImpl({
   onSwitchWorkspace,
   onDownloadFile,
   onDownloadFiles,
+  onMoveToWorkspace,
   onShareFile,
   onShareFiles,
   docked = false,
@@ -242,10 +272,6 @@ function SidebarImpl({
       ),
     [files, hiddenFolders],
   );
-  const saved = useMemo(
-    () => allSaved.filter((entry) => !hiddenFiles.has(entry.fileId)),
-    [allSaved, hiddenFiles],
-  );
 
   const currentWorkspace = useMemo(
     () => workspaces.find((w) => w.id === currentWorkspaceId) ?? null,
@@ -259,10 +285,6 @@ function SidebarImpl({
   // Back/forward over the workspace's own navigation trail, rendered next to
   // the sidebar toggle.
   const navHistory = useNavHistory();
-
-  // Which documents are starred as a whole — the star in each row's menu
-  // reflects this. Section and block stars are excluded: they say nothing about
-  // whether the document itself is starred.
 
   // Progressive disclosure: chapters stay collapsed unless the reader opens
   // them; the current chapter is expanded automatically. This keeps the
@@ -280,10 +302,16 @@ function SidebarImpl({
   const [reordering, setReordering] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
+  // The folder equivalents: the folder being dragged, and the folder row under
+  // the pointer (which is also where a dragged *document* lands, filed inside).
+  const [dragFolderId, setDragFolderId] = useState<string | null>(null);
+  const [overFolderId, setOverFolderId] = useState<string | null>(null);
 
-  // Multi-select mode
+  // Multi-select mode. Documents and folders are selected side by side; a
+  // selected folder stands for itself *and* everything inside it.
   const [selecting, setSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedFolderIds, setSelectedFolderIds] = useState<Set<string>>(new Set());
   useEffect(() => {
     setSelectedIds((selected) => {
       const visible = new Set([...selected].filter((id) => !hiddenFiles.has(id)));
@@ -291,11 +319,24 @@ function SidebarImpl({
     });
   }, [hiddenFiles]);
 
-  const toggleSelection = (id: string) => {
-    const next = new Set(selectedIds);
+  const toggleIn = (set: Set<string>, id: string) => {
+    const next = new Set(set);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    setSelectedIds(next);
+    return next;
+  };
+  const toggleSelection = (id: string) => setSelectedIds((prev) => toggleIn(prev, id));
+  const toggleFolderSelection = (id: string) => setSelectedFolderIds((prev) => toggleIn(prev, id));
+  const clearSelection = () => {
+    setSelecting(false);
+    setSelectedIds(new Set());
+    setSelectedFolderIds(new Set());
+  };
+  /** Enter multi-select, optionally with the row it was started from ticked. */
+  const startSelecting = (seed?: { fileId?: string; folderId?: string }) => {
+    setSelecting(true);
+    setSelectedIds(new Set(seed?.fileId ? [seed.fileId] : []));
+    setSelectedFolderIds(new Set(seed?.folderId ? [seed.folderId] : []));
   };
 
   // Folders start open — a folder the reader just made should show what lands
@@ -360,8 +401,14 @@ function SidebarImpl({
 
   // Multi-select shortcuts. Read through a ref so the listener isn't torn down
   // and rebuilt on every render just because `activeFiles` is a fresh array.
-  const activeFilesRef = useRef(activeFiles);
-  activeFilesRef.current = activeFiles;
+  const selectAll = () => {
+    setSelectedIds(new Set(activeFiles.map((f) => f.id)));
+    // Folders only exist as rows in the flat "All" list; selecting ones the
+    // reader cannot see would bin them without their knowing.
+    setSelectedFolderIds(new Set(view.mode === "all" ? folders.map((f) => f.id) : []));
+  };
+  const selectAllRef = useRef(selectAll);
+  selectAllRef.current = selectAll;
 
   useEffect(() => {
     // Only while multi-select is on: outside it, Cmd/Ctrl+A must keep meaning
@@ -371,12 +418,13 @@ function SidebarImpl({
       if (isEditableTarget(e.target)) return;
       if (hasModKey(e) && e.key.toLowerCase() === "a") {
         e.preventDefault();
-        setSelectedIds(new Set(activeFilesRef.current.map((f) => f.id)));
+        selectAllRef.current();
         return;
       }
       if (e.key === "Escape") {
         setSelecting(false);
         setSelectedIds(new Set());
+        setSelectedFolderIds(new Set());
       }
     };
     window.addEventListener("keydown", onKey);
@@ -392,15 +440,12 @@ function SidebarImpl({
   // Drag reorder is only meaningful against the real file order in a flat list,
   // so enabling it forces the view back to manual/All. Disabled entirely when
   // there is nothing to reorder or the parent gave us no reorder handler.
-  const canReorder = !!onReorderFile && total > 1;
+  const canReorder = (!!onReorderFile && total > 1) || (!!onReorderFolder && folders.length > 1);
   const toggleReorder = () => {
     setReordering((on) => {
       const next = !on;
       if (next && viewActive) onView?.(DEFAULT_VIEW);
-      if (!next) {
-        setDragIndex(null);
-        setOverIndex(null);
-      }
+      if (!next) endDrag();
       return next;
     });
   };
@@ -410,17 +455,26 @@ function SidebarImpl({
   useEffect(() => {
     if (reordering && viewActive) {
       setReordering(false);
-      setDragIndex(null);
-      setOverIndex(null);
+      endDrag();
     }
   }, [reordering, viewActive]);
 
-  const endDrag = () => {
+  function endDrag() {
     setDragIndex(null);
     setOverIndex(null);
-  };
+    setDragFolderId(null);
+    setOverFolderId(null);
+  }
   const dropOn = (targetIndex: number) => {
     if (dragIndex !== null && dragIndex !== targetIndex) {
+      // Dropped beside a document in another folder: it joins that folder as
+      // well as taking that place, which is what the reader just saw happen.
+      const moved = files[dragIndex];
+      const target = files[targetIndex];
+      const targetFolder = target?.folderId ?? null;
+      if (moved && target && (moved.folderId ?? null) !== targetFolder) {
+        onMoveFileToFolder?.(moved.id, targetFolder);
+      }
       onReorderFile?.(dragIndex, targetIndex);
     }
     endDrag();
@@ -435,8 +489,7 @@ function SidebarImpl({
               : (a.addedAt ?? 0) - (b.addedAt ?? 0);
           return base * (view.dir === "desc" ? -1 : 1);
         });
-  // Folders only shape the flat "All" list; Grouped stays grouped by file type,
-  // and Recent/Saved are their own orderings.
+  // Folders only shape the flat "All" list; Grouped stays grouped by file type.
   const knownFolderIds = new Set(folders.map((f) => f.id));
   const showFolders = view.mode === "all" && folders.length > 0;
   const rootFiles = sorted.filter((f) => !f.folderId || !knownFolderIds.has(f.folderId));
@@ -499,6 +552,80 @@ function SidebarImpl({
     });
   const rootFolders = childrenOf(null);
 
+  /** The selected folders and every folder nested under them. */
+  const selectedFolderTree = () => {
+    const tree = new Set<string>();
+    const visit = (id: string, depth: number) => {
+      if (tree.has(id) || depth > 12) return;
+      tree.add(id);
+      for (const child of childrenOf(id)) visit(child.id, depth + 1);
+    };
+    for (const id of selectedFolderIds) visit(id, 0);
+    return tree;
+  };
+  /**
+   * The documents a group action applies to: the ones ticked, plus everything
+   * inside a ticked folder. Sharing or downloading a folder means its contents.
+   */
+  const selectedFileIds = () => {
+    const tree = selectedFolderTree();
+    const ids = new Set(selectedIds);
+    for (const file of activeFiles) if (file.folderId && tree.has(file.folderId)) ids.add(file.id);
+    return [...ids];
+  };
+  const selectionTotal = activeFiles.length + (view.mode === "all" ? folders.length : 0);
+
+  /** The menu every selected row carries. One instance of the rules, whichever row opens it. */
+  const groupMenu = () => (
+    <GroupActionMenu
+      onShare={
+        onShareFiles
+          ? () => {
+              const ids = selectedFileIds();
+              if (ids.length) onShareFiles(ids);
+              clearSelection();
+            }
+          : undefined
+      }
+      onMoveToBin={() => {
+        const fileIds = selectedFileIds();
+        const folderIds = [...selectedFolderTree()];
+        if (onRemoveSelection) onRemoveSelection({ fileIds, folderIds });
+        else fileIds.forEach((id) => onRemoveFile(id));
+        clearSelection();
+      }}
+      onMoveToWorkspace={
+        onMoveToWorkspace
+          ? () => {
+              onMoveToWorkspace({ fileIds: [...selectedIds], folderIds: [...selectedFolderIds] });
+              clearSelection();
+            }
+          : undefined
+      }
+      onDownload={
+        onDownloadFile
+          ? () => {
+              const ids = selectedFileIds();
+              // A multi-file download stays the original bytes. The converted
+              // formats are per-document by nature — a batch of PDFs would mean
+              // one print dialog per file, each waiting on the last, and the
+              // reader picking a format once for documents that may not all
+              // support it.
+              if (onDownloadFiles) onDownloadFiles(ids, "original");
+              else ids.forEach((id) => onDownloadFile(id, "original"));
+              clearSelection();
+            }
+          : undefined
+      }
+      onCancel={clearSelection}
+      onSelectAll={selectAll}
+      allSelected={selectedIds.size + selectedFolderIds.size >= selectionTotal}
+    />
+  );
+
+  /** Which row a right-click landed on, so "Select" can start from it. */
+  const contextRowRef = useRef<{ fileId?: string; folderId?: string } | null>(null);
+
   /**
    * One folder and everything under it.
    *
@@ -515,98 +642,179 @@ function SidebarImpl({
     const collapsed = collapsedFolders.has(folder.id);
     const isDropTarget = dropFolderId === folder.id && draggingFolderId !== folder.id;
     const count = items.length + subfolders.length;
+    // Reorder mode turns the folder's drag from "file it inside another
+    // folder" into "move it in the list", and makes its header a landing spot
+    // for a document being reordered.
+    const reorderActive = reordering && !viewActive && !selecting && !!onReorderFolder;
+    const parentDragActive = !!onMoveFolderToFolder && !selecting && !reordering;
+    const isReorderTarget =
+      reordering &&
+      overFolderId === folder.id &&
+      (dragIndex !== null || (dragFolderId !== null && dragFolderId !== folder.id));
+    const folderSelected = selectedFolderIds.has(folder.id);
     return (
       <div
         key={folder.id}
-        className={`mb-1.5 rounded-lg ${isDropTarget ? "ring-2 ring-primary/60" : ""} ${
+        className={`mb-px rounded-lg ${isDropTarget ? "ring-2 ring-primary/60" : ""} ${
           draggingFolderId === folder.id ? "opacity-40" : ""
         }`}
         {...dropTargetProps(folder.id)}
       >
         <div
-          className="group flex items-center gap-1 rounded-lg px-1"
-          draggable={!!onMoveFolderToFolder && !selecting}
+          data-sidebar-folder={folder.id}
+          className={`group flex items-center gap-1 rounded-lg px-1 transition-colors duration-150 hover:bg-sidebar-accent/50 ${
+            reorderActive ? "cursor-grab active:cursor-grabbing" : ""
+          } ${dragFolderId === folder.id ? "opacity-40" : ""} ${
+            isReorderTarget ? "ring-2 ring-primary/60" : ""
+          } ${folderSelected ? "bg-sidebar-accent/60" : ""}`}
+          draggable={reorderActive || parentDragActive}
           onDragStart={
-            onMoveFolderToFolder && !selecting
+            reorderActive
               ? (e) => {
                   e.stopPropagation();
-                  e.dataTransfer.setData(FOLDER_DND, folder.id);
+                  e.dataTransfer.setData(FOLDER_REORDER_DND, folder.id);
                   e.dataTransfer.effectAllowed = "move";
-                  setDraggingFolderId(folder.id);
+                  setDragFolderId(folder.id);
+                }
+              : parentDragActive
+                ? (e) => {
+                    e.stopPropagation();
+                    e.dataTransfer.setData(FOLDER_DND, folder.id);
+                    e.dataTransfer.effectAllowed = "move";
+                    setDraggingFolderId(folder.id);
+                  }
+                : undefined
+          }
+          onDragOver={
+            reordering
+              ? (e) => {
+                  const folderMove = dragFolderId !== null && dragFolderId !== folder.id;
+                  const fileMove = dragIndex !== null && !!onMoveFileToFolder;
+                  if (!folderMove && !fileMove) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.dataTransfer.dropEffect = "move";
+                  setOverFolderId(folder.id);
+                }
+              : undefined
+          }
+          onDragLeave={
+            reordering
+              ? () => setOverFolderId((current) => (current === folder.id ? null : current))
+              : undefined
+          }
+          onDrop={
+            reordering
+              ? (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (dragFolderId && dragFolderId !== folder.id) {
+                    onReorderFolder?.(dragFolderId, folder.id);
+                  } else if (dragIndex !== null && files[dragIndex]) {
+                    onMoveFileToFolder?.(files[dragIndex].id, folder.id);
+                  }
+                  endDrag();
                 }
               : undefined
           }
           onDragEnd={
-            onMoveFolderToFolder && !selecting
-              ? () => {
-                  setDraggingFolderId(null);
-                  setDropFolderId(null);
-                }
-              : undefined
+            reorderActive
+              ? endDrag
+              : parentDragActive
+                ? () => {
+                    setDraggingFolderId(null);
+                    setDropFolderId(null);
+                  }
+                : undefined
           }
         >
+          {reorderActive && (
+            <GripVertical className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden />
+          )}
+          {selecting && (
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center pl-1">
+              <input
+                type="checkbox"
+                checked={folderSelected}
+                onChange={() => toggleFolderSelection(folder.id)}
+                aria-label={`Select folder ${folder.name}`}
+                className="h-4 w-4 cursor-pointer rounded border-border text-primary focus:ring-primary"
+              />
+            </div>
+          )}
           <button
             onClick={() => toggleFolder(folder.id)}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-2 pl-2 pr-1.5 text-left coarse:min-h-11"
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1.5 pl-1 pr-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:min-h-11"
             aria-expanded={!collapsed}
+            title={`${folder.name} · ${count} item${count === 1 ? "" : "s"}`}
           >
             <ChevronRight
-              className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${
+              className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
                 collapsed ? "" : "rotate-90"
               }`}
               aria-hidden
             />
             {collapsed ? (
-              <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" aria-hidden />
+              <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
             ) : (
-              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" aria-hidden />
+              <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
             )}
-            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground/80">
+            <span className="ml-1 min-w-0 flex-1 truncate text-sm text-foreground/75">
               {folder.name}
             </span>
-            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{count}</span>
+            {/* Open, the folder's contents are its count. Closed, the number is
+                the only hint of what is inside. */}
+            {collapsed && count > 0 && (
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{count}</span>
+            )}
           </button>
-          <FolderMenu
-            onNewFile={onCreateFile ? () => onCreateFile(folder.id) : undefined}
-            onNewMermaid={onCreateMermaid ? () => onCreateMermaid(folder.id) : undefined}
-            onNewBoard={onCreateBoard ? () => onCreateBoard(folder.id) : undefined}
-            // Creates *inside* this folder now, rather than another one beside
-            // it at the top level.
-            onNewFolder={onCreateFolder ? () => promptNewFolder(folder.id) : undefined}
-            onRename={
-              onRenameFolder
-                ? () => {
-                    const next = window.prompt("Rename folder to:", folder.name);
-                    if (next && next.trim() && next.trim() !== folder.name) {
-                      onRenameFolder(folder.id, next.trim());
+          {selecting ? (
+            folderSelected ? (
+              groupMenu()
+            ) : null
+          ) : (
+            <FolderMenu
+              onNewFile={onCreateFile ? () => onCreateFile(folder.id) : undefined}
+              onNewMermaid={onCreateMermaid ? () => onCreateMermaid(folder.id) : undefined}
+              onNewBoard={onCreateBoard ? () => onCreateBoard(folder.id) : undefined}
+              // Creates *inside* this folder now, rather than another one beside
+              // it at the top level.
+              onNewFolder={onCreateFolder ? () => promptNewFolder(folder.id) : undefined}
+              onRename={
+                onRenameFolder
+                  ? () => {
+                      const next = window.prompt("Rename folder to:", folder.name);
+                      if (next && next.trim() && next.trim() !== folder.name) {
+                        onRenameFolder(folder.id, next.trim());
+                      }
                     }
-                  }
-                : undefined
-            }
-            onDelete={
-              onDeleteFolder
-                ? () => {
-                    if (
-                      count === 0 ||
-                      window.confirm(
-                        `Delete "${folder.name}"? Its ${count} item${
-                          count > 1 ? "s" : ""
-                        } move back to the top level.`,
-                      )
-                    ) {
-                      onDeleteFolder(folder.id);
+                  : undefined
+              }
+              onDelete={
+                onDeleteFolder
+                  ? () => {
+                      if (
+                        count === 0 ||
+                        window.confirm(
+                          `Delete "${folder.name}"? Its ${count} item${
+                            count > 1 ? "s" : ""
+                          } move back to the top level.`,
+                        )
+                      ) {
+                        onDeleteFolder(folder.id);
+                      }
                     }
-                  }
-                : undefined
-            }
-          />
+                  : undefined
+              }
+            />
+          )}
         </div>
         {!collapsed && (
-          <div className="ml-4 border-l border-border pl-1">
+          <div className="ml-[0.9rem] border-l border-border/60 pl-1.5">
             {subfolders.map((child) => renderFolder(child, depth + 1))}
             {items.map(renderFileRow)}
             {count === 0 && (
-              <p className="px-2 py-2 text-xs text-muted-foreground">Empty — drag a file here.</p>
+              <p className="px-2 py-1.5 text-xs text-muted-foreground">Drag files here</p>
             )}
           </div>
         )}
@@ -639,7 +847,7 @@ function SidebarImpl({
     const isTextual = kind === "markdown" || kind === "text";
     const mins = readingMinutes(file.content);
     const title = file.name.replace(
-      /\.(md|markdown|mdx|mmd|mermaid|excalidraw|txt|docx|pdf|xlsx|xls|csv|json|html|htm|ppt|pptx|gdoc|gslides)$/i,
+      /\.(md|markdown|mdx|mmd|mermaid|board|excalidraw|txt|docx|pdf|xlsx|xls|csv|json|html|htm|ppt|pptx|gdoc|gslides)$/i,
       "",
     );
     const dragActive = reordering && !viewActive && realIndex >= 0 && !selecting;
@@ -649,8 +857,9 @@ function SidebarImpl({
     const isDragging = dragActive && dragIndex === realIndex;
     const isDropTarget = dragActive && overIndex === realIndex && dragIndex !== realIndex;
     return (
-      <div key={file.id} className="mb-1.5">
+      <div key={file.id} className="mb-px">
         <div
+          data-sidebar-file={file.id}
           draggable={dragActive || folderDragActive}
           onDragStart={
             dragActive
@@ -715,13 +924,16 @@ function SidebarImpl({
               className="flex h-6 w-6 shrink-0 items-center justify-center pl-1"
               onClick={(e) => {
                 e.stopPropagation();
-                toggleSelection(file.id);
+                // The checkbox's own change handles clicks on the box; this is
+                // the padding around it.
+                if (e.target === e.currentTarget) toggleSelection(file.id);
               }}
             >
               <input
                 type="checkbox"
                 checked={selectedIds.has(file.id)}
                 onChange={() => toggleSelection(file.id)}
+                aria-label={`Select ${file.name}`}
                 className="h-4 w-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
               />
             </div>
@@ -731,27 +943,21 @@ function SidebarImpl({
               if (selecting) toggleSelection(file.id);
               else onSelect(file.id);
             }}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-2 pl-2 pr-1.5 text-left coarse:min-h-11"
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md py-1.5 pl-2 pr-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:min-h-11"
             aria-current={current ? "page" : undefined}
+            /* The type and reading time used to be a column on every row —
+               "9m", "CSV", "JSON" — repeating what the coloured glyph already
+               says and squeezing every name into an earlier ellipsis. They are
+               a hover away now, with the full name the row truncates. */
+            title={`${file.name} · ${isTextual ? `${mins} min read` : meta.label}`}
           >
             {!selecting && <KindIcon className={`h-4 w-4 shrink-0 ${meta.tone}`} aria-hidden />}
             <span
               className={`min-w-0 flex-1 truncate text-sm ${
-                current ? "font-semibold text-foreground" : "font-medium text-foreground/80"
+                current ? "font-medium text-foreground" : "text-foreground/75"
               }`}
             >
               {title}
-            </span>
-            {/* Reading time where there is text to read, the file type where
-                there is not — this column used to render an empty span for
-                every binary file, leaving half the list with a ragged, unused
-                right edge and no indication of what those rows held. */}
-            <span
-              className={`shrink-0 text-2xs tabular-nums ${
-                current ? "text-muted-foreground" : "text-muted-foreground/60"
-              } ${isTextual ? "" : "font-semibold tracking-wider"}`}
-            >
-              {isTextual ? `${mins}m` : meta.label}
             </span>
           </button>
           {!selecting ? (
@@ -771,12 +977,19 @@ function SidebarImpl({
                 const copy = markdownCopies.get(file.id);
                 return copy ? () => onSelect(copy.id) : undefined;
               })()}
-              onRename={() => {
-                const newName = window.prompt("Rename file to:", file.name);
-                if (newName && newName !== file.name) {
-                  onRenameFile(file.id, newName);
-                }
-              }}
+              // Markdown and text are renamed from the name field their editor
+              // puts above the source; everything else has no editor to hold
+              // one, so it keeps the menu item.
+              onRename={
+                onEditFile && isTextual
+                  ? undefined
+                  : () => {
+                      const newName = window.prompt("Rename file to:", file.name);
+                      if (newName && newName !== file.name) {
+                        onRenameFile(file.id, newName);
+                      }
+                    }
+              }
               onMoveToBin={() => onRemoveFile(file.id)}
               folders={folders}
               currentFolderId={file.folderId ?? null}
@@ -788,51 +1001,9 @@ function SidebarImpl({
               onDownload={onDownloadFile ? (format) => onDownloadFile(file.id, format) : undefined}
               formats={availableFormats(file)}
               onShare={onShareFile ? () => onShareFile(file.id) : undefined}
-              reordering={reordering}
-              onToggleReorder={canReorder ? toggleReorder : undefined}
-              onSelectMode={() => {
-                setSelecting(true);
-                setSelectedIds(new Set([file.id]));
-              }}
             />
           ) : selectedIds.has(file.id) ? (
-            <GroupActionMenu
-              onShare={
-                onShareFiles
-                  ? () => {
-                      onShareFiles([...selectedIds]);
-                      setSelecting(false);
-                      setSelectedIds(new Set());
-                    }
-                  : undefined
-              }
-              onMoveToBin={() => {
-                selectedIds.forEach((id) => onRemoveFile(id));
-                setSelecting(false);
-                setSelectedIds(new Set());
-              }}
-              onDownload={
-                onDownloadFile
-                  ? () => {
-                      // A multi-file download stays the original bytes. The
-                      // converted formats are per-document by nature — a batch
-                      // of PDFs would mean one print dialog per file, each
-                      // waiting on the last, and the reader picking a format
-                      // once for documents that may not all support it.
-                      if (onDownloadFiles) onDownloadFiles([...selectedIds], "original");
-                      else selectedIds.forEach((id) => onDownloadFile(id, "original"));
-                      setSelecting(false);
-                      setSelectedIds(new Set());
-                    }
-                  : undefined
-              }
-              onCancel={() => {
-                setSelecting(false);
-                setSelectedIds(new Set());
-              }}
-              onSelectAll={() => setSelectedIds(new Set(activeFiles.map((f) => f.id)))}
-              allSelected={selectedIds.size >= activeFiles.length}
-            />
+            groupMenu()
           ) : null}
         </div>
       </div>
@@ -842,63 +1013,53 @@ function SidebarImpl({
   return (
     <aside className="flex h-full flex-col">
       {docked ? (
-        <>
-          {/* Brand row: the product's name owns the top of the rail, with the
-              controls that act on the whole app — search and the collapse
-              toggle — sitting opposite it. */}
-          <div className="flex items-center gap-1 px-4 pt-4">
-            <span className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight text-foreground">
-              Localdox
-            </span>
-            {onOpenSearch && (
-              <button
-                onClick={onOpenSearch}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11"
-                aria-label="Search docs"
-                title="Search docs"
-              >
-                <Search className="h-4.5 w-4.5" />
-              </button>
-            )}
-            {onToggleSidebar && (
-              <button
-                onClick={onToggleSidebar}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11"
-                aria-label="Toggle sidebar"
-                title="Toggle sidebar"
-              >
-                <PanelLeft className="h-4.5 w-4.5" />
-              </button>
-            )}
-          </div>
-
-          {/* History controls. Back and forward act on the workspace as a whole
-              rather than on the open document, so they belong with the chrome
-              here rather than in the viewer's own header. */}
-          <div className="flex items-center gap-1 px-3 pt-2">
+        /* One row of chrome, not two. The collapse toggle comes first so it
+           sits exactly where the collapsed rail's expand button does: toggling
+           twice never moves the pointer. Back and forward act on the whole
+           workspace, so they ride beside it; search sits opposite. There is no
+           wordmark — the reader already knows which app they are in, and it
+           was the loudest thing in the column while doing nothing. The save
+           state moved to the footer, beside the workspace it describes. */
+        <div className="flex items-center gap-0.5 px-2.5 pt-2.5">
+          {onToggleSidebar && (
             <button
-              onClick={navHistory.back}
-              disabled={!navHistory.canBack}
-              aria-label={navHistory.backLabel}
-              title={navHistory.backLabel}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11 disabled:pointer-events-none disabled:opacity-40"
+              onClick={onToggleSidebar}
+              className={CHROME_BUTTON}
+              aria-label="Toggle sidebar"
+              title="Collapse sidebar"
             >
-              <ArrowLeft className="h-4 w-4" />
+              <PanelLeft className="h-4 w-4" />
             </button>
+          )}
+          <button
+            onClick={navHistory.back}
+            disabled={!navHistory.canBack}
+            aria-label={navHistory.backLabel}
+            title={navHistory.backLabel}
+            className={CHROME_BUTTON}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <button
+            onClick={navHistory.forward}
+            disabled={!navHistory.canForward}
+            aria-label={navHistory.forwardLabel}
+            title={navHistory.forwardLabel}
+            className={CHROME_BUTTON}
+          >
+            <ArrowRight className="h-4 w-4" />
+          </button>
+          {onOpenSearch && (
             <button
-              onClick={navHistory.forward}
-              disabled={!navHistory.canForward}
-              aria-label={navHistory.forwardLabel}
-              title={navHistory.forwardLabel}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11 disabled:pointer-events-none disabled:opacity-40"
+              onClick={onOpenSearch}
+              className={`ml-auto ${CHROME_BUTTON}`}
+              aria-label="Search docs"
+              title={`Search docs (${modKeyLabel}K)`}
             >
-              <ArrowRight className="h-4 w-4" />
+              <Search className="h-4 w-4" />
             </button>
-            {saveIndicator && (
-              <div className="ml-auto flex min-w-0 items-center pr-1">{saveIndicator}</div>
-            )}
-          </div>
-        </>
+          )}
+        </div>
       ) : null}
 
       {/* The list's own header: which view is showing, and the one control for
@@ -906,18 +1067,22 @@ function SidebarImpl({
           buttons above; as a `+` beside the label they take no vertical space
           and sit next to the list they add to. */}
       {onView && !search && (
-        <div className="flex items-center gap-1 px-3 pb-1 pt-3">
+        <div className="flex items-center gap-1 pb-1 pl-3 pr-2.5 pt-4">
           <div ref={viewMenuRef} className="relative min-w-0 flex-1">
+            {/* Sized to its label rather than the full row, so the hover and
+                the click target describe the same thing: the picker. */}
             <button
               onClick={() => setViewMenuOpen((o) => !o)}
               aria-expanded={viewMenuOpen}
-              className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground coarse:min-h-11"
+              aria-haspopup="menu"
+              className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:min-h-11"
             >
               <span className="truncate">{VIEW_LABEL[view.mode]}</span>
-              <ChevronRight
+              <ChevronDown
                 className={`h-3.5 w-3.5 shrink-0 opacity-60 transition-transform ${
-                  viewMenuOpen ? "rotate-90" : ""
+                  viewMenuOpen ? "rotate-180" : ""
                 }`}
+                aria-hidden
               />
             </button>
 
@@ -952,159 +1117,188 @@ function SidebarImpl({
       {search ? (
         <SearchPanel {...search} />
       ) : (
-        <nav className="flex-1 overflow-y-auto px-3 pb-3">
-          {reordering && !viewActive && (
-            <div className="mb-2 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-2 text-xs text-primary">
-              <GripVertical className="h-3.5 w-3.5 shrink-0" />
-              <span className="flex-1">Drag files to reorder</span>
-              <button
-                onClick={toggleReorder}
-                className="shrink-0 rounded px-2 py-0.5 text-xs font-semibold hover:bg-primary/15"
-              >
-                Done
-              </button>
-            </div>
-          )}
-          {view.mode === "saved" ? (
-            saved.length === 0 ? (
-              <p className="px-2 py-4 text-sm text-muted-foreground">
-                No saved items yet. Star a document, a section, a table or a code block.
-              </p>
-            ) : (
-              savedByFile(saved).map(([fileName, items]) => (
-                <div key={fileName} className="mb-3">
-                  <div className="px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    {fileName}
-                  </div>
-                  <ul className="space-y-1">
-                    {items.map((item) => {
-                      const Icon = savedIcon(item);
-                      return (
-                        <li
-                          key={item.id}
-                          className="group flex items-start gap-1 rounded-lg px-1 hover:bg-accent/60"
-                        >
-                          <button
-                            onClick={() => onOpenSaved(item)}
-                            className="flex min-w-0 flex-1 items-start gap-2 rounded-md py-2 pl-2 pr-1.5 text-left"
-                            title={item.text || item.title}
-                          >
-                            <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-sm font-medium text-foreground/80">
-                                {item.title}
-                              </span>
-                              <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                                {savedTypeLabel(item)}
-                                {item.orphaned && (
-                                  <span className="text-amber-600 dark:text-amber-400">
-                                    · edited away
-                                  </span>
-                                )}
-                              </span>
-                            </span>
-                          </button>
-                          <button
-                            onClick={() => onRemoveSaved(item.id)}
-                            className="mt-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-100 transition-opacity hover:text-destructive md:opacity-0 md:group-hover:opacity-100"
-                            aria-label="Remove saved item"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
+        /* Right-click anywhere in the list for the list's own modes. They used
+           to be reachable only from a document's ⋮ menu, which made "select"
+           and "reorder" look like things you do to one file. Radix also opens
+           this on a long press, so touch gets it too. */
+        <ContextMenu>
+          <ContextMenuTrigger
+            asChild
+            onContextMenu={(e) => {
+              const row = (e.target as Element).closest?.(
+                "[data-sidebar-file],[data-sidebar-folder]",
+              );
+              contextRowRef.current = row
+                ? {
+                    fileId: row.getAttribute("data-sidebar-file") ?? undefined,
+                    folderId: row.getAttribute("data-sidebar-folder") ?? undefined,
+                  }
+                : null;
+            }}
+          >
+            <nav className="flex-1 overflow-y-auto px-3 pb-3">
+              {reordering && !viewActive && (
+                <div className="mb-2 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-2 text-xs text-primary">
+                  <GripVertical className="h-3.5 w-3.5 shrink-0" />
+                  <span className="flex-1">Drag files and folders to reorder</span>
+                  <button
+                    onClick={toggleReorder}
+                    className="shrink-0 rounded px-2 py-0.5 text-xs font-semibold hover:bg-primary/15"
+                  >
+                    Done
+                  </button>
                 </div>
-              ))
-            )
-          ) : total === 0 && folders.length === 0 ? null : (
-            <>
-              {showFolders && rootFolders.map((folder) => renderFolder(folder, 0))}
-              {/* The top level's own drop target, and the reason a file can be
+              )}
+              {selecting && (
+                <div className="mb-2 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-2 text-xs text-primary">
+                  <CheckSquare className="h-3.5 w-3.5 shrink-0" />
+                  <span className="flex-1 tabular-nums" aria-live="polite">
+                    {selectedIds.size + selectedFolderIds.size} selected
+                  </span>
+                  <button
+                    onClick={clearSelection}
+                    className="shrink-0 rounded px-2 py-0.5 text-xs font-semibold hover:bg-primary/15"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+              {total === 0 && folders.length === 0 ? null : (
+                <>
+                  {showFolders && rootFolders.map((folder) => renderFolder(folder, 0))}
+                  {/* The top level's own drop target, and the reason a file can be
                 dragged back out of a folder: it wraps the unfiled list *and*
                 the empty space below it, so the gap under the last row is a
                 real place to drop rather than dead pixels. */}
-              <div
-                className={`min-h-16 rounded-lg ${
-                  // Only while something is actually being dragged. This used to
-                  // test `dropFolderId === null`, which is the *resting* state —
-                  // so the ring was drawn permanently, reading as a stray border
-                  // around the unfiled files.
-                  showFolders && draggingFileId !== null && dropFolderId === null
-                    ? "ring-2 ring-primary/60"
-                    : ""
-                }`}
-                {...(showFolders ? dropTargetProps(null) : {})}
-              >
-                {groups.map((groupItem) => (
-                  <div key={groupItem.label || "__all"} className={groupItem.label ? "mb-3" : ""}>
-                    {groupItem.label && (
-                      <div className="px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        {groupItem.label}
+                  <div
+                    className={`min-h-16 rounded-lg ${
+                      // Only while something is actually being dragged. This used to
+                      // test `dropFolderId === null`, which is the *resting* state —
+                      // so the ring was drawn permanently, reading as a stray border
+                      // around the unfiled files.
+                      showFolders && draggingFileId !== null && dropFolderId === null
+                        ? "ring-2 ring-primary/60"
+                        : ""
+                    }`}
+                    {...(showFolders ? dropTargetProps(null) : {})}
+                  >
+                    {groups.map((groupItem) => (
+                      <div
+                        key={groupItem.label || "__all"}
+                        className={groupItem.label ? "mb-3" : ""}
+                      >
+                        {groupItem.label && (
+                          <div className="px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                            {groupItem.label}
+                          </div>
+                        )}
+                        {groupItem.items.map(renderFileRow)}
                       </div>
-                    )}
-                    {groupItem.items.map(renderFileRow)}
+                    ))}
                   </div>
-                ))}
-              </div>
-            </>
-          )}
-        </nav>
+                </>
+              )}
+            </nav>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="z-(--z-menu) w-56 rounded-xl p-1.5 shadow-xl">
+            {selecting ? (
+              <>
+                <ContextMenuItem
+                  className={CONTEXT_ITEM}
+                  disabled={selectedIds.size + selectedFolderIds.size >= selectionTotal}
+                  onSelect={selectAll}
+                >
+                  <CheckSquare className="h-4 w-4" strokeWidth={1.5} />
+                  Select all
+                  <ContextMenuShortcut>{modKeyLabel}A</ContextMenuShortcut>
+                </ContextMenuItem>
+                <ContextMenuItem className={CONTEXT_ITEM} onSelect={clearSelection}>
+                  <X className="h-4 w-4" strokeWidth={1.5} />
+                  Done selecting
+                </ContextMenuItem>
+              </>
+            ) : (
+              <ContextMenuItem
+                className={CONTEXT_ITEM}
+                disabled={total === 0 && folders.length === 0}
+                onSelect={() => {
+                  if (reordering) toggleReorder();
+                  startSelecting(contextRowRef.current ?? undefined);
+                }}
+              >
+                <CheckSquare className="h-4 w-4" strokeWidth={1.5} />
+                Select
+              </ContextMenuItem>
+            )}
+            {canReorder && (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  className={CONTEXT_ITEM}
+                  onSelect={() => {
+                    if (selecting) clearSelection();
+                    toggleReorder();
+                  }}
+                >
+                  {reordering ? (
+                    <Check className="h-4 w-4" strokeWidth={1.5} />
+                  ) : (
+                    <GripVertical className="h-4 w-4" strokeWidth={1.5} />
+                  )}
+                  {reordering ? "Done reordering" : "Reorder"}
+                </ContextMenuItem>
+              </>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
       )}
 
-      <div className="flex items-center gap-2 border-t border-sidebar-border p-2">
-        {/* Settings apply to whichever workspace is open, so its trigger sits
-            fused to that workspace's own avatar rather than floating on its
-            own — the pairing reads as "settings for here". Everywhere else to
-            switch to lives in the strip beside it. */}
-        {currentWorkspace && (
-          // Same origin-bottom hover magnify as the strip's own avatars, so the
-          // current workspace doesn't sit dead while everything beside it
-          // responds to the pointer.
-          <div className="flex shrink-0 origin-bottom flex-col items-center gap-1.5 transition-transform duration-150 ease-out hover:scale-105">
-            <div className="flex items-center gap-0.5 rounded-full border border-primary/35 bg-sidebar-accent p-1">
-              <span
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-background text-xs font-semibold uppercase text-sidebar-foreground"
-                title={currentWorkspace.name}
-              >
-                {initials(currentWorkspace.name)}
-              </span>
-              <button
-                onClick={() => onOpenSettings()}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-sidebar-foreground"
-                aria-label={`Settings for ${currentWorkspace.name}`}
-                title="Settings"
-              >
-                <Settings className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <span className="max-w-19 truncate text-2xs font-medium text-sidebar-foreground">
+      {/* One row: where you are, whether it is safe, where else you could be,
+          and settings. It used to be a pill-shaped avatar with a fused gear
+          and the name in 10px type underneath — three stacked layers of chrome
+          to say "My workspace". The save state lives here because it is a
+          fact about this workspace, not about the open document. */}
+      <div className="flex items-center gap-1 border-t border-sidebar-border py-2 pl-2.5 pr-2.5">
+        {currentWorkspace ? (
+          <div className="flex min-w-0 flex-1 items-center gap-2 pl-0.5">
+            <span
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-2xs font-semibold uppercase text-sidebar-foreground ring-1 ring-inset ring-primary/40"
+              aria-hidden
+            >
+              {initials(currentWorkspace.name)}
+            </span>
+            <span
+              className="min-w-0 truncate text-sm font-medium text-foreground/90"
+              title={currentWorkspace.name}
+            >
               {currentWorkspace.name}
             </span>
+            {saveIndicator && <span className="flex shrink-0 items-center">{saveIndicator}</span>}
           </div>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-center">{saveIndicator}</div>
         )}
+        {/* The other workspaces stay one tap away — Arc-style instant
+            switching — but as small avatars in the same row rather than a
+            second band of labelled circles. Each keeps its name as its
+            accessible label and tooltip. */}
         {onSwitchWorkspace && otherWorkspaces.length > 0 && (
-          <>
-            <div className="h-8 w-0.5 shrink-0 rounded-full bg-border" />
-            <WorkspaceStrip
-              workspaces={otherWorkspaces}
-              currentId={null}
-              onSelect={onSwitchWorkspace}
-              className="min-w-0 flex-1"
-            />
-          </>
+          <WorkspaceStrip
+            size="sm"
+            workspaces={otherWorkspaces}
+            currentId={null}
+            onSelect={onSwitchWorkspace}
+            className="min-w-0 max-w-[45%] shrink"
+          />
         )}
-        {!currentWorkspace && (
-          <button
-            onClick={() => onOpenSettings()}
-            className="shrink-0 rounded-md p-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-            aria-label="Settings"
-            title="Settings"
-          >
-            <Settings className="h-4 w-4" />
-          </button>
-        )}
+        <button
+          onClick={() => onOpenSettings()}
+          className={CHROME_BUTTON}
+          aria-label={currentWorkspace ? `Settings for ${currentWorkspace.name}` : "Settings"}
+          title="Settings"
+        >
+          <Settings className="h-4 w-4" />
+        </button>
       </div>
     </aside>
   );

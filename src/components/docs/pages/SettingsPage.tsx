@@ -1,15 +1,13 @@
 import { useState, useEffect } from "react";
-import { Database, Folder, Palette, Sparkles, Star, X } from "lucide-react";
+import { Database, Folder, Palette, Sparkles, X } from "lucide-react";
 import { AiSettings } from "@/services/ai";
 import { AppearanceSettings } from "./settings/AppearanceTab";
 import { WorkspaceSettings } from "./settings/WorkspaceTab";
-import { SavedSettings, HighlightSettings, BinSettings } from "./settings/SavedTab";
+import { BinSettings } from "./settings/SavedTab";
 import { StorageSettings } from "./settings/StorageTab";
-import type { Highlight } from "@/lib/markdown/dom-highlighter";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { ThemePref, ReadingMode, ReadingFont } from "@/lib/workspace/persistence";
 import type { MathRendererType } from "@/services/math";
-import type { SavedEntry, SavedItem } from "@/lib/workspace/saved-items";
 
 export interface SettingsPageProps {
   showEmbedMedia: boolean;
@@ -20,15 +18,12 @@ export interface SettingsPageProps {
   onDeleteWorkspace: (id: string) => void;
   onNewWorkspace: (name: string) => void;
   onClearStorage: () => void;
-  saved: SavedEntry[];
-  onOpenSaved: (item: SavedItem) => void;
-  onRemoveSaved: (id: string) => void;
-  onClearSaved: () => void;
-  highlights: Highlight[];
-  onRemoveHighlight: (id: string) => void;
-  onClearHighlights: () => void;
-  onNavigate: (fileId: string, subtopicId?: string) => void;
   files: MdFile[];
+  /** The open workspace's notes and rough work, for the storage total. */
+  writing?: {
+    notes: readonly { content: string }[];
+    scratchpads: readonly { title: string; content: string }[];
+  };
   onOpenWorkspace: (id: string) => void;
   theme: ThemePref;
   onSetTheme: (theme: ThemePref) => void;
@@ -72,13 +67,12 @@ export interface SettingsPageProps {
   onClose: () => void;
 }
 
-type TabId = "appearance" | "ai" | "workspace" | "saved" | "storage";
+type TabId = "appearance" | "ai" | "workspace" | "storage";
 
 const TABS = [
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "ai", label: "Ask AI", icon: Sparkles },
   { id: "workspace", label: "Workspace", icon: Folder },
-  { id: "saved", label: "Saved", icon: Star },
   { id: "storage", label: "Storage", icon: Database },
 ] as const satisfies readonly { id: TabId; label: string; icon: typeof Palette }[];
 
@@ -97,15 +91,8 @@ export function SettingsPage({
   onDeleteWorkspace,
   onNewWorkspace,
   onClearStorage,
-  saved,
-  onOpenSaved,
-  onRemoveSaved,
-  onClearSaved,
-  highlights,
-  onRemoveHighlight,
-  onClearHighlights,
-  onNavigate,
   files,
+  writing,
   onOpenWorkspace,
   theme,
   onSetTheme,
@@ -312,22 +299,16 @@ export function SettingsPage({
                 onShare={onShareWorkspace}
               />
             )}
-            {/* Saved gathers everything the reader kept: starred items, their
-                highlights, and the files they archived out of the sidebar. */}
-            {activeTab === "saved" && (
+            {/* The Bin sits beside the quota it competes for. */}
+            {activeTab === "storage" && (
               <div className="space-y-10">
-                <SavedSettings
-                  saved={saved}
-                  onOpen={onOpenSaved}
-                  onRemove={onRemoveSaved}
-                  onClearAll={onClearSaved}
-                />
-                <HighlightSettings
-                  highlights={highlights}
+                <StorageSettings
+                  onClearStorage={onClearStorage}
+                  workspaceId={currentWorkspaceId}
                   files={files}
-                  onRemove={onRemoveHighlight}
-                  onClearAll={onClearHighlights}
-                  onNavigate={onNavigate}
+                  writing={writing}
+                  binCount={files.filter((f) => typeof f.deletedAt === "number").length}
+                  onEmptyBin={onEmptyBin}
                 />
                 <BinSettings
                   files={files}
@@ -336,15 +317,6 @@ export function SettingsPage({
                   onEmptyBin={onEmptyBin}
                 />
               </div>
-            )}
-            {activeTab === "storage" && (
-              <StorageSettings
-                onClearStorage={onClearStorage}
-                workspaceId={currentWorkspaceId}
-                files={files}
-                binCount={files.filter((f) => typeof f.deletedAt === "number").length}
-                onEmptyBin={onEmptyBin}
-              />
             )}
           </div>
         </div>

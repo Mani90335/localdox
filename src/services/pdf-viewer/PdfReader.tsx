@@ -176,7 +176,7 @@ function usePdfDocument(
 
 function PdfMessage({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-[calc(100dvh-7.5rem)] w-full items-center justify-center p-6">
+    <div className="flex h-[calc(100dvh-var(--app-chrome-h)-3.5rem)] w-full items-center justify-center p-6">
       <p className="max-w-sm text-center text-sm text-muted-foreground">{children}</p>
     </div>
   );
@@ -210,14 +210,14 @@ export function PdfReader({ file, reader }: PdfBookProps) {
   if (reader.loadError) return <PdfMessage>{reader.loadError}</PdfMessage>;
   if (!pdfjs || !pdfDocument) {
     return (
-      <div className="flex h-[calc(100dvh-7.5rem)] w-full items-center justify-center bg-muted/20">
+      <div className="flex h-[calc(100dvh-var(--app-chrome-h)-3.5rem)] w-full items-center justify-center bg-muted/20">
         <div className="h-[70%] w-[54%] max-w-md animate-pulse rounded-sm bg-background shadow-lg" />
       </div>
     );
   }
 
   return (
-    <div className="flex h-[calc(100dvh-7.5rem)] w-full overflow-hidden">
+    <div className="flex h-[calc(100dvh-var(--app-chrome-h)-3.5rem)] w-full overflow-hidden">
       {reader.sidebarOpen && outlineResolver && (
         <PdfSidebar reader={reader} getPage={getPage} outlineResolver={outlineResolver} />
       )}

@@ -27,6 +27,8 @@ contains a math label. These prerequisites matter when interpreting the totals.
 | First XLSX | 156.6 | 156.6 | 180 |
 | First interactive React example | 764.7 | 764.7 | 840 |
 | First math keyboard | 215.0 | 215.0 | 240 |
+| First Compute result, typed in the math field (MathLive 214.9 + engine 302.7; updated 2026-10-02; macOS, Chromium) | — | 519.2 | 540 |
+| First advanced (SymPy) result, incl. the basic engine (added 2026-10-02) | — | 11034.1 | 12000 |
 
 The gate sums decoded JS/MJS/WASM responses recompressed independently with
 Node's default `gzipSync`. It includes dedicated-worker requests through the
@@ -67,7 +69,7 @@ Other substantial assets remain optional: Babel's worker is 2,967,068 raw bytes,
 MathLive 807,992, XLSX's worker 430,570 (including its protocol), PDF's worker
 1,265,413, and conversion WASM 6,691,779. The 1,821,047-byte chunk from the audit
 is Excalidraw's vendor output, not a common vendor bundle fetched by these nine
-journeys. The emitted module report identifies its owner. A future compiler
+journeys. (Boards no longer use Excalidraw; see `boards.md`.) The emitted module report identifies its owner. A future compiler
 replacement needs a separate syntax-compatibility decision; worker execution
 alone does not reduce download size.
 

@@ -1,4 +1,214 @@
-Latest update — 2026-09-29 (D01 part 1 merged with upstream D02/B03/B05: other workspaces are read without bodies and without resetting the open workspace's save cache)
+Latest update — 2026-10-02 (Math Compute: graduate-level math with an on-device SymPy engine)
+
+The Compute tab gets a second engine for calculus, linear algebra,
+probability and random variables, statistics, transforms and ODEs: SymPy 1.14
+on Pyodide 314.0.7, in a Web Worker, downloaded (10.9 MB) only after the reader
+agrees, then offline. The basic engine still answers what it can; anything
+else is routed to SymPy. Details: documentation/math-compute-advanced.md.
+
+- Why: probing the basic engine at this level gave wrong answers (d²/dx² x⁴ =
+  "dx²", Σk = 50015001, Σ1/n² off in the 4th digit, Monte Carlo integrals, 3×3
+  inverse crash), not just gaps.
+- Notation: several statements (`X ~ N(0, 4)`, `let A = …`, `assume x > 0`,
+  ODE conditions `y(0) = 1`), LaTeX or extended plain text; every
+  distribution's parameter convention is stated in the result.
+- Advanced tools (Calculus, Matrices, Probability, Statistics, Transforms) for
+  operations with settings; results carry `lhs` statements, Given rows and a
+  SymPy badge into Copy, rough work and insertion.
+- Security: input is parsed in JavaScript to allow-listed MathJSON and built
+  into SymPy objects in Python; nothing typed is ever evaluated as Python
+  (tested on both sides). Supply chain: wheels verified against the pinned
+  package's lock-file SHA-256; published lock trimmed to sympy + mpmath.
+- Robustness found while testing: Pyodide hangs (no rejection) on a
+  WebAssembly response without `application/wasm` (Vite preview): the worker
+  now compiles from bytes, and the client fails a load after 180 s instead of
+  spinning; a 30 s compute limit terminates the worker.
+
+Tests: tests/compute-advanced.test.ts (13, real SymPy in Node),
+compute-client (13), tests/e2e/compute-advanced.spec.ts (5; 10/10 with
+--repeat-each=2), bundle journey `advanced` (11,034 KiB gzip incl. the basic
+engine; ceiling 12,000). Unit 574 pass / 0 fail (576, 2 skipped). E2E on a
+private-port production build: compute-advanced, compute, rough-work, notes,
+addressing, bundle-journeys 37/37. tsc: only the pre-existing __root.tsx
+error. eslint: no errors.
+
+Previous update — 2026-10-01 (Math Compute: an on-device math engine in the Notes panel)
+
+The Notes panel has a third tab, **Compute**: Evaluate, Simplify, Numeric
+value and Solve for an unknown, on LaTeX or plain text, in a Web Worker, and
+offline once used. Results show their input, operation, exact value, decimal
+and conditions, and reach rough work or a document only through explicit
+actions (Copy, Add to rough work, Insert into document… with the Rough work
+insert dialog). Details: documentation/math-compute.md.
+
+- Engine: @cortex-js/compute-engine 0.58.0 (MIT), already installed as
+  MathLive's pinned dependency, now a direct dependency at the same version.
+  It is bundled only into `compute.worker` (291.0 KiB gzip). The compute
+  journey costs 292.3 KiB (ceiling 320), and the Notes panel chunk grows
+  6.2 KiB gzip. A build check asserts the engine is in no page chunk.
+- `services/compute/`: `input.ts` (strict plain-text → LaTeX; ambiguous names,
+  inequalities, environments refused with reasons), `engine.ts` (routing,
+  exact-vs-decimal rules, verified factored forms, domain notes, checked
+  solutions), `polynomial.ts` (rational form + Aberth roots + verified
+  multiplicity: polynomial and rational equations solved completely, poles
+  excluded), `compute-client.ts` (queue, LRU cache, 8 s hard limit over the
+  engine's 4 s one, cancellation by terminating the worker, failed-load and
+  no-Worker states), `result-markdown.ts`.
+- Engine gaps found and covered by our own layer, each a unit test: its
+  `solve` returns nothing for x³+x+1=0 and (x²−1)/(x−1)=0, ∞ for 1/x=0, and
+  only 3 for |x|=3; its `Together` gets 1/x + 1/(x−1) wrong; its `Factor`
+  gives (x√x−1)(x√x+1) for x³−1; and it reads `sqrt(8)` as 8·q·r·s·t.
+
+Tests: tests/compute-engine.test.ts (14, real engine; every result rendered by
+KaTeX), tests/compute-client.test.ts (9), tests/e2e/compute.spec.ts (5;
+15/15 with --repeat-each=3), and the bundle journey plus a worker-only check. Unit
+557 pass / 0 fail (559 total, 2 skipped). E2E on a private-port production
+build: compute, rough-work, notes, addressing, bundle-journeys 31/31. While
+the engine computes 100000! (~1 s), the page records no long task; the test
+proves its observer works with a 120 ms block first. tsc: only the pre-existing
+__root.tsx error. eslint: no errors (12 existing warnings in DocsApp).
+
+Previous update — 2026-10-01 (Rough work: math scratchpads in the Notes panel)
+
+The Notes panel has two tabs, **Notes** and **Rough work**. A scratchpad is
+private working space for equations and intermediate steps: Markdown with
+`$…$`/`$$…$$`, the editor's toolbar and shortcuts, the MathLive keyboard, and a
+live preview drawn by the notes' idle-time renderer. It never touches a
+document unless the reader confirms an insertion. Details:
+documentation/rough-work.md.
+
+- Model `src/lib/workspace/rough-work.ts`: `Scratchpad { id, title, content,
+  fileId | null, fileName?, createdAt, updatedAt }` on
+  `WorkspaceRecord.scratchpads`. Optional document association (new pads link
+  to the open document; Unlink/Link in the menu), kept after the document is gone.
+- Actions: New, Rename, Duplicate, Link/Unlink, Clear contents (confirmation
+  dialog, then Undo), Delete (Undo), Save (selection) as note (the note carries
+  `origin` and links back to the pad), Insert (selection) into document. The
+  insert dialog shows what goes in and where (end of this page / end of the
+  document). It re-checks at Insert (document unchanged, not open in the editor:
+  `editor/open-editors.ts`), lands on and flashes the exact span, and offers Undo.
+- Persistence: autosave (500 ms pause + workspace write), draft journal under
+  `rough:<padId>` with crash recovery into the pad, two-tab merge, backup
+  import/export (validated), linked pads follow a moved document, never in
+  share links.
+- Storage accounting now counts notes and rough work (`recordTextBytes`) in
+  summary totals, lazy re-measure, the open workspace, backup imports and
+  Settings ▸ Storage.
+- Bugs found by the new e2e tests and fixed before landing: an outside change
+  applied in a layout effect let the journal stage stale text, which a reload
+  offered back over restored work (now synced during render); and the journal's
+  base hash was frozen at open, so post-autosave drafts restored as copies.
+
+Tests: tests/rough-work.test.ts (18), tests/e2e/rough-work.spec.ts (8, also
+16/16 with --repeat-each=2). Unit 534 pass / 0 fail (536 total). E2E on a
+private-port production build: rough-work, notes, durability, editing, math,
+persistence, storage-budget, storage-persistence, addressing,
+mobile-navigation 58/59; the one failure (mobile drawer close) fails the same on
+a HEAD build. Bundle journeys 10/10. tsc: only the pre-existing __root.tsx
+error. eslint: nothing new in any touched file.
+
+Previous update — 2026-10-01 (Source addressing: search hits, Inspect source and note links land on the exact occurrence; search in tables and diagrams fixed)
+
+Every rendered block now carries its span in the file's Markdown
+(`data-src="start:end"`, stamped by `rehypeSourceAddress` through segments and
+paged-mode stripping). Page ↔ file mapping is done per block by aligning its
+text with its projected source (`lib/markdown/source-address.ts`,
+`dom-address.ts`). Details: documentation/source-addressing.md.
+
+Bug, reproduced first: in a document with a table and a Mermaid diagram, all 4
+table and diagram search hits for "widget" flashed the intro paragraph's
+"widget". The diagram's SVG labels and stylesheet broke the occurrence count,
+and the line fallback couldn't find tab-joined table rows or diagram source.
+Now each hit maps line + occurrence → file span (`searchHitSpan`, counted as the
+index counts) → page range. A diagram hit lands on the label showing the word,
+or on the diagram.
+
+- Inspect source and Copy code use the selection's address: exact for
+  repeated phrases and table cells. Text search remains the fallback.
+- Notes store a source anchor (span + 32-char head/tail); `relocateAnchor`
+  survives edits elsewhere in the file. Older notes use the quote as before.
+- Equations and drawn fences are atomic, wrapped in `display: contents`
+  elements carrying their span.
+- Also fixed, in its own commit: the selection menu ran off the bottom of the window when
+  selecting near it (a document's last lines), hiding Save/Highlight/Copy to
+  notes. A layout effect now keeps it on screen.
+
+Measured, one page with about 2,300 stamped blocks: fully rendered at 391 ms
+with stamping vs 373 ms without (medians, within run-to-run noise of
+363–402 ms), same long frames.
+
+Tests: tests/source-address.test.ts (7), tests/e2e/addressing.spec.ts (3). Unit
+516 pass / 0 fail (518 total). E2E on a private-port production build: search,
+highlighting, editing, math, diagram ×3, long-markdown, viewers, persistence,
+durability 57/57; notes + addressing 6/6; test:bundles 10/10. tsc and eslint:
+nothing new (pre-existing __root.tsx, import-schema, CodeBlock, document-utils
+issues unchanged).
+
+Previous update — 2026-10-01 (Notes panel: copy a selection as clean Markdown, keep it as a snapshot, follow it back to its source)
+
+Select text in a Markdown document → **Copy selection to notes**. The passage
+is kept as Markdown in a Notes panel: docked right of the reading column at
+≥1024px, a bottom sheet below that. The source document is never modified.
+Details: documentation/notes-panel.md.
+
+What changed:
+- Model `src/lib/workspace/notes.ts`: `Note { id, fileId, fileName, content,
+  source: quote anchor, createdAt, updatedAt }`, stored as
+  `WorkspaceRecord.notes`. Notes are snapshots: only an explicit edit changes
+  them, and they outlive their source document.
+- Clean copy `src/lib/markdown/selection-markdown.ts`: walks the DOM between
+  the selection's boundary points, drops viewer chrome, emits GFM (lists, task
+  boxes, tables with header, fenced code with language, callouts) and the
+  LaTeX source of any equation touched.
+- Source links: `resolveNoteSource` finds the quote in the Markdown (exact
+  matches only: whole quote, then lines of ≥20 chars) and opens the page it is
+  on *now*. The viewer then flashes it via the existing star jump
+  (`pendingSaved`, now `PassageTarget`; split panes now receive it too). A gone
+  passage opens its heading with a toast; a binned or deleted source says so.
+- Persistence: autosave, 3-way merge (no live-file filter), backup
+  export/import (validated; no version bump), and cross-workspace move. Never
+  included in share links (they upload to an external host).
+- `locateInSource` gained `{ exactOnly }`. Inspect's behavior is unchanged.
+
+Found in the browser, not by unit tests: the math sanitizer leaves KaTeX's
+annotation as bare text inside `<math>` (handled), and `Selection.toString()`
+doesn't match the `textContent` index across equations (the quote now comes
+from `textBetween`).
+
+Tests:
+- tests/notes.test.ts (25): clean copy, snapshot semantics, search, anchors
+  (moved, repeated, crossed math, broken, binned, missing), and storage (backup
+  round trip, validation, IndexedDB, two-tab merge, cross-workspace move).
+- tests/e2e/notes.spec.ts (2): select → copy → stored Markdown → reload →
+  search → follow from page 1 back to the flashed passage on page 2; the phone
+  sheet.
+- Run: `npm test` 501 pass / 0 fail (503 total; the other 2 are skips); tsc
+  clean except the pre-existing src/routes/__root.tsx error (also on HEAD with a
+  frozen-lockfile install); eslint 0 new errors or warnings (import-schema.ts's
+  3 Prettier errors are on HEAD). Production build e2e, private port: notes,
+  highlighting, persistence, durability, editing, math, long-markdown,
+  storage-persistence, search, bundle-journeys all passed; `test:bundles` 10/10.
+
+Follow-up, same day: equations and diagrams drawn in the panel at no cost to
+the document. Notes read the reader's render caches first; misses typeset in
+`requestIdleCallback` (`services/math/idle-typeset.ts`, `renderMathIdle`),
+never charged to the 12 ms per-task budget. Only equations and diagrams on
+screen are drawn (one shared IntersectionObserver), and the panel's first
+render waits for idle. Diagrams copy as `mermaid`/`mindmap` fences through a
+WeakMap registry (`lib/markdown/diagram-sources.ts`) and draw from the
+`renderMermaid` cache with per-instance SVG ids. Measured, 300-equation note,
+production build: opening the panel went from 130/69/72 ms frames to none;
+expanding and scrolling all 300: none; reload with the panel open: none (as
+with it closed, down from 53–60 ms). +8 unit tests
+(tests/notes-rendering.test.ts), +1 e2e; reader math/diagram/editing/long
+document e2e 39/39; `test:bundles` 10/10.
+
+Known limits: embeds/media copy as nothing; local images copy as alt text;
+MathJax-only equations draw in a note only if the document drew them this
+session; panel diagrams use Mermaid's theme, not the reader's semantic
+colours; an empty workspace has no viewer to open the panel from.
+
+Previous update — 2026-09-29 (D01 part 1 merged with upstream D02/B03/B05: other workspaces are read without bodies and without resetting the open workspace's save cache)
 
 Merged upstream/main (eb5424b: D02 Blob bodies, B03 bundle budgets, B05
 fonts) into main, which held D01 part 1's first version (2ab5273, entry

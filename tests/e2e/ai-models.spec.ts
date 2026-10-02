@@ -213,7 +213,15 @@ test("a retired model is reported as a model problem, not a bad key", async ({ p
       getSelection()!.addRange(range);
       el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
-  await page.getByRole("button", { name: "Ask AI", exact: true }).click();
+  await page.getByRole("button", { name: "More highlight actions" }).click();
+  // The AI actions start folded and unfold in place, leaving the menu open.
+  const aiRow = page.getByRole("menuitem", { name: "AI", exact: true });
+  await expect(aiRow).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("menuitem", { name: "Summarize" })).toHaveCount(0);
+  await aiRow.click();
+  await expect(aiRow).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("menuitem", { name: "Summarize" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Ask AI", exact: true }).click();
   const box = page.getByPlaceholder("Ask anything about the content…");
   await box.fill("What is this?");
   await box.press("Enter");

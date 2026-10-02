@@ -5,6 +5,7 @@ import { MindMapBlock } from "@/services/mindmap";
 import { JsonTree } from "../JsonTree";
 import { InteractiveBlock } from "../InteractiveBlock";
 import { extractText } from "./extract-text";
+import { registerDiagramSource } from "@/lib/markdown/diagram-sources";
 
 /**
  * A ```json fence, rendered as a browsable tree with a full-screen control.
@@ -49,9 +50,34 @@ function JsonFigure({ value }: { value: unknown }) {
           {full ? <Minimize2 className="h-3.5 w-3.5" /> : <Expand className="h-3.5 w-3.5" />}
         </button>
       </div>
-      <div className={full ? "min-h-0 flex-1 overflow-auto" : "max-h-128 overflow-auto"}>
+      {/* In full screen the tree's own panel fills the screen rather than
+          sitting as a short card at the top of an empty one. */}
+      <div
+        className={full ? "min-h-0 flex-1 overflow-auto *:min-h-full" : "max-h-128 overflow-auto"}
+      >
         <JsonTree value={value} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * A fence drawn as something other than its text, wrapped so it still carries
+ * its source span (see source-address.ts). Atomic: a point inside a diagram
+ * addresses the whole fence. `display: contents` keeps it out of layout.
+ */
+function Drawn({
+  span,
+  register,
+  children,
+}: {
+  span?: string;
+  register?: (element: HTMLDivElement | null) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div ref={register} data-src={span} data-src-atomic="" className="contents">
+      {children}
     </div>
   );
 }
@@ -59,13 +85,18 @@ function JsonFigure({ value }: { value: unknown }) {
 export function CodeBlock({ children, ...rest }: any) {
   const ref = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
+  const span: string | undefined = rest["data-src"];
 
   // Detect Mermaid
   const codeEl: any = Array.isArray(children) ? children[0] : children;
   const cls = codeEl?.props?.className ?? "";
   if (typeof cls === "string" && /language-mermaid/.test(cls)) {
     const raw = extractText(codeEl?.props?.children);
-    return <MermaidBlock code={raw} />;
+    return (
+      <Drawn span={span}>
+        <MermaidBlock code={raw} />
+      </Drawn>
+    );
   }
 
   const encodedLang = /language-([\w+-]+)/.exec(cls)?.[1];
@@ -80,16 +111,24 @@ export function CodeBlock({ children, ...rest }: any) {
   // ```mermaid fences hold diagram source. Any fence meta becomes the root's
   // name when the JSON does not carry one.
   if (lang === "mindmap") {
-    return <MindMapBlock code={extractText(codeEl?.props?.children)} title={meta} />;
+    const source = extractText(codeEl?.props?.children);
+    // Registered for copying, as MermaidBlock registers its diagrams.
+    return (
+      <Drawn span={span} register={(el) => registerDiagramSource(el, "mindmap", source)}>
+        <MindMapBlock code={source} title={meta} />
+      </Drawn>
+    );
   }
 
   if (lang === "interactive-html" || lang === "interactive-react") {
     return (
-      <InteractiveBlock
-        kind={lang === "interactive-html" ? "html" : "react"}
-        code={extractText(codeEl?.props?.children)}
-        meta={meta}
-      />
+      <Drawn span={span}>
+        <InteractiveBlock
+          kind={lang === "interactive-html" ? "html" : "react"}
+          code={extractText(codeEl?.props?.children)}
+          meta={meta}
+        />
+      </Drawn>
     );
   }
 
@@ -101,7 +140,11 @@ export function CodeBlock({ children, ...rest }: any) {
     try {
       const parsed = JSON.parse(raw);
       if (parsed !== null && typeof parsed === "object") {
-        return <JsonFigure value={parsed} />;
+        return (
+          <Drawn span={span}>
+            <JsonFigure value={parsed} />
+          </Drawn>
+        );
       }
     } catch {
       // Not valid JSON — fall through.

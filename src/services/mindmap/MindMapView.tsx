@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Home, Minus, Plus, X } from "lucide-react";
 import { initialOpenDepth, openToDepth, type MindMapNode, type MindMapTree } from "./mindmap";
 import { isZoomWheel, wheelPixels, wheelZoomFactor } from "@/lib/viewport";
@@ -18,8 +18,23 @@ const CONTROL_WIDTH = 22,
 const MIN_ZOOM = 0.35,
   MAX_ZOOM = 2.5,
   VIEW_PADDING = 56;
+// How a label is drawn, and so how it is measured: one source for both, so a
+// box is sized for exactly the text it holds. Sizes are rem, like the type scale.
+const LABEL_FONT = {
+  root: { size: 0.875, weight: 600 },
+  branch: { size: 0.75, weight: 500 },
+  leaf: { size: 0.6875, weight: 500 },
+} as const;
+type LabelKind = keyof typeof LABEL_FONT;
+/** Rendered width of a label in px. */
+type Measure = (text: string, kind: LabelKind) => number;
+// Before the map is mounted there is no font to measure (and no DOM on the
+// server): a per-character guess stands in for that one frame.
+const estimate: Measure = (text) => text.length * CHAR_WIDTH;
 interface Placed {
   node: MindMapNode;
+  /** The label as drawn: ellipsized when it is wider than a node may grow. */
+  label: string;
   x: number;
   y: number;
   width: number;
@@ -40,27 +55,75 @@ interface Layout {
   height: number;
 }
 
-function nodeWidth(node: MindMapNode, hasChildren: boolean) {
-  return Math.min(
-    MAX_NODE_WIDTH,
-    Math.max(
-      MIN_NODE_WIDTH,
-      node.label.length * CHAR_WIDTH + NODE_PADDING + (hasChildren ? CONTROL_WIDTH : 0),
-    ),
-  );
+function labelKind(depth: number, hasChildren: boolean): LabelKind {
+  return depth === 0 ? "root" : hasChildren ? "branch" : "leaf";
+}
+/**
+ * The label and box width for a node. The box hugs the measured text up to
+ * MAX_NODE_WIDTH; past that the label is cut to the widest prefix that fits
+ * with an ellipsis, so text never runs out of its box whatever the font.
+ */
+function fitNode(node: MindMapNode, depth: number, hasChildren: boolean, measure: Measure) {
+  const kind = labelKind(depth, hasChildren),
+    chrome = NODE_PADDING + (hasChildren ? CONTROL_WIDTH : 0),
+    room = MAX_NODE_WIDTH - chrome;
+  let label = node.label,
+    text = measure(label, kind);
+  if (text > room) {
+    // Binary search for the longest prefix that still fits with its ellipsis.
+    let low = 0,
+      high = label.length;
+    while (low < high) {
+      const mid = (low + high + 1) >> 1;
+      if (measure(`${label.slice(0, mid).trimEnd()}…`, kind) <= room) low = mid;
+      else high = mid - 1;
+    }
+    label = `${label.slice(0, low).trimEnd()}…`;
+    text = measure(label, kind);
+  }
+  return { label, width: Math.min(MAX_NODE_WIDTH, Math.max(MIN_NODE_WIDTH, text + chrome)) };
 }
 function nodeHeight(depth: number, hasChildren: boolean) {
   return depth === 0 ? ROOT_HEIGHT : hasChildren ? BRANCH_HEIGHT : LEAF_HEIGHT;
 }
+/**
+ * Measures labels with a canvas in the font the map inherits: the reader picks
+ * the document font, so a per-character guess overflowed wide fonts and left
+ * narrow ones swimming in their boxes. Results are cached per label.
+ */
+function textMeasurer(element: Element): Measure {
+  const context = document.createElement("canvas").getContext("2d");
+  if (!context) return estimate;
+  const family = getComputedStyle(element).fontFamily,
+    rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16,
+    cache = new Map<string, number>();
+  return (text, kind) => {
+    const key = `${kind}:${text}`;
+    let width = cache.get(key);
+    if (width === undefined) {
+      const { size, weight } = LABEL_FONT[kind];
+      context.font = `${weight} ${size * rem}px ${family}`;
+      width = context.measureText(text).width;
+      cache.set(key, width);
+    }
+    return width;
+  };
+}
 
-function layout(root: MindMapNode, open: Set<string>): Layout {
+function layout(root: MindMapNode, open: Set<string>, measureText: Measure): Layout {
   const nodes: Placed[] = [],
     edges: Edge[] = [],
-    columns: number[] = [];
+    columns: number[] = [],
+    fitted = new Map<string, { label: string; width: number }>();
+  const fitOf = (node: MindMapNode, depth: number, hasChildren: boolean) => {
+    let fit = fitted.get(node.id);
+    if (!fit) fitted.set(node.id, (fit = fitNode(node, depth, hasChildren, measureText)));
+    return fit;
+  };
   let cursorY = 0;
   const measure = (node: MindMapNode, depth: number) => {
     const hasChildren = Boolean(node.children?.length);
-    columns[depth] = Math.max(columns[depth] ?? 0, nodeWidth(node, hasChildren));
+    columns[depth] = Math.max(columns[depth] ?? 0, fitOf(node, depth, hasChildren).width);
     if (open.has(node.id)) node.children?.forEach((child) => measure(child, depth + 1));
   };
   measure(root, 0);
@@ -74,11 +137,13 @@ function layout(root: MindMapNode, open: Set<string>): Layout {
     const hasChildren = Boolean(node.children?.length),
       expanded = hasChildren && open.has(node.id),
       height = nodeHeight(depth, hasChildren);
+    const { label, width } = fitOf(node, depth, hasChildren);
     const placed: Placed = {
       node,
+      label,
       x: offsets[depth],
       y: cursorY,
-      width: nodeWidth(node, hasChildren),
+      width,
       height,
       depth,
       hasChildren,
@@ -121,11 +186,14 @@ function edgePath({ from, to }: Edge) {
 export function MindMapView({
   tree,
   embedded = false,
+  fill = false,
   onInspect,
 }: {
   tree: MindMapTree;
   /** Rendered inside a document: a figure sized to the text, not a full page. */
   embedded?: boolean;
+  /** Fill the parent's height instead of sizing to the viewport (full screen). */
+  fill?: boolean;
   /**
    * Hand the selected node to the caller instead of drawing the details panel
    * inside the map. Passed when the map is a figure in a document, where the
@@ -143,8 +211,25 @@ export function MindMapView({
     [dragging, setDragging] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null),
     dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null),
-    fittedRef = useRef(false);
-  const { nodes, edges, width, height } = useMemo(() => layout(tree.root, open), [tree.root, open]);
+    // Until the reader moves the view, it stays fitted to the frame. The frame
+    // changes size on entering or leaving full screen, and a view fitted once
+    // to the inline figure left the map small in the top-left corner there.
+    followFrameRef = useRef(true);
+  const [measureText, setMeasureText] = useState<Measure>(() => estimate);
+  // Before first paint, so the map is never drawn from the estimate; again when
+  // a web font finishes loading, since until then the canvas measured a fallback.
+  useLayoutEffect(() => {
+    const element = frameRef.current;
+    if (!element) return;
+    const update = () => setMeasureText(() => textMeasurer(element));
+    update();
+    document.fonts?.addEventListener("loadingdone", update);
+    return () => document.fonts?.removeEventListener("loadingdone", update);
+  }, []);
+  const { nodes, edges, width, height } = useMemo(
+    () => layout(tree.root, open, measureText),
+    [tree.root, open, measureText],
+  );
   const selectedNode = useMemo(() => {
     const node = nodes.find(({ node }) => node.id === selected)?.node;
     return node?.metadata?.length ? node : null;
@@ -171,7 +256,7 @@ export function MindMapView({
     setSelected(null);
     setZoom(1);
     setPan({ x: 0, y: 0 });
-    fittedRef.current = false;
+    followFrameRef.current = true;
   }, [tree]);
   const fit = useCallback(() => {
     if (!frame.width || !frame.height || !width || !height) return;
@@ -187,13 +272,21 @@ export function MindMapView({
     );
     setZoom(nextZoom);
     setPan({ x: (frame.width - width * nextZoom) / 2, y: (frame.height - height * nextZoom) / 2 });
+    followFrameRef.current = true;
   }, [frame, height, width]);
+  // Keyed on the frame alone: opening a branch changes the layout, and that
+  // must not re-zoom the map under the reader's click.
+  const fitRef = useRef(fit);
+  fitRef.current = fit;
   useEffect(() => {
-    if (!fittedRef.current && frame.width && frame.height) {
-      fit();
-      fittedRef.current = true;
-    }
-  }, [fit, frame]);
+    if (followFrameRef.current && frame.width && frame.height) fitRef.current();
+    // Re-measured labels (a font arriving) resize the map: keep it framed.
+  }, [frame, measureText]);
+  // Entering or leaving full screen is a new framing even after the reader
+  // has moved the view: fit again once the new frame has been measured.
+  useEffect(() => {
+    followFrameRef.current = true;
+  }, [fill]);
   const toggle = useCallback(
     (id: string) =>
       setOpen((previous) => {
@@ -221,6 +314,7 @@ export function MindMapView({
     const oy = clientY === undefined ? rect.height / 2 : clientY - rect.top;
     const k = next / current;
     const nextPan = { x: ox - (ox - offset.x) * k, y: oy - (oy - offset.y) * k };
+    followFrameRef.current = false;
     viewRef.current = { zoom: next, pan: nextPan };
     setZoom(next);
     setPan(nextPan);
@@ -245,6 +339,7 @@ export function MindMapView({
       event.preventDefault();
       const { zoom: current, pan: offset } = viewRef.current;
       const nextPan = { x: offset.x - dx, y: embedded ? offset.y : offset.y - dy };
+      followFrameRef.current = false;
       viewRef.current = { zoom: current, pan: nextPan };
       setPan(nextPan);
     };
@@ -276,6 +371,7 @@ export function MindMapView({
     if ((event.target as Element).closest("[data-mindmap-node]")) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { x: event.clientX, y: event.clientY, px: pan.x, py: pan.y };
+    followFrameRef.current = false;
     setDragging(true);
   };
   const onPointerMove = (event: React.PointerEvent) => {
@@ -290,7 +386,7 @@ export function MindMapView({
     Boolean(selected && selected.startsWith(`${edge.from.node.id}.`));
   return (
     <div
-      className={`relative isolate overflow-hidden bg-background ${embedded ? "border-y border-border/70" : ""}`}
+      className={`relative isolate overflow-hidden bg-background ${embedded ? "border-y border-border/70" : ""} ${fill ? "h-full" : ""}`}
     >
       <div
         ref={frameRef}
@@ -299,7 +395,7 @@ export function MindMapView({
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         className={`mindmap-canvas w-full overflow-hidden bg-[radial-gradient(circle_at_center,color-mix(in_oklab,var(--primary)_4%,transparent),transparent_58%)] ${
-          embedded ? "h-104" : "h-[calc(100dvh-8rem)] min-h-105"
+          fill ? "h-full" : embedded ? "h-104" : "h-[calc(100dvh-8rem)] min-h-105"
         }`}
         style={{ cursor: dragging ? "grabbing" : "grab", touchAction: "none" }}
       >
@@ -441,9 +537,9 @@ const MindMapNodeShape = memo(function MindMapNodeShape({
   onSelect: (id: string) => void;
   onToggle: (id: string) => void;
 }) {
-  const { node, x, y, width, height, depth, hasChildren, expanded } = placed,
+  const { node, label, x, y, width, height, depth, hasChildren, expanded } = placed,
     root = depth === 0,
-    label = node.label.length > 30 ? `${node.label.slice(0, 29)}…` : node.label;
+    font = LABEL_FONT[labelKind(depth, hasChildren)];
   const fill = root ? "fill-primary/10" : hasChildren ? "fill-card" : "fill-background",
     stroke = selected
       ? "stroke-primary/70"
@@ -460,6 +556,7 @@ const MindMapNodeShape = memo(function MindMapNodeShape({
       style={{ transition: "transform 180ms cubic-bezier(.2,.8,.2,1)" }}
       onClick={() => onSelect(node.id)}
       role="treeitem"
+      aria-label={node.label}
       aria-expanded={hasChildren ? expanded : undefined}
       aria-selected={selected}
       tabIndex={0}
@@ -470,6 +567,8 @@ const MindMapNodeShape = memo(function MindMapNodeShape({
         }
       }}
     >
+      {/* A cut label keeps its full text a hover away. */}
+      {label !== node.label && <title>{node.label}</title>}
       <rect
         width={width}
         height={height}
@@ -481,7 +580,8 @@ const MindMapNodeShape = memo(function MindMapNodeShape({
         x={11}
         y={height / 2}
         dominantBaseline="central"
-        className={`pointer-events-none ${root ? "fill-foreground text-sm font-semibold" : hasChildren ? "fill-foreground text-xs font-medium" : "fill-muted-foreground text-2xs font-medium"}`}
+        className={`pointer-events-none ${root || hasChildren ? "fill-foreground" : "fill-muted-foreground"}`}
+        style={{ fontSize: `${font.size}rem`, fontWeight: font.weight }}
       >
         {label}
       </text>

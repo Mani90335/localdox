@@ -73,7 +73,13 @@ export function SharePreviewDialog({
   const picked = candidates.filter((f) => selected.has(f.id));
   const annotationCount = mode === "workspace" ? countAnnotations(record, selected) : 0;
   // What travels: the text plus the base64 body of any binary file.
-  const approxBytes = picked.reduce((sum, f) => sum + f.content.length + (typeof f.data === "string" ? f.data.length : Math.ceil(dataBytes(f.data) / 3) * 4), 0);
+  const approxBytes = picked.reduce(
+    (sum, f) =>
+      sum +
+      f.content.length +
+      (typeof f.data === "string" ? f.data.length : Math.ceil(dataBytes(f.data) / 3) * 4),
+    0,
+  );
   const binned = candidates.filter((f) => f.deletedAt != null).length;
 
   const build = () =>
@@ -86,9 +92,10 @@ export function SharePreviewDialog({
     setPhase({ step: "uploading" });
     try {
       const shared = build();
-      const json = mode === "workspace"
-        ? await serializeWorkspace(shared)
-        : await serializeSharedFiles(shared.files, record.name);
+      const json =
+        mode === "workspace"
+          ? await serializeWorkspace(shared)
+          : await serializeSharedFiles(shared.files, record.name);
       const url = await onUpload(mode, json);
       setPhase({ step: "done", url, copied: await onCopy(url) });
     } catch (e) {
@@ -282,7 +289,7 @@ export function SharePreviewDialog({
                   className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border text-primary focus:ring-primary"
                 />
                 <span className="text-sm text-foreground">
-                  Include my stars, notes and highlights
+                  Include my notes and highlights
                   <span className="block text-xs text-muted-foreground">
                     {annotationCount === 0
                       ? "The selected files have none."

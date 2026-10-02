@@ -89,3 +89,31 @@ export const TOOLBAR_GROUPS: ToolbarItem[][] = [
 
 /** Every item, flattened — the editor binds shortcuts off this. */
 export const TOOLBAR_ITEMS: ToolbarItem[] = TOOLBAR_GROUPS.flat();
+
+/**
+ * The toolbar item a key press is the shortcut for, if any. Shared by every
+ * Markdown field, so a chord does the same thing wherever it is typed.
+ */
+export function toolbarShortcut(event: {
+  key: string;
+  code: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+}): ToolbarItem | undefined {
+  if (!(event.metaKey || event.ctrlKey)) return undefined;
+  const key = event.key.toLowerCase();
+  for (const item of TOOLBAR_ITEMS) {
+    if (!item.shortcut) continue;
+    const parts = item.shortcut.split("+");
+    if (parts.includes("Shift") !== event.shiftKey) continue;
+    if (parts.includes("Alt") !== event.altKey) continue;
+    // The last segment is the key itself. Compared case-insensitively, and
+    // against `event.code` digits too: Alt on macOS rewrites `key` into a
+    // symbol (⌥1 becomes "¡"), which would otherwise never match.
+    const wanted = parts[parts.length - 1].toLowerCase();
+    if (key === wanted || (/^\d$/.test(wanted) && event.code === `Digit${wanted}`)) return item;
+  }
+  return undefined;
+}

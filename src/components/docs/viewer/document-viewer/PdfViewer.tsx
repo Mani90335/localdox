@@ -6,15 +6,7 @@ import { IconBtn } from "../viewer-controls";
 import { ViewerFrame } from "./shared";
 import type { Props } from "./shared";
 
-export function PdfViewer({
-  file,
-  isBookmarked,
-  onToggleBookmark,
-  prevFile,
-  nextFile,
-  onNavFile,
-  onOpenPalette,
-}: Props) {
+export function PdfViewer({ file, prevFile, nextFile, onNavFile, onOpenPalette }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const reader = usePdfReaderState(file.id);
@@ -32,8 +24,6 @@ export function PdfViewer({
     <div ref={containerRef} className="bg-background">
       <ViewerFrame
         file={file}
-        isBookmarked={isBookmarked}
-        onToggleBookmark={onToggleBookmark}
         prevFile={prevFile}
         nextFile={nextFile}
         onNavFile={onNavFile}

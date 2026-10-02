@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { FilePlus, FolderPlus, PenTool, Plus, Upload } from "lucide-react";
+import { FilePlus, FolderPlus, PenTool, Plus, Upload, type LucideIcon } from "lucide-react";
 import { isOutsideMenu, MenuItem, MenuPanel } from "./menu-primitives";
 
 /**
- * The `+` menu: the three ways to add to a workspace. Shared by the expanded
- * sidebar's list header and the collapsed rail, so both offer the same options.
+ * The `+` menu: create a file, folder or board, or upload. Shared by the
+ * expanded sidebar's list header and the collapsed rail, so both offer the
+ * same options.
  */
 export function AddMenu({
   onCreateFile,
@@ -27,6 +28,11 @@ export function AddMenu({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const creates = [
+    onCreateFile && { label: "File", icon: FilePlus, run: onCreateFile },
+    onCreateFolder && { label: "Folder", icon: FolderPlus, run: onCreateFolder },
+    onCreateBoard && { label: "Board", icon: PenTool, run: onCreateBoard },
+  ].filter((item): item is { label: string; icon: LucideIcon; run: () => void } => !!item);
 
   useEffect(() => {
     if (!open) return;
@@ -59,35 +65,44 @@ export function AddMenu({
 
       {open && (
         <MenuPanel align={align}>
-          {onCreateFile && (
-            <MenuItem
-              icon={FilePlus}
-              label="New file"
-              onClick={() => {
-                setOpen(false);
-                onCreateFile();
-              }}
-            />
-          )}
-          {onCreateBoard && (
-            <MenuItem
-              icon={PenTool}
-              label="New board"
-              onClick={() => {
-                setOpen(false);
-                onCreateBoard();
-              }}
-            />
-          )}
-          {onCreateFolder && (
-            <MenuItem
-              icon={FolderPlus}
-              label="New folder"
-              onClick={() => {
-                setOpen(false);
-                onCreateFolder();
-              }}
-            />
+          {/* Two decisions, in the order a reader makes them: make something
+              new, or bring something in. The three things you can make are
+              peers, so they sit side by side as equal tiles rather than as a
+              list that implies an order of importance. */}
+          {creates.length > 0 && (
+            <>
+              <p className="px-2 pb-2 pt-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Create
+              </p>
+              <div className="grid grid-cols-3 gap-2" role="group" aria-label="Create">
+                {creates.map(({ label, icon: Icon, run }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      run();
+                    }}
+                    aria-label={`New ${label.toLowerCase()}`}
+                    className="flex flex-col items-center gap-2 rounded-lg border border-border/70 p-3 text-xs font-medium text-foreground transition-colors hover:border-border hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Icon
+                      className="h-5 w-5 text-muted-foreground"
+                      strokeWidth={1.5}
+                      aria-hidden
+                    />
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="my-3 flex items-center gap-2 px-1" aria-hidden>
+                <span className="h-px flex-1 bg-border" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  or
+                </span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            </>
           )}
           <MenuItem
             icon={Upload}

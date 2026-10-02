@@ -18,6 +18,8 @@ import { EquationRef } from "./EquationRef";
 interface MathElementProps {
   "data-latex"?: string;
   "data-display"?: string;
+  /** The equation's file span, stamped by rehypeSourceAddress (lib/markdown/source-address). */
+  "data-src"?: string;
 }
 
 interface RefElementProps {
@@ -26,9 +28,17 @@ interface RefElementProps {
 }
 
 export const MATH_COMPONENTS = {
-  [MATH_ELEMENT]: (props: MathElementProps) => (
-    <MathNode latex={props["data-latex"] ?? ""} displayMode={props["data-display"] === "true"} />
-  ),
+  // Wrapped (`display: contents`, so layout is unchanged) to carry the
+  // equation's source span: an equation is addressed as a whole.
+  [MATH_ELEMENT]: (props: MathElementProps) => {
+    const display = props["data-display"] === "true";
+    const Wrapper = display ? "div" : "span";
+    return (
+      <Wrapper data-src={props["data-src"]} data-src-atomic="" className="contents">
+        <MathNode latex={props["data-latex"] ?? ""} displayMode={display} />
+      </Wrapper>
+    );
+  },
   [MATH_REF_ELEMENT]: (props: RefElementProps) => (
     <EquationRef
       label={props["data-label"] ?? ""}

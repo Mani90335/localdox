@@ -6,15 +6,7 @@ import { IconBtn } from "../viewer-controls";
 import { ErrorState, ViewerFrame } from "./shared";
 import type { Props } from "./shared";
 
-export function ImageViewer({
-  file,
-  isBookmarked,
-  onToggleBookmark,
-  prevFile,
-  nextFile,
-  onNavFile,
-  onOpenPalette,
-}: Props) {
+export function ImageViewer({ file, prevFile, nextFile, onNavFile, onOpenPalette }: Props) {
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -106,8 +98,6 @@ export function ImageViewer({
     <div ref={containerRef} className="bg-background">
       <ViewerFrame
         file={file}
-        isBookmarked={isBookmarked}
-        onToggleBookmark={onToggleBookmark}
         prevFile={prevFile}
         nextFile={nextFile}
         onNavFile={onNavFile}
@@ -155,7 +145,7 @@ export function ImageViewer({
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
-            className="image-canvas flex min-h-[calc(100dvh-7.5rem)] items-center justify-center overflow-hidden p-4 md:p-8"
+            className="image-canvas flex min-h-[calc(100dvh-var(--app-chrome-h)-3.5rem)] items-center justify-center overflow-hidden p-4 md:p-8"
             style={{
               cursor: zoom > 1 ? (dragRef.current ? "grabbing" : "grab") : "default",
               // Blocks touch pinch-zoom, which would zoom the page not the image.

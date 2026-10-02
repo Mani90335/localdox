@@ -241,7 +241,7 @@ export function PdfPageArea({
       onScroll={recordAnchor}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
-      className="pdf-page-area relative flex min-h-[calc(100dvh-7.5rem)] flex-1 overflow-auto p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+      className="pdf-page-area relative flex min-h-[calc(100dvh-var(--app-chrome-h)-3.5rem)] flex-1 overflow-auto p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
     >
       {/* Centered with auto margins, not justify/align-center: those center an
           overflowing (zoomed) page by pushing its top and left edges out of

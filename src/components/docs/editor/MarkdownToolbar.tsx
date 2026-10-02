@@ -28,6 +28,7 @@ export function MarkdownToolbar({
   onAction,
   onAttach,
   onMath,
+  controls = "markdown-source",
 }: {
   onAction: (action: FormatAction) => void;
   onAttach?: () => void;
@@ -35,12 +36,14 @@ export function MarkdownToolbar({
    *  comes from composing an expression in a dialog, not from a pure transform
    *  of the current selection. */
   onMath?: () => void;
+  /** Id of the field the buttons edit. */
+  controls?: string;
 }) {
   return (
     <div
       role="toolbar"
       aria-label="Formatting"
-      aria-controls="markdown-source"
+      aria-controls={controls}
       // Scrolls rather than wraps on a narrow screen: a toolbar that reflows to
       // two rows moves every button the moment the window changes, and the
       // reader loses the muscle memory that made it worth having.

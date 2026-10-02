@@ -10,19 +10,12 @@ import {
   Presentation,
   Globe,
   File as FileIcon,
-  Hash,
-  Table,
-  Code,
-  Quote,
-  List,
   PenTool,
-  Star,
   Printer,
   Download,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { DocumentKind } from "@/lib/markdown/markdown-utils";
-import type { SavedEntry, SavedItem } from "@/lib/workspace/saved-items";
 import type { ExportFormat } from "@/services/markdown-export";
 
 /** A glyph per export format, so the flyout scans by shape like the file list. */
@@ -93,35 +86,4 @@ const KIND_META: Partial<Record<DocumentKind, { tone: string; label: string }>> 
 
 export function kindMeta(kind: DocumentKind) {
   return KIND_META[kind] ?? { tone: "text-muted-foreground", label: "FILE" };
-}
-
-/** Glyph for a saved item, so the Saved list scans by what was starred. */
-export function savedIcon(item: SavedItem): LucideIcon {
-  if (item.kind === "file") return FileText;
-  if (item.kind === "section") return Hash;
-  switch (item.blockType) {
-    case "table":
-      return Table;
-    case "code":
-      return Code;
-    case "quote":
-      return Quote;
-    case "image":
-      return FileImage;
-    case "list":
-      return List;
-    default:
-      return Star;
-  }
-}
-
-/** Saved items grouped under the file they came from, newest group first. */
-export function savedByFile(items: SavedEntry[]): Array<[string, SavedEntry[]]> {
-  const groups = new Map<string, SavedEntry[]>();
-  for (const item of items) {
-    const bucket = groups.get(item.fileName);
-    if (bucket) bucket.push(item);
-    else groups.set(item.fileName, [item]);
-  }
-  return [...groups.entries()];
 }

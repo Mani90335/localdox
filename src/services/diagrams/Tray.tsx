@@ -3,9 +3,6 @@
  * buttons, no gaps for the diagram to show through. Grouping by meaning — and
  * spacing the groups — is what tells the eye which buttons belong together,
  * so no group needs a label to explain itself.
- *
- * Exported so the star affordance the markdown viewer overlays on a diagram can
- * join the same row instead of being positioned next to it by guesswork.
  */
 export function Tray({ children }: { children: React.ReactNode }) {
   return (
