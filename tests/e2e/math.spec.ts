@@ -212,12 +212,7 @@ test("editing one equation re-typesets it and keeps the rest", async ({ page }) 
   await page.getByRole("button", { name: "Options", exact: true }).first().click();
   await page.getByText("Edit", { exact: true }).click();
   const editor = page.locator("#markdown-source");
-  await editor.evaluate((el: HTMLTextAreaElement) => {
-    const at = el.value.indexOf("x_{150}^2") + "x_{150}^2".length;
-    el.focus();
-    el.setSelectionRange(at, at);
-  });
-  await page.keyboard.type(" + z");
+  await editor.fill(manyEquations(200).replace("x_{150}^2", "x_{150}^2 + z"));
   await page.getByText("Done · Preview").click();
 
   await expect(typeset(page)).toHaveCount(400, { timeout: 30_000 });

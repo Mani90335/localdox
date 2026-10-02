@@ -130,7 +130,7 @@ export function ReadingFontSettings({
             >
               Atkinson Hyperlegible
             </span>
-            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+            <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
               Drawn for maximum letterform distinction
             </span>
           </span>
@@ -151,7 +151,7 @@ export function ReadingFontSettings({
                 >
                   {customName}
                 </span>
-                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
                   Your font
                 </span>
               </span>
@@ -199,7 +199,7 @@ export function ReadingFontSettings({
                 >
                   {googleFont}
                 </span>
-                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
                   From Google Fonts
                 </span>
               </span>
@@ -223,6 +223,7 @@ export function ReadingFontSettings({
                   if (e.key === "Enter") void applyGoogleFamily();
                 }}
                 placeholder="Font family"
+                aria-label="Google font family"
                 spellCheck={false}
                 className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/10 coarse:min-h-11"
               />

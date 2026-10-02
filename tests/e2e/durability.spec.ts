@@ -55,10 +55,7 @@ const indicator = (page: Page) =>
   page.getByTestId("save-indicator").filter({ visible: true }).first();
 
 async function caretToEnd(page: Page) {
-  await page.locator("#markdown-source").evaluate((el: HTMLTextAreaElement) => {
-    el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
-  });
+  await page.locator("#markdown-source").press("ControlOrMeta+End");
 }
 
 /** Type into the editor, then kill the renderer before the autosave can land. */

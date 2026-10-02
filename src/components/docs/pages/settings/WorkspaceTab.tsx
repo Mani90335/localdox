@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
-import { Section, Group, Row, IconButton } from "./primitives";
+import { Section, Group, Row, Empty, IconButton } from "./primitives";
 import { Switch } from "@/components/ui/switch";
 
 export function WorkspaceSettings({
@@ -41,7 +41,7 @@ export function WorkspaceSettings({
   };
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-7">
       <Section title="Sidebar">
         <Group>
           <Row
@@ -73,17 +73,24 @@ export function WorkspaceSettings({
         }
       >
         <Group>
+          {workspaces.length === 0 && !creating && (
+            <Empty>Create a workspace to organize your documents.</Empty>
+          )}
           {creating && (
             <div className="flex items-center gap-2 px-4 py-2.5">
               <input
                 autoFocus
                 type="text"
                 placeholder="Workspace name..."
+                aria-label="New workspace name"
+                data-settings-draft
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") commitCreate();
                   if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
                     setCreating(false);
                     setNewName("");
                   }
@@ -220,10 +227,16 @@ function WorkspaceItemRow({
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") commit();
-            if (e.key === "Escape") cancel();
+            if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              cancel();
+            }
           }}
           className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/10 coarse:min-h-11"
           placeholder="Workspace name"
+          aria-label="Workspace name"
+          data-settings-draft
         />
         <button
           onClick={commit}

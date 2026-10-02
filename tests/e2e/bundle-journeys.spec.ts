@@ -17,7 +17,8 @@ const budgets = {
   pdf: 570,
   conversion: 3250,
   diagram: 390,
-  edit: 12,
+  // CodeMirror source highlighting, folding, and undo: 193.2 KiB measured.
+  edit: 210,
   export: 165,
   spreadsheet: 180,
   interactive: 840,
@@ -32,7 +33,7 @@ const optional =
   /(?:compiler\.worker|compute\.worker|advanced\.worker|\/pyodide\/|mathlive\.min|spreadsheet\.worker|pdf(?:\.worker)?-|anydoc_wasm|conversion\.worker|mermaid\.core|media-bundle|react-dom-server|katex-[^.]+\.js)/;
 type ReportFile = { file: string; modules?: string[] };
 const capabilityModules =
-  /node_modules\/(?:@babel\/standalone|@cortex-js\/compute-engine|mathlive|xlsx|pdfjs-dist|mermaid|katex)\//;
+  /node_modules\/(?:@babel\/standalone|@(?:codemirror|lezer)\/[^/]+|@cortex-js\/compute-engine|mathlive|xlsx|pdfjs-dist|mermaid|katex)\//;
 
 async function upload(page: Page, name: string, source: string) {
   await page
