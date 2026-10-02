@@ -246,14 +246,14 @@ function apply(op: Op, [a, b]: Q[]): { value: Q; work?: Step } {
         return {
           value,
           work: {
-            text: "Same denominator: combine the numerators.",
+            text: "The bottom numbers match, so combine the top numbers.",
             latex: `${first} = ${qLatex(value)}`,
           },
         };
       return {
         value,
         work: {
-          text: `Write both over the common denominator $${common}$.`,
+          text: `Give both fractions the same bottom number: $${common}$.`,
           latex: `${first} = ${over(a)} ${sign} ${b.n < 0n ? `\\left(${over(b)}\\right)` : over(b)} = ${qLatex(value)}`,
         },
       };
@@ -264,7 +264,7 @@ function apply(op: Op, [a, b]: Q[]): { value: Q; work?: Step } {
       return {
         value,
         work: {
-          text: "Multiply the numerators, and the denominators.",
+          text: "Multiply the top numbers together, then the bottom numbers.",
           latex: `${qLatex(a)} \\times ${wrapNegative(b)} = \\frac{${a.n} \\times ${paren(b.n)}}{${a.d} \\times ${b.d}} = ${qLatex(value)}`,
         },
       };
@@ -277,7 +277,7 @@ function apply(op: Op, [a, b]: Q[]): { value: Q; work?: Step } {
         return {
           value,
           work: {
-            text: "Dividing by a number is multiplying by its reciprocal.",
+            text: "Flip the second fraction, then multiply.",
             latex: `${qLatex(a)} \\div ${wrapNegative(b)} = ${qLatex(a)} \\times ${wrapNegative(reciprocal)} = ${qLatex(value)}`,
           },
         };
@@ -306,7 +306,7 @@ function apply(op: Op, [a, b]: Q[]): { value: Q; work?: Step } {
         return {
           value,
           work: {
-            text: "A negative power is the reciprocal of the positive power.",
+            text: "For a negative power, work out the positive power, then divide 1 by it.",
             latex: `${powerBase(a)}^{${k}} = \\frac{1}{${powerBase(a)}^{${-k}}} = ${qLatex(value)}`,
           },
         };
@@ -315,7 +315,7 @@ function apply(op: Op, [a, b]: Q[]): { value: Q; work?: Step } {
         return {
           value,
           work: {
-            text: "Raise the numerator and the denominator to the power.",
+            text: "Apply the power to both the top and bottom numbers.",
             latex: `${powerBase(a)}^{${k}} = \\frac{${paren(a.n)}^{${k}}}{${a.d}^{${k}}} = ${qLatex(value)}`,
           },
         };

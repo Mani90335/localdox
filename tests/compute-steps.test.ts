@@ -75,7 +75,7 @@ test("quadratics: factoring, the square root, the quadratic formula, complex roo
   assert.equal(formula.at(-1), "The solutions: x = 1 + \\sqrt{2},\\quad x = 1 - \\sqrt{2}");
 
   const complex = lines(answer("solve", "x^2+x+1=0"));
-  assert.ok(complex.some((l) => /negative, so the solutions are complex/.test(l)));
+  assert.ok(complex.some((l) => /number inside the square root is negative/.test(l)));
   assert.equal(
     complex.at(-1),
     "The solutions: x = \\frac{-1 + \\sqrt{3}\\,i}{2},\\quad x = \\frac{-1 - \\sqrt{3}\\,i}{2}",
@@ -175,7 +175,7 @@ test("arithmetic: the order of operations, with the fraction work beneath", () =
   ]);
   assert.deepEqual(lines(answer("evaluate", "\\frac{1}{2}+\\frac{1}{3}")), [
     "Add. \\frac{5}{6}",
-    "Write both over the common denominator $6$. \\frac{1}{2} + \\frac{1}{3} = \\frac{3}{6} + \\frac{2}{6} = \\frac{5}{6}",
+    "Give both fractions the same bottom number: $6$. \\frac{1}{2} + \\frac{1}{3} = \\frac{3}{6} + \\frac{2}{6} = \\frac{5}{6}",
   ]);
   assert.deepEqual(lines(answer("evaluate", "-3^2")), [
     "Work out the powers. -\\left(9\\right)",

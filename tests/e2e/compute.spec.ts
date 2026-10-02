@@ -92,7 +92,7 @@ test("evaluate, copy, add to rough work, then insert into the document only when
   const stepsToggle = result.getByRole("button", { name: /^Steps/ });
   await expect(stepsToggle).toHaveAttribute("aria-expanded", "true");
   const steps = result.getByRole("list", { name: "Steps" });
-  await expect(steps).toContainText("Write both over the common denominator");
+  await expect(steps).toContainText("Give both fractions the same bottom number:");
   // Hidden steps aren't copied: what is copied is what the card shows.
   await stepsToggle.click();
   await expect(steps).toBeHidden();
