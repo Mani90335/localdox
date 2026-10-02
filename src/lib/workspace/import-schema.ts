@@ -107,6 +107,7 @@ const highlightSchema = z.object({
   text: z.string(),
   color: z.string(),
   label: optionalText,
+  createdAt: optionalCount,
 });
 
 const noteSchema = z

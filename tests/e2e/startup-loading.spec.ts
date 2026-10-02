@@ -17,7 +17,7 @@ test.use({ serviceWorkers: "block" });
 
 const MARKERS = {
   // The Markdown reader's highlight menu; no other chunk carries this label.
-  reader: "Save this selection",
+  reader: "More highlight actions",
   editor: "Editing — changes save automatically",
   parser: "Cannot close document, a token",
   panes: "data-separator",

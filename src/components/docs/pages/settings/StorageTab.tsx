@@ -127,7 +127,7 @@ export function StorageSettings({
 
       <Section
         title="Danger zone"
-        description="Permanently deletes every workspace, file, highlight, saved item and preference stored in this browser. This cannot be undone."
+        description="Permanently deletes every workspace, file, highlight, note and preference stored in this browser. This cannot be undone."
       >
         <Group>
           <Row

@@ -4,7 +4,6 @@ import { isEditableTarget, hasModKey } from "@/lib/platform/keyboard";
 import {
   ChevronRight,
   Settings,
-  Trash2,
   GripVertical,
   Check,
   PanelLeft,
@@ -26,7 +25,6 @@ import {
 } from "@/components/ui/context-menu";
 import { modKeyLabel } from "@/lib/platform/keyboard";
 import type { Highlight } from "@/lib/markdown/dom-highlighter";
-import { savedTypeLabel, type SavedEntry, type SavedItem } from "@/lib/workspace/saved-items";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import { readingMinutes } from "@/lib/markdown/markdown-utils";
 import { fileLabel, getDocumentKind, isEditableKind } from "@/lib/markdown/document-utils";
@@ -34,7 +32,7 @@ import { availableFormats, type ExportFormat } from "@/services/markdown-export"
 import { WorkspaceStrip, initials } from "./WorkspaceStrip";
 import { useNavHistory } from "@/hooks/use-nav-history";
 import { canConvertToMarkdown, latestMarkdownCopies } from "@/services/doc-conversion";
-import { kindIcon, kindMeta, savedIcon, savedByFile } from "./sidebar/file-glyphs";
+import { kindIcon, kindMeta } from "./sidebar/file-glyphs";
 import { isOutsideMenu, MenuItem, MenuPanel } from "./sidebar/menu-primitives";
 import { GroupActionMenu } from "./sidebar/GroupActionMenu";
 import { FileMenu } from "./sidebar/FileMenu";
@@ -48,15 +46,14 @@ export { AddMenu };
 
 /**
  * How the file list is presented in the sidebar.
- * - `mode` is driven by the chip row: All (flat), Grouped (by file type),
- *   or Saved (bookmarks only).
+ * - `mode` is driven by the chip row: All (flat) or Grouped (by file type).
  * - `sort`/`dir` are set from the three-dots menu. `manual` keeps the real
  *   file order so drag reordering stays meaningful.
  */
 export type SidebarView = {
   sort: "manual" | "name" | "date";
   dir: "asc" | "desc";
-  mode: "all" | "grouped" | "saved";
+  mode: "all" | "grouped";
 };
 export const DEFAULT_VIEW: SidebarView = {
   sort: "manual",
@@ -65,7 +62,7 @@ export const DEFAULT_VIEW: SidebarView = {
 };
 
 /**
- * The list's three views, in the order the picker offers them.
+ * The list's views, in the order the picker offers them.
  *
  * The Bin is not among them. It is not a way of looking at the workspace —
  * it holds documents that have left it — and it lives in Settings ▸ Storage,
@@ -74,11 +71,10 @@ export const DEFAULT_VIEW: SidebarView = {
 /** Context-menu rows styled like the sidebar's own menus (`MenuItem`). */
 const CONTEXT_ITEM = "gap-3 rounded-lg px-2.5 py-2 text-sm";
 
-const VIEW_MODES: readonly SidebarView["mode"][] = ["all", "grouped", "saved"];
+const VIEW_MODES: readonly SidebarView["mode"][] = ["all", "grouped"];
 const VIEW_LABEL: Record<SidebarView["mode"], string> = {
   all: "All files",
   grouped: "Grouped",
-  saved: "Saved",
 };
 
 /**
@@ -123,7 +119,6 @@ interface Props {
   onEditFile?: (id: string) => void;
   onConvertFile?: (id: string) => void;
   convertingFileId?: string | null;
-  /** Star / unstar a whole document from its row menu. */
   /**
    * Folders the workspace has, flat. Files point at one through `folderId`;
    * anything unfiled stays at the top level under the folder rows.
@@ -142,17 +137,12 @@ interface Props {
   /** Deleting a folder keeps its documents — they return to the top level. */
   onDeleteFolder?: (id: string) => void;
   onMoveFileToFolder?: (fileId: string, folderId: string | null) => void;
-  /** Stars on documents, sections and blocks — the Saved chip. */
-  saved: SavedEntry[];
   currentWorkspaceName: string;
   canDeleteWorkspace: boolean;
   onRenameCurrentWorkspace: (name: string) => void;
   onDeleteCurrentWorkspace: () => void;
   onClearStorage: () => void;
   highlights: Highlight[];
-  /** Go to a saved item: its file, its page, then the passage itself. */
-  onOpenSaved: (item: SavedItem) => void;
-  onRemoveSaved: (id: string) => void;
   onRemoveHighlight: (id: string) => void;
   /** Open the isolated "highlights only" view for a file (text-based only). */
   onReorderFile?: (oldIndex: number, newIndex: number) => void;
@@ -222,15 +212,12 @@ function SidebarImpl({
   onDeleteFolder,
   onMoveFileToFolder,
   onMoveFolderToFolder,
-  saved: allSaved,
   currentWorkspaceName,
   canDeleteWorkspace,
   onRenameCurrentWorkspace,
   onDeleteCurrentWorkspace,
   onClearStorage,
   highlights,
-  onOpenSaved,
-  onRemoveSaved,
   onRemoveHighlight,
   onReorderFile,
   onReorderFolder,
@@ -275,10 +262,6 @@ function SidebarImpl({
       ),
     [files, hiddenFolders],
   );
-  const saved = useMemo(
-    () => allSaved.filter((entry) => !hiddenFiles.has(entry.fileId)),
-    [allSaved, hiddenFiles],
-  );
 
   const currentWorkspace = useMemo(
     () => workspaces.find((w) => w.id === currentWorkspaceId) ?? null,
@@ -292,10 +275,6 @@ function SidebarImpl({
   // Back/forward over the workspace's own navigation trail, rendered next to
   // the sidebar toggle.
   const navHistory = useNavHistory();
-
-  // Which documents are starred as a whole — the star in each row's menu
-  // reflects this. Section and block stars are excluded: they say nothing about
-  // whether the document itself is starred.
 
   // Progressive disclosure: chapters stay collapsed unless the reader opens
   // them; the current chapter is expanded automatically. This keeps the
@@ -500,8 +479,7 @@ function SidebarImpl({
               : (a.addedAt ?? 0) - (b.addedAt ?? 0);
           return base * (view.dir === "desc" ? -1 : 1);
         });
-  // Folders only shape the flat "All" list; Grouped stays grouped by file type,
-  // and Recent/Saved are their own orderings.
+  // Folders only shape the flat "All" list; Grouped stays grouped by file type.
   const knownFolderIds = new Set(folders.map((f) => f.id));
   const showFolders = view.mode === "all" && folders.length > 0;
   const rootFiles = sorted.filter((f) => !f.folderId || !knownFolderIds.has(f.folderId));
@@ -1143,7 +1121,6 @@ function SidebarImpl({
         <ContextMenu>
           <ContextMenuTrigger
             asChild
-            disabled={view.mode === "saved"}
             onContextMenu={(e) => {
               const row = (e.target as Element).closest?.(
                 "[data-sidebar-file],[data-sidebar-folder]",
@@ -1183,60 +1160,7 @@ function SidebarImpl({
                   </button>
                 </div>
               )}
-              {view.mode === "saved" ? (
-                saved.length === 0 ? (
-                  <p className="px-2 py-4 text-sm text-muted-foreground">
-                    No saved items yet. Star a document, a section, a table or a code block.
-                  </p>
-                ) : (
-                  savedByFile(saved).map(([fileName, items]) => (
-                    <div key={fileName} className="mb-3">
-                      <div className="px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        {fileName}
-                      </div>
-                      <ul className="space-y-1">
-                        {items.map((item) => {
-                          const Icon = savedIcon(item);
-                          return (
-                            <li
-                              key={item.id}
-                              className="group flex items-start gap-1 rounded-lg px-1 hover:bg-accent/60"
-                            >
-                              <button
-                                onClick={() => onOpenSaved(item)}
-                                className="flex min-w-0 flex-1 items-start gap-2 rounded-md py-2 pl-2 pr-1.5 text-left"
-                                title={item.text || item.title}
-                              >
-                                <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                <span className="min-w-0 flex-1">
-                                  <span className="block truncate text-sm font-medium text-foreground/80">
-                                    {item.title}
-                                  </span>
-                                  <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                                    {savedTypeLabel(item)}
-                                    {item.orphaned && (
-                                      <span className="text-amber-600 dark:text-amber-400">
-                                        · edited away
-                                      </span>
-                                    )}
-                                  </span>
-                                </span>
-                              </button>
-                              <button
-                                onClick={() => onRemoveSaved(item.id)}
-                                className="mt-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-100 transition-opacity hover:text-destructive md:opacity-0 md:group-hover:opacity-100"
-                                aria-label="Remove saved item"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </div>
-                  ))
-                )
-              ) : total === 0 && folders.length === 0 ? null : (
+              {total === 0 && folders.length === 0 ? null : (
                 <>
                   {showFolders && rootFolders.map((folder) => renderFolder(folder, 0))}
                   {/* The top level's own drop target, and the reason a file can be

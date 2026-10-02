@@ -28,8 +28,6 @@ const overflows = (value: string, width: number) => value.length * 7.6 + 26 > wi
 export function SpreadsheetViewer({
   file,
   embedded,
-  isBookmarked,
-  onToggleBookmark,
   prevFile,
   nextFile,
   onNavFile,
@@ -145,8 +143,6 @@ export function SpreadsheetViewer({
     <ViewerFrame
       file={file}
       embedded={embedded}
-      isBookmarked={isBookmarked}
-      onToggleBookmark={onToggleBookmark}
       prevFile={prevFile}
       nextFile={nextFile}
       onNavFile={onNavFile}

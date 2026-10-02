@@ -1,7 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Expand, LoaderCircle, Minimize2, Star } from "lucide-react";
+import { Download, Expand, LoaderCircle, Minimize2 } from "lucide-react";
 import { toast } from "sonner";
-import { useSaveAction } from "@/components/docs/editor/save-action";
 import { largeDiagramMermaidConfig } from "./mermaid-config";
 import { withMermaid } from "./mermaid-runtime";
 import {
@@ -70,8 +69,6 @@ export function Mermaid({
   const { followNumbers, showNumbers } = useStepPreferences();
   const [renderError, setRenderError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  // Present when the markdown viewer has delegated its save star to this tray.
-  const saveAction = useSaveAction();
   // Trimming a multi-megabyte source on every state update is measurable. The
   // prop changes only when the document changes, so retain the normalized view.
   const source = useMemo(() => code.trim(), [code]);
@@ -221,19 +218,6 @@ export function Mermaid({
     </TrayButton>
   );
 
-  // Saving is something you do *to* this diagram, like downloading it, so it
-  // joins that segment rather than floating in the corner as its own surface.
-  const saveControl = saveAction ? (
-    <TrayButton
-      onClick={saveAction.toggle}
-      label={saveAction.label}
-      title={saveAction.title}
-      active={saveAction.saved}
-    >
-      <Star className={`h-3.5 w-3.5 ${saveAction.saved ? "fill-gold text-gold" : ""}`} />
-    </TrayButton>
-  ) : null;
-
   const unavailable: Partial<Record<MermaidMode, string>> | undefined = held
     ? {
         stepped: "Draw the diagram first to step through it",
@@ -291,7 +275,6 @@ export function Mermaid({
           it held almost nothing. Each one appears only where it applies, so
           nothing needs hiding. */}
       <Tray>
-        {saveControl}
         {effectiveMode === "flow" ? downloadControl : null}
         <TrayButton
           onClick={toggleFullscreen}

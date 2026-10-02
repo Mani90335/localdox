@@ -6,8 +6,6 @@ import { ViewerHeader, type ViewerNav } from "../../navigation/ViewerHeader";
 
 export interface Props {
   file: MdFile;
-  isBookmarked?: boolean;
-  onToggleBookmark?: () => void;
   onRemoveFile?: () => void;
   /** Sibling files, so the shared header's prev/next can move between files. */
   prevFile?: MdFile | null;
@@ -123,8 +121,6 @@ export function ViewerFrame({
   editing?: boolean;
   navAction?: React.ReactNode;
   icon?: React.ReactNode;
-  isBookmarked?: boolean;
-  onToggleBookmark?: () => void;
 } & Pick<Props, "prevFile" | "nextFile" | "onNavFile" | "onOpenPalette">) {
   const edit = useEditAction(editing ? undefined : file);
   if (embedded) return <>{children}</>;

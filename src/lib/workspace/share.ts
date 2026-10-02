@@ -30,7 +30,10 @@ export interface SharedFilesPayload {
   files: PersistedFile[];
 }
 
-export async function serializeSharedFiles(files: PersistedFile[], sourceName: string): Promise<string> {
+export async function serializeSharedFiles(
+  files: PersistedFile[],
+  sourceName: string,
+): Promise<string> {
   const includedIds = new Map(files.map((file) => [file.id, file.id]));
   const payload: SharedFilesPayload = {
     format: "localdox-files",
@@ -53,14 +56,14 @@ export async function serializeSharedFiles(files: PersistedFile[], sourceName: s
 }
 
 /**
- * What a share leaves out unless the sender opts in. Stars, notes and
- * highlights are private reading state, and the Bin holds what was thrown
+ * What a share leaves out unless the sender opts in. Notes and highlights
+ * are private reading state, and the Bin holds what was thrown
  * away; none of it is part of "the documents" a reader means to hand over.
  */
 export interface ShareSelection {
   /** Files to send. Binned files are sent only when listed here explicitly. */
   fileIds: string[];
-  /** Carry stars, notes and highlights on the included files. */
+  /** Carry notes and highlights on the included files. */
   includeAnnotations: boolean;
 }
 
@@ -94,14 +97,10 @@ export function buildWorkspaceShare(
     .map((folder) => ({ ...folder }));
 
   const onShared = (fileId: string) => ids.has(fileId);
-  const saved = selection.includeAnnotations
-    ? (record.saved ?? []).filter((s) => onShared(s.fileId))
-    : [];
+  // Stars never travel: starring was removed from the app, so the sender can
+  // no longer see what they would be handing over (see saved-items.ts).
   const highlights = selection.includeAnnotations
     ? (record.highlights ?? []).filter((h) => onShared(h.fileId))
-    : [];
-  const bookmarks = selection.includeAnnotations
-    ? record.bookmarks.filter((b) => onShared(b.split("#")[0]))
     : [];
   const order = (record.ui.fileOrder ?? []).filter(onShared);
   const active =
@@ -131,8 +130,8 @@ export function buildWorkspaceShare(
       return file;
     }),
     folders,
-    bookmarks,
-    saved,
+    bookmarks: [],
+    saved: [],
     highlights,
     ui: {
       activeFileId: active,
@@ -150,10 +149,7 @@ export function buildWorkspaceShare(
 /** How many private annotations a set of files carries — the opt-in's label. */
 export function countAnnotations(record: WorkspaceRecord, fileIds: Iterable<string>): number {
   const ids = new Set(fileIds);
-  return (
-    (record.saved ?? []).filter((s) => ids.has(s.fileId)).length +
-    (record.highlights ?? []).filter((h) => ids.has(h.fileId)).length
-  );
+  return (record.highlights ?? []).filter((h) => ids.has(h.fileId)).length;
 }
 
 /** Parse a `#share-files=` payload. Throws when it isn't one. */

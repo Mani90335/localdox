@@ -6,15 +6,7 @@ import { IconBtn } from "../viewer-controls";
 import { ErrorState, ViewerFrame } from "./shared";
 import type { Props } from "./shared";
 
-export function ImageViewer({
-  file,
-  isBookmarked,
-  onToggleBookmark,
-  prevFile,
-  nextFile,
-  onNavFile,
-  onOpenPalette,
-}: Props) {
+export function ImageViewer({ file, prevFile, nextFile, onNavFile, onOpenPalette }: Props) {
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -106,8 +98,6 @@ export function ImageViewer({
     <div ref={containerRef} className="bg-background">
       <ViewerFrame
         file={file}
-        isBookmarked={isBookmarked}
-        onToggleBookmark={onToggleBookmark}
         prevFile={prevFile}
         nextFile={nextFile}
         onNavFile={onNavFile}

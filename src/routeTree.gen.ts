@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as MdReaderRouteImport } from './routes/md-reader'
-import { Route as SavedRouteImport } from './routes/saved'
 import { Route as SettingsRouteImport } from './routes/settings'
 
 const IndexRoute = IndexRouteImport.update({
@@ -24,11 +23,6 @@ const MdReaderRoute = MdReaderRouteImport.update({
   path: '/md-reader',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SavedRoute = SavedRouteImport.update({
-  id: '/saved',
-  path: '/saved',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -38,34 +32,30 @@ const SettingsRoute = SettingsRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/md-reader': typeof MdReaderRoute
-  '/saved': typeof SavedRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/md-reader': typeof MdReaderRoute
-  '/saved': typeof SavedRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/md-reader': typeof MdReaderRoute
-  '/saved': typeof SavedRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/md-reader' | '/saved' | '/settings'
+  fullPaths: '/' | '/md-reader' | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/md-reader' | '/saved' | '/settings'
-  id: '__root__' | '/' | '/md-reader' | '/saved' | '/settings'
+  to: '/' | '/md-reader' | '/settings'
+  id: '__root__' | '/' | '/md-reader' | '/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   MdReaderRoute: typeof MdReaderRoute
-  SavedRoute: typeof SavedRoute
   SettingsRoute: typeof SettingsRoute
 }
 
@@ -85,13 +75,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MdReaderRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/saved': {
-      id: '/saved'
-      path: '/saved'
-      fullPath: '/saved'
-      preLoaderRoute: typeof SavedRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -105,7 +88,6 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   MdReaderRoute: MdReaderRoute,
-  SavedRoute: SavedRoute,
   SettingsRoute: SettingsRoute,
 }
 export const routeTree = rootRouteImport

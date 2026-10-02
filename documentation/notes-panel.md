@@ -6,16 +6,14 @@ document is never modified. Each note links back to the passage it came from.
 
 ## The problem
 
-Readers already had two ways to keep something, and neither fits "I want this
+Readers already had a way to keep something, and it doesn't fit "I want this
 passage, in my own words, next to what I'm reading":
 
-- A **highlight** is a live mark *on* the document. It moves when the text
+- A **highlight** is a live mark _on_ the document. It moves when the text
   moves and is orphaned when the text is deleted. You can't edit the passage,
   only label it.
-- A **star** (saved item) is a bookmark. It points at a place and holds no text
-  of its own.
 
-A note is the missing third thing: a **copy**. Once taken, it belongs to the
+A note is the other thing: a **copy**. Once taken, it belongs to the
 reader. They can edit it, search it, and copy it out. Editing or deleting the
 source never reaches into it.
 
@@ -34,17 +32,17 @@ the wrong page.
 ```ts
 interface Note {
   id: string;
-  fileId: string;      // source document; kept after it is deleted
-  fileName: string;    // name at copy time; shown only once the source is gone
-  content: string;     // the passage, as Markdown (≤ 200,000 chars)
+  fileId: string; // source document; kept after it is deleted
+  fileName: string; // name at copy time; shown only once the source is gone
+  content: string; // the passage, as Markdown (≤ 200,000 chars)
   source: {
-    quote: string;     // rendered text of the selection (textContent): the anchor
-    prefix?: string;   // ~48 chars of rendered text either side,
-    suffix?: string;   //   to tell repeated passages apart
-    start?: number;    // offsets in the rendered page at copy time (hint only)
+    quote: string; // rendered text of the selection (textContent): the anchor
+    prefix?: string; // ~48 chars of rendered text either side,
+    suffix?: string; //   to tell repeated passages apart
+    start?: number; // offsets in the rendered page at copy time (hint only)
     end?: number;
-    subtopicId?: string;   // page (H1 section) it was on; absent in single-page mode
-    headingId?: string;    // nearest heading above, used when the passage is gone
+    subtopicId?: string; // page (H1 section) it was on; absent in single-page mode
+    headingId?: string; // nearest heading above, used when the passage is gone
     sectionTitle?: string; // shown on the source link
   };
   createdAt: number;
@@ -58,9 +56,9 @@ Why these choices:
   below it. The quote (with prefix and suffix) is the same scheme highlights
   use (`text-offsets.ts`), so a note survives edits around it.
 - **The live name wins.** While the document exists, the panel shows its
-  *current* name, looked up by `fileId`. A rename never leaves a note pointing
+  _current_ name, looked up by `fileId`. A rename never leaves a note pointing
   at a stale name. `fileName` is only a fallback.
-- **Notes outlive documents.** Stars and highlights are dropped with their
+- **Notes outlive documents.** Highlights (and legacy stars) are dropped with their
   file in import validation and merge. Notes are not: they carry their own
   text.
 
@@ -104,12 +102,12 @@ annotation). So the selection is converted in two steps:
 
 Context rules for partial selections:
 
-| Selection | Result |
-| --- | --- |
-| Part of one paragraph, list item or table cell | that text, no wrapper |
-| Any part of a code block | a fenced block of what was selected |
-| Any part of an equation | the whole equation's LaTeX |
-| Cells across rows | a table, with the header row added if it wasn't selected |
+| Selection                                      | Result                                                   |
+| ---------------------------------------------- | -------------------------------------------------------- |
+| Part of one paragraph, list item or table cell | that text, no wrapper                                    |
+| Any part of a code block                       | a fenced block of what was selected                      |
+| Any part of an equation                        | the whole equation's LaTeX                               |
+| Cells across rows                              | a table, with the header row added if it wasn't selected |
 
 LaTeX comes from what KaTeX and Temml embed in their MathML. The app's
 sanitizer (`services/math/sanitize.ts`) unwraps `<semantics>` and `<annotation>`
@@ -127,7 +125,9 @@ browser globals, so the conversion is unit-tested in Node.
 
 ```
 click "guide.md › Measurements" → DocsApp.openNoteSource(note)
-  resolveNoteSource(note, file)       pure; reads Markdown, not the DOM
+  (a highlight card: openHighlight(h) → highlightSource(h), same path)
+  openPassage(fileId, source)
+  resolveNoteSource({ source }, file) pure; reads Markdown, not the DOM
     no file            → toast "no longer in this workspace"
     file in Bin        → toast "is in the Bin" (restore from Settings ▸ Storage)
     anchor holds       → handleSelect(file, page the span is on now)
@@ -144,12 +144,12 @@ source characters. `relocateAnchor` keeps the span if the file still has the
 same text there. If text was added or removed elsewhere, it finds the
 occurrence nearest the old position. Only when the passage's own edges were
 edited does it give up and fall through to the quote. This is what makes a link
-to the *second* of two identical sentences land on the second one. See
+to the _second_ of two identical sentences land on the second one. See
 `documentation/source-addressing.md`.
 
 **Then, the quote.** `resolveNoteSource` searches the document's Markdown with
 `locateInSource` in **exact mode**. Inspect's fuzzy fallbacks (a prefix, a rare word) are fine for
-placing a caret *near* lost text, but would make a link claim a deleted passage
+placing a caret _near_ lost text, but would make a link claim a deleted passage
 still exists. It tries the whole quote first, then each line of the quote that
 is at least 20 characters long. A selection that crossed an equation carries
 KaTeX glyphs the Markdown never contains, but its plain lines still match
@@ -159,23 +159,51 @@ resolves to the reader's own copy.
 
 Once the right page is open, the viewer re-finds the exact characters with
 `findAnchor` (same quote, prefix and suffix) and flashes them. This reuses the
-star jump (`pendingSaved`, now typed `PassageTarget`). In split view, only the
+passage jump (`pendingSaved`, typed `PassageTarget`) that starred items used
+before starring was removed. In split view, only the
 focused pane takes the jump. The stored `start` offset is passed as a
 tie-breaking hint only when it was measured in the same space: same page, same
 reading mode.
+
+## Highlights in the list
+
+A highlight is also the reader keeping a passage, so the Notes list shows
+highlights alongside notes. There is no Highlights list in Settings any more.
+A highlight is still a highlight, a live mark rather than a copy. Only where it
+is listed has changed.
+
+- **Shown as a note, not painted.** A column of yellow and pink blocks is
+  tiring to read beside a document, and the colour only has to say "this is a
+  highlight". The card shows the text plainly. An 8px dot of its colour sits
+  where a note shows its document icon. Screen readers hear "Highlight in
+  guide.md › Install".
+- **One order.** `notebookEntries(notes, highlights)` sorts both by
+  `createdAt`, newest first. Highlights got an optional `createdAt` for this
+  (set in `DocsApp.addHighlight`, kept by `import-schema.ts`). Older ones have
+  no time. They sort below every dated entry, latest added first, because the
+  array is append-ordered.
+- **Same way back.** `highlightSource(h)` turns the highlight's quote anchor
+  (text, prefix, suffix, page) into a `NoteSource`. `openHighlight` then goes
+  through the same `openPassage` as a note's link: resolve against the
+  Markdown, open the right page, flash the passage.
+- **No edit button.** The text is the document's own. Recolouring and labels
+  stay on the mark in the document. A label shows under the text, and search
+  covers text, label, document name and page title (`searchHighlights`).
+- **Delete** removes the mark from the document too. The toast offers
+  **Undo**, as for notes, and ⌘/Ctrl+Z still works through highlight history.
 
 ## Persistence
 
 `notes` is threaded through every path a workspace record takes:
 
-| Path | Where | Behavior |
-| --- | --- | --- |
-| Autosave / reload | `DocsApp` `buildRecord`, `hydrateWorkspace` | the record is written as a whole |
-| Two tabs | `merge.ts` | merged by id; the same note edited differently in both tabs is a conflict |
-| Backup export/import | `serializeWorkspace`, `import-schema.ts` | validated; malformed fields repaired, duplicate ids rejected, old backups import with `[]` |
-| Move to another workspace | `workspace-transfer.ts` | notes follow their document, renumbered with it |
-| Share links | `share.ts` | **never included**: shares upload to an external host, and notes are private |
-| Storage accounting | `recordTextBytes` | note content counts toward the storage cap, like documents |
+| Path                      | Where                                       | Behavior                                                                                   |
+| ------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Autosave / reload         | `DocsApp` `buildRecord`, `hydrateWorkspace` | the record is written as a whole                                                           |
+| Two tabs                  | `merge.ts`                                  | merged by id; the same note edited differently in both tabs is a conflict                  |
+| Backup export/import      | `serializeWorkspace`, `import-schema.ts`    | validated; malformed fields repaired, duplicate ids rejected, old backups import with `[]` |
+| Move to another workspace | `workspace-transfer.ts`                     | notes follow their document, renumbered with it                                            |
+| Share links               | `share.ts`                                  | **never included**: shares upload to an external host, and notes are private               |
+| Storage accounting        | `recordTextBytes`                           | note content counts toward the storage cap, like documents                                 |
 
 No backup version bump was needed. Older builds drop the unknown `notes` field,
 and newer builds default it to `[]`.
@@ -209,8 +237,8 @@ source passage, and its link opens the scratchpad.
 
 ## Equations and diagrams in notes
 
-A note stores **source**: `$…$` / `$$…$$` LaTeX, and ```` ```mermaid ```` /
-```` ```mindmap ```` fences. The panel draws them (`note-blocks.tsx`), under one
+A note stores **source**: `$…$` / `$$…$$` LaTeX, and ` ```mermaid ` /
+` ```mindmap ` fences. The panel draws them (`note-blocks.tsx`), under one
 rule: it must cost the document nothing. That means no slice of the reader's
 12 ms-per-task math budget, no long frames, no new bundle, and no stored HTML.
 
@@ -265,11 +293,11 @@ of its own, not in the document's first React task.
 Production build, 300-equation note copied from a 300-equation document,
 docked panel. Long animation frames ≥30 ms, 3 runs each:
 
-| Step | Before | After |
-| --- | --- | --- |
-| Open the panel (cache hits) | 130 + 69 + 72 ms | none (9 equations drawn: those on screen) |
-| Expand, then scroll all 300 into view | — | none (all 300 drawn) |
-| Reload with panel open (cold caches) | 53–60 ms | none, same as panel closed |
+| Step                                  | Before           | After                                     |
+| ------------------------------------- | ---------------- | ----------------------------------------- |
+| Open the panel (cache hits)           | 130 + 69 + 72 ms | none (9 equations drawn: those on screen) |
+| Expand, then scroll all 300 into view | —                | none (all 300 drawn)                      |
+| Reload with panel open (cold caches)  | 53–60 ms         | none, same as panel closed                |
 
 Attribution (Long Animation Frames API): "before" was inserting 300 equations'
 KaTeX markup, mostly hidden behind the fold. The same note shown as source had
@@ -312,10 +340,11 @@ as the document's first render. After reload, the note's equations appear
 
 ## Tests
 
-- `tests/notes.test.ts` (25 cases): clean copy (formatting, chrome removal, lists,
+- `tests/notes.test.ts` (29 cases): clean copy (formatting, chrome removal, lists,
   tables, code, math, callouts, element boundaries), snapshot semantics,
-  search, anchors that moved, repeated, crossed math, broke, or lost their
-  document, and storage (backup round trip, validation, IndexedDB,
+  search, highlights in the list (order with and without a time, search,
+  following one back, `createdAt` through a backup), anchors that moved,
+  repeated, crossed math, broke, or lost their document, and storage (backup round trip, validation, IndexedDB,
   two-tab merge, cross-workspace move).
 - `tests/e2e/notes.spec.ts`: select a paragraph and a list on page 2 → copy →
   verify the stored Markdown → reload → search → follow the link from page 1

@@ -24,6 +24,7 @@
 import { fileSubtopics, headingChunkMap, type MdChunk } from "../markdown/markdown-utils.ts";
 import { locateInSource } from "../markdown/source-locate.ts";
 import { relocateAnchor, type SourceAnchor, type SourceSpan } from "../markdown/source-address.ts";
+import type { Highlight } from "../markdown/dom-highlighter.ts";
 
 /** Where a note was copied from. */
 export interface NoteSource {
@@ -144,6 +145,75 @@ export function searchNotes(
       .toLowerCase();
     return words.every((word) => hay.includes(word));
   });
+}
+
+// ---- highlights in the Notes list --------------------------------------------
+//
+// A highlight is listed among the notes: it is the reader keeping a passage
+// too. It stays a highlight — a live mark, not a copy — so the list shows its
+// current text, and following it lands on the mark itself.
+
+/** One row of the Notes list. */
+export type NotebookEntry =
+  { kind: "note"; note: Note } | { kind: "highlight"; highlight: Highlight };
+
+/**
+ * Notes and highlights in one list, newest first. Highlights made before they
+ * carried a time sort below every dated entry, latest added first — the order
+ * they were appended in is the only age they have.
+ */
+export function notebookEntries(
+  notes: readonly Note[],
+  highlights: readonly Highlight[],
+): NotebookEntry[] {
+  const dated: Array<{ at: number; entry: NotebookEntry }> = notes.map((note) => ({
+    at: note.createdAt,
+    entry: { kind: "note", note },
+  }));
+  const undated: NotebookEntry[] = [];
+  for (const highlight of highlights) {
+    if (typeof highlight.createdAt === "number") {
+      dated.push({ at: highlight.createdAt, entry: { kind: "highlight", highlight } });
+    } else {
+      undated.unshift({ kind: "highlight", highlight });
+    }
+  }
+  dated.sort((a, b) => b.at - a.at);
+  return [...dated.map((item) => item.entry), ...undated];
+}
+
+/** Highlights matching every word of `query`: their text, label, document or page. */
+export function searchHighlights(
+  highlights: readonly Highlight[],
+  query: string,
+  nameOf: (fileId: string) => string | undefined = () => undefined,
+  sectionOf: (highlight: Highlight) => string | undefined = () => undefined,
+): Highlight[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return [...highlights];
+  return highlights.filter((highlight) => {
+    const hay = [
+      highlight.text,
+      highlight.label ?? "",
+      nameOf(highlight.fileId) ?? "",
+      sectionOf(highlight) ?? "",
+    ]
+      .join("\n")
+      .toLowerCase();
+    return words.every((word) => hay.includes(word));
+  });
+}
+
+/** A highlight as a note source, so it is followed back the same way. */
+export function highlightSource(highlight: Highlight): NoteSource {
+  return {
+    quote: highlight.text,
+    prefix: highlight.prefix,
+    suffix: highlight.suffix,
+    start: highlight.start,
+    end: highlight.end,
+    subtopicId: highlight.subtopicId,
+  };
 }
 
 // ---- following a note back to its source -------------------------------------

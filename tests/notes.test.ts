@@ -17,12 +17,16 @@ import {
 import {
   createNote,
   editNote,
+  highlightSource,
   MAX_NOTE_CHARS,
+  notebookEntries,
   resolveNoteSource,
+  searchHighlights,
   searchNotes,
   sortNotes,
   type Note,
 } from "../src/lib/workspace/notes.ts";
+import type { Highlight } from "../src/lib/markdown/dom-highlighter.ts";
 import {
   newWorkspaceRecord,
   parseWorkspaceImport,
@@ -458,6 +462,58 @@ test("search matches every word across content, current source name and section"
   );
 });
 
+// ---- highlights in the Notes list ------------------------------------------------
+
+const hl = (id: string, extra: Partial<Highlight> = {}): Highlight => ({
+  id,
+  fileId: "doc",
+  text: `Highlighted ${id}`,
+  color: "#fde047",
+  ...extra,
+});
+
+test("highlights interleave with notes by time; undated ones follow, latest added first", () => {
+  const note = (id: string, createdAt: number) => ({ ...noteFor(id), id, createdAt });
+  const entries = notebookEntries(
+    [note("n-old", 1_000), note("n-new", 3_000)],
+    [hl("h-legacy-1"), hl("h-mid", { createdAt: 2_000 }), hl("h-legacy-2")],
+  );
+  assert.deepEqual(
+    entries.map((entry) => (entry.kind === "note" ? entry.note.id : entry.highlight.id)),
+    ["n-new", "h-mid", "n-old", "h-legacy-2", "h-legacy-1"],
+  );
+});
+
+test("highlight search covers its text, label, document name and page", () => {
+  const a = hl("a", { text: "Alpha passage", label: "check later" });
+  const b = hl("b", { fileId: "other", text: "Gamma", subtopicId: "results" });
+  const nameOf = (id: string) => (id === "other" ? "report.md" : "guide.md");
+  const sectionOf = (h: Highlight) => (h.subtopicId === "results" ? "Results" : undefined);
+  const ids = (query: string) =>
+    searchHighlights([a, b], query, nameOf, sectionOf).map((h) => h.id);
+  assert.deepEqual(ids("alpha"), ["a"]);
+  assert.deepEqual(ids("LATER"), ["a"], "the reader's label is searchable");
+  assert.deepEqual(ids("report gamma"), ["b"], "every word, across fields");
+  assert.deepEqual(ids("results"), ["b"]);
+  assert.deepEqual(ids(" "), ["a", "b"]);
+});
+
+test("a highlight is followed back to its page like a note", () => {
+  const highlight = hl("h", {
+    text: "Every flag is documented on this page in alphabetical order.",
+    subtopicId: "reference",
+    start: 0,
+  });
+  const status = resolveNoteSource({ source: highlightSource(highlight) }, file());
+  assert.equal(status.kind, "found");
+  assert.equal(status.kind === "found" && status.subtopicId, "reference");
+  assert.equal(
+    resolveNoteSource({ source: highlightSource(hl("gone", { text: "no such words" })) }, file())
+      .kind,
+    "missing-passage",
+  );
+});
+
 // ---- following a note back -------------------------------------------------------
 
 test("a source anchor resolves to the page the passage is on", () => {
@@ -592,6 +648,14 @@ test("notes survive a backup export and import, including notes whose source is 
   const ws = workspaceWithNotes();
   const restored = parseWorkspaceImport(await serializeWorkspace(ws));
   assert.deepEqual(restored.notes, ws.notes);
+});
+
+test("a highlight keeps its time through a backup, so it keeps its place among notes", async () => {
+  const ws = workspaceWithNotes();
+  ws.highlights = [hl("dated", { createdAt: 5_000 }), hl("legacy")];
+  const restored = parseWorkspaceImport(await serializeWorkspace(ws));
+  assert.equal(restored.highlights?.find((h) => h.id === "dated")?.createdAt, 5_000);
+  assert.equal(restored.highlights?.find((h) => h.id === "legacy")?.createdAt, undefined);
 });
 
 test("a backup written before notes existed imports with none", async () => {

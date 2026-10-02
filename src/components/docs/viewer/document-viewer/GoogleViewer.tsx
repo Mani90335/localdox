@@ -5,8 +5,6 @@ import type { GoogleProps } from "./shared";
 export function GoogleViewer({
   file,
   isSlides,
-  isBookmarked,
-  onToggleBookmark,
   prevFile,
   nextFile,
   onNavFile,
@@ -17,8 +15,6 @@ export function GoogleViewer({
   return (
     <ViewerFrame
       file={file}
-      isBookmarked={isBookmarked}
-      onToggleBookmark={onToggleBookmark}
       prevFile={prevFile}
       nextFile={nextFile}
       onNavFile={onNavFile}

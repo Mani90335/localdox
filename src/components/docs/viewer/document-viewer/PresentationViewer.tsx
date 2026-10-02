@@ -37,13 +37,7 @@ function extractLegacyPptSlides(buffer: ArrayBuffer): Slide[] {
     }));
 }
 
-export function PresentationViewer({
-  file,
-  isBookmarked,
-  onToggleBookmark,
-  embedded,
-  onOpenPalette,
-}: Props) {
+export function PresentationViewer({ file, embedded, onOpenPalette }: Props) {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [current, setCurrent] = useState(0);
   const [error, setError] = useState("");

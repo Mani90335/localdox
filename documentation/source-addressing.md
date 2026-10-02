@@ -134,7 +134,7 @@ frames. The attribute is short, and only blocks carry it. Addressing work
 
 ## Known limits
 
-- Highlights and stars still anchor by rendered offsets and quotes; moving them
+- Highlights still anchor by rendered offsets and quotes; moving them
   to source anchors is a natural next step.
 - Within a Mermaid diagram, a hit lands on the first label showing the query,
   not the n-th.

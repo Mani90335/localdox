@@ -39,7 +39,6 @@ import {
   Files,
   Sparkles,
   BookOpen,
-  Star,
   Share,
   MoreHorizontal,
   Search,
@@ -74,13 +73,7 @@ import {
 import { occurrenceOrdinal, parseRows } from "@/lib/search/rows";
 import type { PendingSearch } from "@/lib/search/schema";
 import { createHighlightPainter } from "@/lib/markdown/highlight-registry";
-import {
-  findSaved,
-  savedExcerpt,
-  type PassageTarget,
-  type SavedDraft,
-  type SavedItem,
-} from "@/lib/workspace/saved-items";
+import type { PassageTarget } from "@/lib/workspace/saved-items";
 import type { NoteDraft } from "@/lib/workspace/notes";
 import { locateInSource, sourceLinesForSelection } from "@/lib/markdown/source-locate";
 import { selectionToMarkdown } from "@/lib/markdown/selection-markdown";
@@ -105,10 +98,8 @@ import { artifactReference, prepareWorkspaceEmbeds } from "@/lib/workspace/works
 import {
   CollapseContext,
   MarkdownRenderContext,
-  SavedContext,
   type CollapseContextValue,
   type MarkdownRenderContextValue,
-  type SavedContextValue,
 } from "./markdown-viewer/contexts";
 import { elementOf, flashPassage, scrollToPassage } from "./markdown-viewer/flash-passage";
 import { remarkInteractiveBlockMeta } from "./markdown-viewer/remark-interactive-block-meta";
@@ -154,8 +145,6 @@ interface Props {
   startInEditFileId?: string | null;
   onStartInEditConsumed?: () => void;
   nextReadingMin: number | null;
-  isBookmarked: boolean;
-  onToggleBookmark: () => void;
   highlights: Highlight[];
   onAddHighlight: (hl: Omit<Highlight, "id" | "fileId">) => void;
   onUpdateHighlight: (id: string, patch: Partial<Pick<Highlight, "color" | "label">>) => void;
@@ -165,15 +154,10 @@ interface Props {
    * highlights had to be re-located. Persisted, but not as an undoable step.
    */
   onRepairHighlights?: (patches: Array<{ id: string; patch: Partial<Highlight> }>) => void;
-  /** Saved items (stars) for this file. */
-  saved?: SavedItem[];
-  /** Star or unstar a section or a block (table, code fence, quote, image). */
-  onToggleSaved?: (draft: SavedDraft) => void;
-  onRemoveSaved?: (id: string) => void;
   /**
-   * A passage the reader just opened — a star from the Saved list, or a note's
-   * source link: scroll to it and flash it once, then call `onSavedShown` so it
-   * isn't replayed on re-render.
+   * A passage the reader just opened from a note's source link: scroll to it
+   * and flash it once, then call `onSavedShown` so it isn't replayed on
+   * re-render.
    */
   pendingSaved?: PassageTarget | null;
   onSavedShown?: () => void;
@@ -256,16 +240,11 @@ function MarkdownViewerImpl({
   startInEditFileId,
   onStartInEditConsumed,
   nextReadingMin,
-  isBookmarked,
-  onToggleBookmark,
   highlights,
   onAddHighlight,
   onUpdateHighlight,
   onRemoveHighlight,
   onRepairHighlights,
-  saved = [],
-  onToggleSaved,
-  onRemoveSaved,
   pendingSaved,
   onSavedShown,
   pendingSearch,
@@ -560,13 +539,6 @@ function MarkdownViewerImpl({
     setMenu({ mode: "edit", hl, x, y, label: hl.label ?? "" });
   };
 
-  // ---- saved items (stars) ----
-  //
-  // Offsets are measured against whatever `contentRef` renders: the active
-  // section in paged mode, the whole document in single mode. A section-scoped
-  // item records which page it came from so the two spaces never mix — the same
-  // rule persistent highlights follow.
-  const savedSubtopicId = singleMode ? undefined : activeChunk.id;
   // Sections the reader has wrapped up, by heading id. Cleared on a document
   // switch: the ids belong to the document that was open.
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
@@ -595,20 +567,7 @@ function MarkdownViewerImpl({
   );
   useSectionFolds(contentRef, collapsedSections, `${contentKey}:${editMode}`);
 
-  const savedCtx = useMemo<SavedContextValue>(
-    () => ({
-      containerRef: contentRef,
-      subtopicId: savedSubtopicId,
-      enabled: !!onToggleSaved && !editMode,
-      isSaved: (probe) => findSaved(saved, { fileId: file.id, ...probe }),
-      toggle: (draft) => onToggleSaved?.(draft),
-      remove: (id) => onRemoveSaved?.(id),
-      revision: markdownSource,
-    }),
-    [saved, savedSubtopicId, onToggleSaved, onRemoveSaved, editMode, file.id, markdownSource],
-  );
-
-  // Opening a saved item from the Saved list: once the target page is rendered,
+  // Opening a passage from a note's source link: once the target page is rendered,
   // scroll to the passage and flash it. Anchored by quote first (the document
   // may have been edited since it was saved), by stored offsets only as a hint.
   useEffect(() => {
@@ -1289,7 +1248,7 @@ function MarkdownViewerImpl({
           : null;
       if (range) scrollToPassage(range, () => (range.collapsed ? reanchor() : range));
       else target?.scrollIntoView({ behavior: "smooth", block: "center" });
-      // The same one-shot flash a saved item gets, for the same reason: on a
+      // The same one-shot flash a note source link gets, for the same reason: on a
       // dense page, arriving is not the same as seeing where you arrived.
       flashPassage(range, target, landed ? { container, reanchor } : undefined);
 
@@ -1408,8 +1367,8 @@ function MarkdownViewerImpl({
             </Select>
           )
         }
-        /* Starring lives on the document's own row in the sidebar, and exporting
-           in that row's ⋮ ▸ Export, where every format is listed. What is left
+        /* Exporting lives in the document's own row in the sidebar, under
+           ⋮ ▸ Export, where every format is listed. What is left
            here acts on the document on screen: edit it, or change how it
            reads. In the editor this must be `undefined`, not an empty wrapper,
            or the header has no way to tell it is empty and reserves its height
@@ -1553,34 +1512,6 @@ function MarkdownViewerImpl({
                 >
                   <Copy className="h-3.5 w-3.5" />
                 </button>
-
-                {/* Saving lives here rather than on a star pinned to every
-                    block: a selection can be any range — a paragraph, part of a
-                    table, a whole section — where a block star could only ever
-                    offer the block it sat on. */}
-                {savedCtx.enabled && menu.mode === "create" && (
-                  <button
-                    onClick={() => {
-                      savedCtx.toggle({
-                        kind: "block",
-                        blockType: "text",
-                        title: savedExcerpt(menu.text, 90),
-                        text: menu.text,
-                        subtopicId: savedCtx.subtopicId,
-                        start: menu.start,
-                        end: menu.end,
-                        prefix: menu.prefix,
-                        suffix: menu.suffix,
-                      });
-                      window.getSelection()?.removeAllRanges();
-                      setMenu(null);
-                    }}
-                    className="flex h-7 items-center justify-center rounded px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                    title="Save this selection"
-                  >
-                    <Star className="h-3.5 w-3.5" />
-                  </button>
-                )}
 
                 {menu.mode === "create" && onCopyToNotes && (
                   <button
@@ -1782,28 +1713,26 @@ function MarkdownViewerImpl({
                 aria-busy={settled ? undefined : true}
               >
                 <MarkdownRenderContext.Provider value={renderCtx}>
-                  <SavedContext.Provider value={savedCtx}>
-                    <CollapseContext.Provider value={collapseCtx}>
-                      {/* Numbered from the whole document, not the page on
+                  <CollapseContext.Provider value={collapseCtx}>
+                    {/* Numbered from the whole document, not the page on
                           screen, so equation numbers and references stay put
                           as the reader pages through. */}
-                      <MathProvider
-                        source={file.content}
-                        preferences={mathPreferences}
-                        navigateToEquation={navigateToEquation}
-                      >
-                        <ProgressiveMarkdown
-                          addressing={addressing}
-                          source={markdownSource}
-                          urlTransform={mediaUrlTransform}
-                          remarkPlugins={remarkPlugins}
-                          rehypePlugins={rehypePlugins}
-                          components={markdownComponents}
-                          onRendered={setRenderedSource}
-                        />
-                      </MathProvider>
-                    </CollapseContext.Provider>
-                  </SavedContext.Provider>
+                    <MathProvider
+                      source={file.content}
+                      preferences={mathPreferences}
+                      navigateToEquation={navigateToEquation}
+                    >
+                      <ProgressiveMarkdown
+                        addressing={addressing}
+                        source={markdownSource}
+                        urlTransform={mediaUrlTransform}
+                        remarkPlugins={remarkPlugins}
+                        rehypePlugins={rehypePlugins}
+                        components={markdownComponents}
+                        onRendered={setRenderedSource}
+                      />
+                    </MathProvider>
+                  </CollapseContext.Provider>
                 </MarkdownRenderContext.Provider>
               </div>
             )}

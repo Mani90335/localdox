@@ -105,8 +105,6 @@ const DocumentViewer = lazy(() =>
  */
 const MAX_PANES = 4;
 
-const SavedPage = lazy(() => import("./pages/SavedPage").then((m) => ({ default: m.SavedPage })));
-
 const SettingsPage = lazy(() =>
   import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
@@ -171,24 +169,21 @@ import {
   type ThemePref,
 } from "@/lib/workspace/persistence";
 import {
-  findSaved,
   migrateBookmarks,
-  newSavedId,
-  savedKey,
   toLegacyBookmarks,
   type PassageTarget,
-  type SavedDraft,
-  type SavedEntry,
   type SavedItem,
 } from "@/lib/workspace/saved-items";
 import {
   createNote,
   editNote,
+  highlightSource,
   MAX_NOTE_CHARS,
   resolveNoteSource,
   sortNotes,
   type Note,
   type NoteDraft,
+  type NoteSource,
 } from "@/lib/workspace/notes";
 import {
   createScratchpad,
@@ -242,10 +237,9 @@ import {
 
 type Theme = ThemePref;
 
-// Shared empties, so "this file has no highlights / nothing saved" is always the
-// same array. A fresh `[]` would be a new prop identity on every render.
+// Shared empty, so "this file has no highlights" is always the same array. A
+// fresh `[]` would be a new prop identity on every render.
 const EMPTY_HIGHLIGHTS: Highlight[] = [];
-const EMPTY_SAVED: SavedItem[] = [];
 
 /** Whether the Notes panel was open — a per-device convenience, not workspace data. */
 const NOTES_OPEN_KEY = "localdox:notes-open";
@@ -499,13 +493,15 @@ export function DocsApp() {
     if (journalTimer.current) clearTimeout(journalTimer.current);
     journalTimer.current = setTimeout(() => journal.flush(), 250);
   }, [journal]);
-  // Stars. Not just files any more: a star can point at a section, a table, a
-  // code block or a passage the reader selected. Legacy `${fileId}#${sectionId}`
-  // bookmarks are read as saved items on hydrate (see `migrateBookmarks`).
+  // Stars the reader saved before saving was removed from the app. Nothing
+  // shows or creates them any more; they are only carried through so a
+  // workspace written back to storage, exported or moved keeps them intact.
+  // Legacy `${fileId}#${sectionId}` bookmarks are read as saved items on
+  // hydrate (see `migrateBookmarks`).
   const [saved, setSaved] = useState<SavedItem[]>([]);
   /**
-   * A passage the reader just opened — a star, or a note's source link —
-   * handed to the viewer to scroll to.
+   * A passage the reader just opened — a note's source link — handed to the
+   * viewer to scroll to.
    */
   const [pendingSaved, setPendingSaved] = useState<PassageTarget | null>(null);
   // Passages copied out of documents into the Notes panel. Snapshots: edits to
@@ -555,10 +551,6 @@ export function DocsApp() {
   const location = useLocation();
   const navigate = useNavigate();
   const showSettings = location.pathname === "/settings";
-  // Saved is a page of its own rather than a tab inside settings: it is
-  // something the reader comes back to and reads, not a preference they set
-  // once. Settings keeps only the clear-everything control.
-  const showSaved = location.pathname === "/saved";
 
   // Navigation history. Owned here because this is where every destination —
   // the route, the open file, the section, the search term — actually lives.
@@ -2102,7 +2094,10 @@ flowchart LR
             !(hl.end <= p.start || hl.start >= p.end),
         );
         const withoutOverlaps = prev.filter((p) => !overlaps.includes(p));
-        return [...withoutOverlaps, { id: crypto.randomUUID(), fileId, ...hl }];
+        return [
+          ...withoutOverlaps,
+          { id: crypto.randomUUID(), fileId, createdAt: Date.now(), ...hl },
+        ];
       });
       markDirty();
     },
@@ -2197,31 +2192,6 @@ flowchart LR
     markDirty();
   }, [markDirty]);
 
-  // Star or unstar one thing. Identity is what the star points at (file,
-  // section anchor, or the passage's text), never a generated id — re-saving
-  // the same table has to find the existing star, not add a second one.
-  const toggleSaved = useCallback(
-    (fileId: string, draft: SavedDraft) => {
-      setSaved((prev) => {
-        const key = savedKey({ fileId, ...draft });
-        const hit = prev.find((s) => savedKey(s) === key);
-        return hit
-          ? prev.filter((s) => s.id !== hit.id)
-          : [...prev, { ...draft, id: newSavedId(), fileId, createdAt: Date.now() }];
-      });
-      markDirty();
-    },
-    [markDirty],
-  );
-
-  const removeSaved = useCallback(
-    (id: string) => {
-      setSaved((prev) => prev.filter((s) => s.id !== id));
-      markDirty();
-    },
-    [markDirty],
-  );
-
   // ---- notes ----
 
   // The panel's open state is the reader's, per device; it is not part of the
@@ -2301,6 +2271,27 @@ flowchart LR
       });
     },
     [markDirty],
+  );
+
+  // Deleting a highlight from the Notes list is offered back the way a note's
+  // deletion is: the list is far from the passage, so a misclick is unseen.
+  const removeHighlightFromNotes = useCallback(
+    (id: string) => {
+      const highlight = snapshotRef.current.highlights.find((h) => h.id === id);
+      if (!highlight) return;
+      removeHighlight(id);
+      toast("Highlight removed", {
+        id: "note-deleted",
+        action: {
+          label: "Undo",
+          onClick: () => {
+            setHighlights((prev) => (prev.some((h) => h.id === id) ? prev : [...prev, highlight]));
+            markDirty();
+          },
+        },
+      });
+    },
+    [removeHighlight, setHighlights, markDirty],
   );
 
   const sortFilesByName = useCallback(() => {
@@ -3535,51 +3526,6 @@ flowchart LR
     }
   }, []);
 
-  // Rows for the Saved list: newest first, each carrying the name of the file it
-  // came from. Stars whose file is gone are dropped rather than shown as dead
-  // rows — removing a file already removes its content.
-  const savedEntries: SavedEntry[] = useMemo(
-    () =>
-      saved
-        .map((item) => {
-          const file = files.find((f) => f.id === item.fileId);
-          return file ? { ...item, fileName: file.name } : null;
-        })
-        .filter(Boolean as unknown as (v: SavedEntry | null) => v is SavedEntry)
-        .sort((a, b) => b.createdAt - a.createdAt),
-    [saved, files],
-  );
-
-  // The header star saves whatever page the reader is on: the current section
-  // when one is selected, otherwise the document itself.
-  const activePageDraft = useCallback((): SavedDraft | null => {
-    if (!activeFile) return null;
-    if (!activeHeadingId) {
-      return { kind: "file", title: activeFile.name };
-    }
-    const chunks = fileSubtopics(activeFile);
-    const chunk = chunks.find((c) => c.id === activeHeadingId);
-    return {
-      kind: "section",
-      title: chunk?.title ?? activeFile.name,
-      headingId: activeHeadingId,
-      subtopicId: activeHeadingId,
-    };
-  }, [activeFile, activeHeadingId]);
-
-  const activePageSaved = activeFile
-    ? findSaved(saved, {
-        fileId: activeFile.id,
-        kind: activeHeadingId ? "section" : "file",
-        headingId: activeHeadingId ?? undefined,
-      })
-    : undefined;
-
-  const toggleActivePageSaved = useCallback(() => {
-    const draft = activePageDraft();
-    if (activeFile && draft) toggleSaved(activeFile.id, draft);
-  }, [activeFile, activePageDraft, toggleSaved]);
-
   // ---- props for the viewer, held to stable identities ----
   //
   // Each of these used to be built inline in the JSX below. A `.filter()` or a
@@ -3593,23 +3539,11 @@ flowchart LR
     [highlights, activeFile],
   );
 
-  const activeFileSaved = useMemo(
-    () => (activeFile ? saved.filter((s) => s.fileId === activeFile.id) : EMPTY_SAVED),
-    [saved, activeFile],
-  );
-
   const addHighlightToActive = useCallback(
     (hl: Omit<Highlight, "id" | "fileId">) => {
       if (activeFile) addHighlight(hl, activeFile.id);
     },
     [addHighlight, activeFile],
-  );
-
-  const toggleSavedOnActive = useCallback(
-    (draft: SavedDraft) => {
-      if (activeFile) toggleSaved(activeFile.id, draft);
-    },
-    [toggleSaved, activeFile],
   );
 
   const copyToNotesFromActive = useCallback(
@@ -3632,10 +3566,6 @@ flowchart LR
     (fileId: string) => handleSelect(fileId, undefined),
     [handleSelect],
   );
-
-  const toggleActiveDocumentSaved = useCallback(() => {
-    if (activeFile) toggleSaved(activeFile.id, { kind: "file", title: activeFile.name });
-  }, [toggleSaved, activeFile]);
 
   // The collapsed rail's "New folder" — the expanded sidebar asks for the name
   // itself, so the rail has to do the same before it can create one.
@@ -3696,46 +3626,18 @@ flowchart LR
     return section ? { title: section.title, content: section.content } : null;
   }, [activeFile, activeHeadingId]);
 
-  // Opening a star: go to its file and page first, then hand the item to the
-  // viewer, which scrolls to the passage and flashes it once it has rendered.
-  const openSaved = useCallback(
-    async (item: SavedItem) => {
-      const target = item.headingId ?? item.subtopicId ?? undefined;
-      if (showSettings) await openFromHome(item.fileId, target);
-      else handleSelect(item.fileId, target);
-      setPendingSaved(item);
-      setDrawerOpen(false);
-    },
-    // handleSelect is redefined every render; calling the latest one is correct.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [openFromHome, showSettings],
-  );
-
   /**
-   * A note's source link. Resolved against the document's Markdown first (see
+   * Open a passage the reader kept — a note's source, or a highlight — and
+   * flash it. Resolved against the document's Markdown first (see
    * `resolveNoteSource`), so the right page opens even if the passage has
    * moved, and a passage or document that is gone says so instead of opening
    * somewhere unrelated.
    */
-  const openNoteSource = useCallback(
-    async (note: Note) => {
-      // A note saved from rough work links to its scratchpad, not a passage.
-      if (note.origin) {
-        const padId = note.origin.scratchpadId;
-        if (!snapshotRef.current.scratchpads.some((pad) => pad.id === padId)) {
-          toast.info("That scratchpad was deleted.", {
-            id: "note-source",
-            description: "The note keeps its own copy of the work.",
-          });
-          return;
-        }
-        setActivePadId(padId);
-        setNotesTab("rough");
-        return;
-      }
-      const file = filesRef.current.find((f) => f.id === note.fileId);
-      const status = resolveNoteSource(note, file);
-      const name = file?.name ?? note.fileName;
+  const openPassage = useCallback(
+    async (fileId: string, source: NoteSource, fallbackName: string) => {
+      const file = filesRef.current.find((f) => f.id === fileId);
+      const status = resolveNoteSource({ source }, file);
+      const name = file?.name ?? fallbackName;
       if (status.kind === "missing-document") {
         toast.info("The source document is no longer in this workspace.", {
           id: "note-source",
@@ -3753,8 +3655,8 @@ flowchart LR
       // On a phone the sheet covers the very passage being opened.
       if (mobileNavigation) setNotesOpen(false);
       const target = status.kind === "found" ? status.subtopicId : (status.target ?? undefined);
-      if (showSettings) await openFromHome(note.fileId, target);
-      else handleSelect(note.fileId, target);
+      if (showSettings) await openFromHome(fileId, target);
+      else handleSelect(fileId, target);
       if (status.kind === "missing-passage") {
         toast.info("This passage is no longer in the document.", {
           id: "note-source",
@@ -3766,18 +3668,46 @@ flowchart LR
       // measured in: the page they came from, or the whole document.
       const sameSpace =
         !status.moved &&
-        (note.source.subtopicId === undefined) === (readingModeRef.current === "single");
+        (source.subtopicId === undefined) === (readingModeRef.current === "single");
       setPendingSaved({
-        fileId: note.fileId,
-        text: note.source.quote,
-        prefix: note.source.prefix,
-        suffix: note.source.suffix,
-        start: sameSpace ? note.source.start : undefined,
+        fileId,
+        text: source.quote,
+        prefix: source.prefix,
+        suffix: source.suffix,
+        start: sameSpace ? source.start : undefined,
         // The exact file span, when the note's source anchor still holds.
         span: status.span,
       });
     },
     [mobileNavigation, showSettings, openFromHome, handleSelect],
+  );
+
+  /** A note's source link: its passage, or the scratchpad it was saved from. */
+  const openNoteSource = useCallback(
+    (note: Note) => {
+      // A note saved from rough work links to its scratchpad, not a passage.
+      if (note.origin) {
+        const padId = note.origin.scratchpadId;
+        if (!snapshotRef.current.scratchpads.some((pad) => pad.id === padId)) {
+          toast.info("That scratchpad was deleted.", {
+            id: "note-source",
+            description: "The note keeps its own copy of the work.",
+          });
+          return;
+        }
+        setActivePadId(padId);
+        setNotesTab("rough");
+        return;
+      }
+      void openPassage(note.fileId, note.source, note.fileName);
+    },
+    [openPassage],
+  );
+
+  /** A highlight in the Notes list: open the document on the mark itself. */
+  const openHighlight = useCallback(
+    (highlight: Highlight) => void openPassage(highlight.fileId, highlightSource(highlight), ""),
+    [openPassage],
   );
 
   // What the panel shows about each note's source, by file id.
@@ -3787,6 +3717,16 @@ flowchart LR
     (fileId: string): NoteSourceState => {
       const file = filesById.get(fileId);
       return !file ? "missing" : file.deletedAt != null ? "binned" : "live";
+    },
+    [filesById],
+  );
+  // A highlight's page, for its line in the Notes list. Not the preamble's:
+  // that page is titled with the document's own name, already shown.
+  const highlightSection = useCallback(
+    (highlight: Highlight) => {
+      const file = filesById.get(highlight.fileId);
+      if (!file || !highlight.subtopicId || highlight.subtopicId === "preamble") return undefined;
+      return fileSubtopics(file).find((chunk) => chunk.id === highlight.subtopicId)?.title;
     },
     [filesById],
   );
@@ -4150,20 +4090,6 @@ flowchart LR
       }
     : null;
 
-  const savedPage = showSaved ? (
-    <LazyBoundary>
-      <SavedPage
-        saved={savedEntries}
-        highlights={highlights}
-        fileName={(fileId) => filesRef.current.find((f) => f.id === fileId)?.name ?? null}
-        onOpenSaved={openSaved}
-        onRemoveSaved={removeSaved}
-        onOpenHighlight={(hl) => handleSelect(hl.fileId, hl.subtopicId || undefined)}
-        onRemoveHighlight={removeHighlight}
-      />
-    </LazyBoundary>
-  ) : null;
-
   // Settings is a dialog over the reader rather than a page of its own, so the
   // document stays visible behind it and closing it returns you to exactly what
   // you were reading. `/settings` stays a real route so the deep link still
@@ -4208,20 +4134,6 @@ flowchart LR
         onDeleteWorkspace={deleteWorkspace}
         onNewWorkspace={newWorkspace}
         onClearStorage={clearAllStorage}
-        saved={savedEntries}
-        onOpenSaved={openSaved}
-        onRemoveSaved={removeSaved}
-        onClearSaved={() => {
-          setSaved([]);
-          markDirty();
-        }}
-        highlights={highlights}
-        onRemoveHighlight={removeHighlight}
-        onClearHighlights={() => {
-          setHighlights([]);
-          markDirty();
-        }}
-        onNavigate={openFromHome}
         files={files}
         writing={writing}
         onOpenWorkspace={openWorkspaceFromHome}
@@ -4403,9 +4315,6 @@ flowchart LR
                   onSortByName={sortFilesByName}
                   view={sidebarView}
                   onView={setSidebarView}
-                  saved={savedEntries}
-                  onOpenSaved={openSaved}
-                  onRemoveSaved={removeSaved}
                   theme={theme}
                   onCycleTheme={cycleTheme}
                   currentWorkspaceName={workspaceNameRef.current}
@@ -4578,9 +4487,6 @@ flowchart LR
                     onSortByName={sortFilesByName}
                     view={sidebarView}
                     onView={setSidebarView}
-                    saved={savedEntries}
-                    onOpenSaved={openSaved}
-                    onRemoveSaved={removeSaved}
                     theme={theme}
                     onCycleTheme={cycleTheme}
                     currentWorkspaceName={workspaceNameRef.current}
@@ -4638,7 +4544,7 @@ flowchart LR
                 <LazyBoundary
                   loading={<main className="min-w-0 flex-1" aria-busy />}
                   failed={<ChunkFailedNotice />}
-                  resetKey={`${activeFileId}:${showSaved}`}
+                  resetKey={activeFileId}
                 >
                   {/* In split view the column is pinned to the viewport and each pane
                 scrolls itself. Without a real height here the group resolves
@@ -4647,20 +4553,13 @@ flowchart LR
                 why the panes used to move together. */}
                   <main
                     className={
-                      paneLayout.panes.length > 1 && !showSaved
+                      paneLayout.panes.length > 1
                         ? "flex min-h-0 w-0 min-w-0 flex-1 flex-col overflow-hidden h-[calc(100dvh-var(--header-h,3.5rem))]"
                         : "min-w-0 flex-1 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:pb-0"
                     }
                   >
-                    {!showSaved &&
-                      paneLayout.panes.length === 1 &&
-                      activeFile &&
-                      conversionActions(activeFile)}
-                    {/* Saved is a page, not an overlay: it takes the content column
-                  instead of stacking on top of whatever document was open. */}
-                    {showSaved ? (
-                      savedPage
-                    ) : paneLayout.panes.length > 1 ? (
+                    {paneLayout.panes.length === 1 && activeFile && conversionActions(activeFile)}
+                    {paneLayout.panes.length > 1 ? (
                       /* Split view. Each pane carries its own tab strip and its own
                    document; the focused pane is what the rest of the app means
                    by "the active file", so nothing outside here has to know
@@ -4730,7 +4629,6 @@ flowchart LR
                                       <PaneDocument
                                         file={paneFile}
                                         files={files}
-                                        saved={saved}
                                         highlights={highlights}
                                         workspaceFolders={folders}
                                         onImportAttachments={importAttachments}
@@ -4749,8 +4647,6 @@ flowchart LR
                                         onUpdateHighlight={updateHighlight}
                                         onRemoveHighlight={removeHighlight}
                                         onRepairHighlights={repairHighlights}
-                                        onToggleSaved={toggleSaved}
-                                        onRemoveSaved={removeSaved}
                                         onOpenArtifact={openEmbeddedArtifact}
                                         readingMode={readingMode}
                                         contentWidth={contentWidth}
@@ -4825,16 +4721,11 @@ flowchart LR
                         startInEditFileId={autoEditFileId}
                         onStartInEditConsumed={consumeStartInEdit}
                         nextReadingMin={nextReadingMinutes}
-                        isBookmarked={!!activePageSaved}
-                        onToggleBookmark={toggleActivePageSaved}
                         highlights={activeFileHighlights}
                         onAddHighlight={addHighlightToActive}
                         onUpdateHighlight={updateHighlight}
                         onRemoveHighlight={removeHighlight}
                         onRepairHighlights={repairHighlights}
-                        saved={activeFileSaved}
-                        onToggleSaved={toggleSavedOnActive}
-                        onRemoveSaved={removeSaved}
                         pendingSaved={pendingSaved?.fileId === activeFile.id ? pendingSaved : null}
                         onSavedShown={clearPendingSaved}
                         pendingSearch={
@@ -4870,8 +4761,6 @@ flowchart LR
                           syncEditorDirty();
                         }}
                         file={activeFile}
-                        isBookmarked={!!findSaved(saved, { fileId: activeFile.id, kind: "file" })}
-                        onToggleBookmark={toggleActiveDocumentSaved}
                         prevFile={prevFile}
                         nextFile={nextFile}
                         onNavFile={navToFile}
@@ -4900,6 +4789,10 @@ flowchart LR
                     onOpenSource={openNoteSource}
                     onUpdate={updateNote}
                     onRemove={removeNote}
+                    highlights={highlights}
+                    highlightSection={highlightSection}
+                    onOpenHighlight={openHighlight}
+                    onRemoveHighlight={removeHighlightFromNotes}
                     onClose={closeNotes}
                     freshId={freshNoteId}
                     mathRenderer={mathPreferences.renderer}
@@ -4924,6 +4817,10 @@ flowchart LR
                   onOpenSource={openNoteSource}
                   onUpdate={updateNote}
                   onRemove={removeNote}
+                  highlights={highlights}
+                  highlightSection={highlightSection}
+                  onOpenHighlight={openHighlight}
+                  onRemoveHighlight={removeHighlightFromNotes}
                   onClose={closeNotes}
                   freshId={freshNoteId}
                   mathRenderer={mathPreferences.renderer}

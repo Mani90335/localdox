@@ -41,13 +41,12 @@ export default defineConfig({
     offlineShell({
       // Lazy, but needed offline without a download: reading and editing
       // Markdown, opening local files of any kind, Settings (including the
-      // offline status) and Saved.
+      // offline status).
       core: [
         "src/components/docs/viewer/MarkdownViewer.tsx",
         "src/components/docs/editor/MarkdownEditor.tsx",
         "src/components/docs/viewer/DocumentViewer.tsx",
         "src/components/docs/pages/SettingsPage.tsx",
-        "src/components/docs/pages/SavedPage.tsx",
         // Split view's panes.
         "src/components/ui/resizable.tsx",
         // Search's main-thread fallback, for when the worker can't start.

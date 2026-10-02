@@ -1777,14 +1777,6 @@ mjx-container[jax="CHTML"] {
   }
 }
 
-/* Block elements that can be saved (tables, code, quotes, images). They no
-   longer draw anything of their own — saving moved to the selection popover,
-   which can save any range instead of only the block it sits on — but the
-   wrapper stays: it anchors the offsets a saved item re-finds itself by. */
-.docs-savable {
-  position: relative;
-}
-
 /* Interactive markdown blocks: a compact workbench that keeps authored code
    beside the result without allowing demo styles to touch the document. */
 .interactive-block {
