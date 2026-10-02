@@ -7,7 +7,8 @@
 // {str: "…"}. Three things happen around it:
 //
 // 1. preprocessLatex rewrites notation the parser doesn't know: \binom,
-//    d²/dx², partial derivatives, dy/dx, one-sided limits (a^+), \nabla.
+//    d²/dx², partial derivatives, dy/dx, one-sided limits (a^+), \nabla,
+//    E\left[…\right]; and scopes each d/dx to the term after it.
 // 2. The parser runs; any Error node is a syntax failure, never guessed past.
 // 3. normalize resolves what raw MathJSON leaves open, chiefly juxtaposition
 //    ("InvisibleOperator"): Var(X) and Γ(5) are function calls, x(x+1) is a
@@ -98,6 +99,10 @@ function rewriteDerivative(
 }
 
 export function preprocessLatex(latex: string, context: Context): string {
+  return scopeDerivatives(rewriteNotation(latex, context));
+}
+
+function rewriteNotation(latex: string, context: Context): string {
   let out = "";
   let i = 0;
   while (i < latex.length) {
@@ -108,7 +113,7 @@ export function preprocessLatex(latex: string, context: Context): string {
       const first = braceGroup(latex, i + binom[0].length);
       const second = first && braceGroup(latex, first[1]);
       if (first && second) {
-        out += `\\operatorname{binomial}\\left(${preprocessLatex(first[0], context)},${preprocessLatex(second[0], context)}\\right)`;
+        out += `\\operatorname{binomial}\\left(${rewriteNotation(first[0], context)},${rewriteNotation(second[0], context)}\\right)`;
         i = second[1];
         continue;
       }
@@ -147,10 +152,125 @@ export function preprocessLatex(latex: string, context: Context): string {
       i += word[0].length;
       continue;
     }
+    // E\left[X\right] → E[X]. The parser reads E followed by \left[ as E
+    // alone, silently dropping what's in the brackets (and fails on
+    // \lbrack); plain brackets it reads as E applied to X. A math field
+    // writes \left[ for every [ typed. P\left[…\right] becomes P(…).
+    if (/(?:^|[^A-Za-z\\])[EP]$/.test(out)) {
+      const bracket = bracketGroup(latex, i);
+      if (bracket) {
+        const inner = rewriteNotation(bracket[0], context);
+        // P[…] isn't a form the bridge has; P(…) is.
+        out += out.endsWith("E") ? `[${inner}]` : `\\left(${inner}\\right)`;
+        i = bracket[1];
+        continue;
+      }
+    }
     out += latex[i];
     i++;
   }
   return out;
+}
+
+/**
+ * A square-bracket group written \left[…\right], \left\lbrack…\right\rbrack
+ * or \lbrack…\rbrack, starting at `start`: its contents and the index after it.
+ */
+function bracketGroup(text: string, start: number): [string, number] | null {
+  const open = /^\\left\s*(?:\[|\\lbrack(?![a-zA-Z]))|^\\lbrack(?![a-zA-Z])/.exec(
+    text.slice(start),
+  );
+  if (!open) return null;
+  const sized = open[0].startsWith("\\left");
+  const tokens = sized ? /\\left(?![a-zA-Z])|\\right(?![a-zA-Z])/g : /\\[lr]brack(?![a-zA-Z])/g;
+  tokens.lastIndex = start + open[0].length;
+  let depth = 1;
+  for (let match = tokens.exec(text); match; match = tokens.exec(text)) {
+    depth += match[0] === "\\left" || match[0] === "\\lbrack" ? 1 : -1;
+    if (depth > 0) continue;
+    const body = text.slice(start + open[0].length, match.index);
+    if (!sized) return [body, match.index + match[0].length];
+    const close = /^\\right\s*(?:\]|\\rbrack(?![a-zA-Z]))/.exec(text.slice(match.index));
+    return close ? [body, match.index + close[0].length] : null;
+  }
+  return null;
+}
+
+/** Ends what a d/dx applies to, at the top level of its expression. */
+const TERM_END =
+  /^(?:[+\-=<>,;&]|\\(?:le|ge|leq|geq|ne|neq|lt|gt|pm|mp|to|mid|sim|approx|coloneqq|coloneq|quad|qquad)(?![a-zA-Z])|\\[,;:! \\])/;
+/** Closes the group the d/dx is in: its operand stops there too. */
+const GROUP_CLOSE = /^(?:\\right(?![a-zA-Z])|[)\]}])/;
+const DERIVATIVE = /\\frac\{d\}\{d(?:[A-Za-z](?:_\{?\w+\}?)?|\\[a-zA-Z]+)\}/g;
+
+/**
+ * d/dx applies to the term after it, up to the next top-level + or −, a
+ * relation, a comma or `;`: d/dx(x²) + 4 is 2x + 4, as on paper. The parser
+ * reads \frac{d}{dx} as applying to everything after it, so it made that
+ * d/dx(x² + 4) = 2x. Each d/dx and its term are put in parentheses, innermost
+ * (rightmost) first, so d²/dx² (two of them in a row) nests.
+ */
+function scopeDerivatives(latex: string): string {
+  const starts = [...latex.matchAll(DERIVATIVE)].map((m) => [m.index, m[0].length]);
+  let text = latex;
+  for (const [start, length] of starts.reverse()) {
+    const from = start + length;
+    const end = termEnd(text, from, /\\int(?![a-zA-Z])/.test(text.slice(0, start)));
+    if (end === from) continue;
+    text = `${text.slice(0, start)}\\left(${text.slice(start, end)}\\right)${text.slice(end)}`;
+  }
+  return text;
+}
+
+/** Where the term starting at `from` ends; `inIntegral`: a trailing dx belongs to the integral. */
+function termEnd(text: string, from: number, inIntegral: boolean): number {
+  let i = from;
+  // A sign at the very start is the term's own.
+  while (/\s/.test(text[i] ?? "")) i++;
+  if (text[i] === "-" || text[i] === "+") i++;
+  let end = i;
+  while (i < text.length) {
+    const rest = text.slice(i);
+    if (/^\s/.test(rest)) {
+      i++;
+      continue;
+    }
+    if (TERM_END.test(rest) || GROUP_CLOSE.test(rest)) break;
+    if (inIntegral && /^(?:\\mathrm\{d\}|d)[A-Za-z](?![A-Za-z])/.test(rest)) break;
+    const next = groupEnd(text, i);
+    if (next === null) break;
+    i = end = next;
+  }
+  return end;
+}
+
+/** The index after the token or group starting at `i`, or null if it doesn't close. */
+function groupEnd(text: string, i: number): number | null {
+  if (text.startsWith("\\left", i) && !/[a-zA-Z]/.test(text[i + 5] ?? "")) {
+    const tokens = /\\left(?![a-zA-Z])|\\right(?![a-zA-Z])/g;
+    tokens.lastIndex = i + 5;
+    let depth = 1;
+    for (let match = tokens.exec(text); match; match = tokens.exec(text)) {
+      depth += match[0] === "\\left" ? 1 : -1;
+      if (depth === 0) {
+        // \right and its delimiter (one character, or a command such as \rbrack).
+        const delimiter = /^\\right\s*(?:\\[a-zA-Z]+|\\.|.)/.exec(text.slice(match.index));
+        return delimiter ? match.index + delimiter[0].length : null;
+      }
+    }
+    return null;
+  }
+  const close = { "{": "}", "(": ")", "[": "]" }[text[i]];
+  if (close) {
+    let depth = 0;
+    for (let j = i; j < text.length; j++) {
+      if (text[j] === text[i]) depth++;
+      else if (text[j] === close && --depth === 0) return j + 1;
+    }
+    return null;
+  }
+  const command = /^\\(?:[a-zA-Z]+|.)/.exec(text.slice(i));
+  return i + (command ? command[0].length : 1);
 }
 
 // ---- 3. raw MathJSON → bridge heads ---------------------------------------------------------

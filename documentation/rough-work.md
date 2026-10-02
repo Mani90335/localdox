@@ -1,10 +1,17 @@
 # Rough work
 
 The Notes panel has a second tab, **Rough work**: scratchpads where the reader
-tries equations, writes intermediate steps and pastes values, without touching
-the document they are learning from. A pad is Markdown with `$…$` and `$$…$$`
-math, drawn by the same renderer as notes, with the editor's toolbar and the
-MathLive keyboard.
+writes intermediate steps and pastes values, without touching the document
+they are learning from. A pad is Markdown with the editor's toolbar, drawn by
+the same renderer as notes.
+
+Rough work has **no math input of its own**: no math keyboard, no Math button
+on its toolbar. Math is entered and worked out in the **Compute** tab
+(math-compute.md, math-input.md), which has a math field, a keypad and an
+engine. Its **Add to rough work** appends a result to the open pad, so pads
+still _render_ `$…$` and `$$…$$` math; a reader can also type it by hand. Two
+places to enter math meant two keyboards to learn and maintain, and the one in
+Compute also checks the work.
 
 ## The problem
 
@@ -207,7 +214,8 @@ equations near the screen, not all 600.
   the editor. `isEditorOpen(fileId)` tells you which.
 - **The page option is missing.** The reader is in single-page mode, or on
   the last page, where it would be the same as "end of the document".
-- **An equation in the preview stays as source.** Same causes as in notes
+- **An equation in the preview stays as source.** (Usually one added from
+  Compute or pasted in.) Same causes as in notes
   (off screen, KaTeX can't parse it, or KaTeX didn't load); see
   notes-panel.md.
 

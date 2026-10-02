@@ -8,7 +8,8 @@ to a second engine, SymPy, downloaded only after the reader agrees; see
 math-compute-advanced.md. What the
 reader wrote and what the engine computed never mix: a result goes to rough
 work or into a document only when the reader asks, and an insertion only after
-its confirmation dialog.
+its confirmation dialog. The input is a math field with an embedded keypad,
+or plain text; see math-input.md.
 
 ## The problem
 
@@ -109,8 +110,8 @@ after a reload`).
 A mismatch is a labelled failure with a way forward, not a guess: Evaluate on
 `2x+3=7` says "That's an equation" and offers **Solve instead**. Evaluate on
 `x+1` offers Simplify. Solve on `ax+b=0` asks which unknown (buttons for `a`,
-`b`, `x`). `Ctrl/⌘+Enter` runs Solve when the input has `=`, Evaluate
-otherwise.
+`b`, `x`). Enter (in Math input; `Ctrl/⌘+Enter` in Text) runs Solve when the
+input has `=`, Evaluate otherwise.
 
 ### Input
 
@@ -219,10 +220,12 @@ engine the same way, and keeping both would ship the engine twice.
 
 ## UI
 
-- Input (monospace, LaTeX or plain text) with the MathLive keyboard button
-  (`MathKeyboard`, seeded with the current input). Below it, "Reads as" and the
-  input drawn, or why it can't be read.
-- Evaluate · Simplify · Numeric, then Solve for [auto]. "Computing…" (or
+- The composer (math-input.md): a math field with its keypad (Math, the
+  default) or a monospace textarea (Text), and the button for the implied
+  operation, Evaluate or Solve. Under it, why the input can't be read (and,
+  in Text, "Reads as" with the input drawn).
+- The other operations as a row (Evaluate or Solve, Simplify, Numeric), then
+  Solve for [auto]. "Computing…" (or
   "Loading the math engine…" the first time) appears after 150 ms, with Cancel.
 - The result card names the operation and shows Input, Exact, other forms, ≈,
   solutions (one line each, complex ones tagged), and notes. Its actions are

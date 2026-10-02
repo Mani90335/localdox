@@ -181,7 +181,17 @@ P(-2 < X < 2)                what to compute: every other line
 - LaTeX notation the parser doesn't know is rewritten first
   (`preprocessLatex`): `\binom`, `\frac{d^2}{dx^2}`, `\frac{\partial^2 f}{\partial x\partial y}`,
   `\frac{dy}{dx}` and `\frac{d^2y}{dx^2}` (y becomes a function of x),
-  `\lim_{x\to 0^+}` (the side is kept), `\nabla`, `\mathbb{E}`, `\Pr`.
+  `\lim_{x\to 0^+}` (the side is kept), `\nabla`, `\mathbb{E}`, `\Pr`, and
+  `E\left[…\right]` / `E\lbrack…\rbrack` (as plain `E[…]`: the parser read E
+  followed by `\left[` as E alone and dropped the rest; `P\left[…\right]`
+  becomes `P(…)`).
+- **A d/dx applies to the term after it**, up to the next top-level `+`, `−`,
+  relation, comma or `;`, as on paper: `\frac{d}{dx}(x^2)+4` is 2x + 4, and
+  `\frac{d}{dx}(x^2)\cdot 3` is 6x. The parser reads `\frac{d}{dx}` as
+  applying to everything after it (it made the first 2x), so `scopeDerivatives`
+  puts each d/dx and its term in parentheses, innermost first so d²/dx² nests.
+  Inside an integral the term stops before its `dx` (or a `\,`).
+- `P(…)` or `E[…]` with nothing inside is a "Can't read this", not a crash.
 - Juxtaposition is resolved deliberately: `Var(X)` and `Γ(5)` are calls,
   `x(x+1)` is a product, `y(0)` is a call when y is a function (it has a prime,
   a dy/dx or a `let`). Case matters for one letter: `E[X]` is an expectation,

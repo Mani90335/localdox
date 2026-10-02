@@ -22,7 +22,9 @@ const budgets = {
   spreadsheet: 180,
   interactive: 840,
   keyboard: 240,
-  compute: 320,
+  // The engine worker (~303 KiB) and, since Compute's input became a math
+  // field, MathLive (~215 KiB; the keyboard journey's library).
+  compute: 540,
   advanced: 12000,
 } as const;
 type Journey = keyof typeof budgets;
@@ -213,6 +215,8 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         break;
       case "advanced":
         await page.getByRole("tab", { name: "Compute" }).click();
+        // LaTeX typed as text: the engine is the feature, not the math field.
+        await page.getByRole("radio", { name: "Text" }).click();
         await page
           .getByRole("textbox", { name: /^Expression or equation/ })
           .fill("\\int_0^1 x^2\\,dx");
@@ -224,8 +228,11 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         );
         break;
       case "compute":
+        // As a reader first meets it: the math field (MathLive) and its keypad.
         await page.getByRole("tab", { name: "Compute" }).click();
-        await page.getByRole("textbox", { name: /^Expression or equation/ }).fill("1/2 + 1/3");
+        for (const key of ["1", "Fraction", "2", "Move right", "Plus", "1", "Fraction", "3"]) {
+          await page.getByRole("button", { name: key, exact: true }).click();
+        }
         await page.getByRole("button", { name: "Evaluate", exact: true }).click();
         await expect(page.getByRole("region", { name: "Evaluate result" })).toContainText(
           "0.833333333333",

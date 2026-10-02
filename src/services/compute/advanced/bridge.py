@@ -439,6 +439,8 @@ def h_given(args, env):
 
 
 def condition(args, env):
+    if not args:
+        raise Refusal("syntax", "P(…) and E[…] need something inside: P(X < 1), E[X].")
     if len(args) == 1 and isinstance(args[0], list) and args[0][:1] == ["Given"]:
         return build(args[0][1], env), build(args[0][2], env)
     return build(args[0], env), None

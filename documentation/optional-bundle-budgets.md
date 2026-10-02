@@ -27,7 +27,7 @@ contains a math label. These prerequisites matter when interpreting the totals.
 | First XLSX | 156.6 | 156.6 | 180 |
 | First interactive React example | 764.7 | 764.7 | 840 |
 | First math keyboard | 215.0 | 215.0 | 240 |
-| First Compute result (added 2026-10-01; macOS, Chromium) | — | 292.3 | 320 |
+| First Compute result, typed in the math field (MathLive 214.9 + engine 302.7; updated 2026-10-02; macOS, Chromium) | — | 519.2 | 540 |
 | First advanced (SymPy) result, incl. the basic engine (added 2026-10-02) | — | 11034.1 | 12000 |
 
 The gate sums decoded JS/MJS/WASM responses recompressed independently with

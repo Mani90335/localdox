@@ -56,9 +56,11 @@ const panel = (page: Page) => page.getByRole("region", { name: "Notes panel" });
 const field = (page: Page) => panel(page).getByRole("textbox", { name: /^Expression or equation/ });
 const button = (page: Page, name: string) => panel(page).getByRole("button", { name, exact: true });
 
+/** Opens Compute with Text input: these tests type plain text and LaTeX. */
 async function openCompute(page: Page) {
   await page.getByRole("button", { name: "Notes", exact: true }).click();
   await page.getByRole("tab", { name: "Compute" }).click();
+  await panel(page).getByRole("radio", { name: "Text" }).click();
   await expect(field(page)).toBeVisible();
 }
 
@@ -263,6 +265,70 @@ test("the engine works in a worker: the page stays responsive, and a long comput
   await field(page).fill("6 * 7");
   await button(page, "Evaluate").click();
   await expect(panel(page).getByRole("region", { name: "Evaluate result" })).toContainText("42");
+});
+
+test("math input: written as it looks, from the keyboard or the keypad; Enter computes", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openGuide(page);
+  await page.getByRole("button", { name: "Notes", exact: true }).click();
+  await page.getByRole("tab", { name: "Compute" }).click();
+  // Math is the default, its keypad open under it.
+  const math = panel(page).locator("math-field");
+  const keypad = panel(page).getByRole("group", { name: "Math keyboard" });
+  await expect(keypad).toBeVisible();
+  const key = (name: string) => keypad.getByRole("button", { name, exact: true });
+  const value = () =>
+    math.evaluate((el) =>
+      (el as unknown as { getValue: (format: string) => string }).getValue("latex-unstyled"),
+    );
+
+  // Typed linearly, as meant: a sum of two fractions, not 1/(2 + 1/3).
+  await math.click();
+  // MathLive takes focus a moment after the click.
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe("MATH-FIELD");
+  await page.keyboard.type("1/2+1/3");
+  expect(await value()).toBe("\\frac12+\\frac13");
+  await page.keyboard.press("Enter");
+  const result = panel(page).getByRole("region", { name: "Evaluate result" });
+  await expect(result).toContainText("0.833333333333");
+
+  // From the keypad: a root, its digits, out of it, on to a fraction.
+  await panel(page).getByRole("button", { name: "Clear input" }).click();
+  for (const name of ["Square root", "1", "6", "Move right", "Plus", "Fraction"]) {
+    await key(name).click();
+  }
+  expect(await value()).toBe("\\sqrt{16}+\\frac{\\placeholder{}}{\\placeholder{}}");
+  // An empty box would be computed as nothing: it's asked for instead.
+  await expect(panel(page).locator("#compute-reading")).toHaveText(
+    "Fill in the empty boxes, then compute.",
+  );
+  await page.keyboard.press("Enter");
+  await expect(result).toContainText("0.833333333333");
+  // The first box is selected; the keypad moves on to the next.
+  await page.keyboard.type("1");
+  await key("Move right").click();
+  await page.keyboard.type("4");
+  await page.keyboard.press("Enter");
+  await expect(result).toContainText("4.25");
+
+  // Text shows what was written, as LaTeX; plain text comes back as math.
+  await panel(page).getByRole("radio", { name: "Text" }).click();
+  await expect(field(page)).toHaveValue("\\sqrt{16}+\\frac14");
+  await field(page).fill("sqrt(8)");
+  await panel(page).getByRole("radio", { name: "Math" }).click();
+  // MathLive writes it its own way: one-digit groups lose their braces.
+  await expect.poll(value).toBe("\\sqrt8");
+  expect(await page.evaluate(() => localStorage.getItem("localdox:compute-input"))).toBe("math");
+
+  // The keypad folds away, and stays folded.
+  await panel(page).getByRole("button", { name: "Math keyboard" }).click();
+  await expect(keypad).toBeHidden();
+  expect(await page.evaluate(() => localStorage.getItem("localdox:compute-keypad"))).toBe("closed");
+  expect(errors).toEqual([]);
 });
 
 /** No network, as offline.spec.ts does it: offline, HTTP cache off, every request aborted. */

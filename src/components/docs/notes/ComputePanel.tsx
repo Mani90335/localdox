@@ -7,7 +7,6 @@ import {
   Cpu,
   FileInput,
   Info,
-  Keyboard,
   Loader2,
   PencilRuler,
   X,
@@ -15,12 +14,7 @@ import {
 import { toast } from "sonner";
 import { PYODIDE_DOWNLOAD_BYTES } from "virtual:pyodide-assets";
 import { copyText } from "@/lib/workspace/share";
-import {
-  cancelIdleCallbackSafe,
-  hasModKey,
-  modKeyLabel,
-  requestIdleCallbackSafe,
-} from "@/lib/platform/keyboard";
+import { cancelIdleCallbackSafe, requestIdleCallbackSafe } from "@/lib/platform/keyboard";
 import { prepareInput } from "@/services/compute/input";
 import { needsAdvanced } from "@/services/compute/advanced/routing";
 import {
@@ -43,8 +37,10 @@ import type {
   RunOptions,
 } from "@/services/compute/compute-client";
 import type { MathRendererType } from "@/services/math/types";
-import { MathKeyboard } from "../editor/MathKeyboard";
 import { AdvancedTools } from "./AdvancedTools";
+import { ComputeComposer, type ComposerHandle } from "./ComputeComposer";
+import { asMath, preferredMode, rememberMode, type InputMode } from "./compute-input";
+import { hasEmptyBox } from "./math-keys";
 import { NoteMath } from "./note-blocks";
 import { NOTE_COMPONENTS, NOTE_PLUGINS } from "./note-components";
 import { NoteRenderContext, type NoteRenderSettings } from "./note-render-context";
@@ -140,6 +136,11 @@ const STAGES: Record<string, string> = {
   sympy: "Loading SymPy…",
 };
 
+/** What computing the input means by default: solving an equation, evaluating anything else. */
+function impliedOp(input: string): ComputeOperation {
+  return /(?<![<>!:])=(?!=)/.test(input) ? "solve" : "evaluate";
+}
+
 /** Waits this long before showing "Computing…", so instant answers don't flash it. */
 const STATUS_DELAY_MS = 150;
 const PREVIEW_MS = 250;
@@ -174,11 +175,13 @@ export function ComputePanel({
   /** An advanced job waiting for the reader to agree to the download. */
   const [asking, setAsking] = useState<Job | null>(null);
   const [showStatus, setShowStatus] = useState(false);
-  const [mathOpen, setMathOpen] = useState(false);
+  const [mode, setMode] = useState<InputMode>(preferredMode);
+  /** MathLive didn't load (offline on first use): text until it can. */
+  const [mathUnavailable, setMathUnavailable] = useState(false);
   const [insert, setInsert] = useState<{ markdown: string; target: InsertTarget | null } | null>(
     null,
   );
-  const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<ComposerHandle>(null);
 
   const setInput = (value: string) => {
     session.input = value;
@@ -227,29 +230,34 @@ export function ComputePanel({
     });
   }, [outcome, asking]);
 
-  /** The job for an operation on the current input, on the engine that can do it. */
-  const jobFor = (op: AnyOperation, params: AdvancedParams = {}): Job => {
+  /** The job for an operation on the input (the current one unless given), on the engine that can do it. */
+  const jobFor = (op: AnyOperation, params: AdvancedParams = {}, text = input): Job => {
     const solveFor = params.variable ?? (op === "solve" ? variable.trim() : undefined);
-    if (BASIC_OPS.includes(op) && !needsAdvanced(input)) {
+    if (BASIC_OPS.includes(op) && !needsAdvanced(text)) {
       return {
         engine: "basic",
         op: op as ComputeOperation,
         request: {
           op: op as ComputeOperation,
-          input,
+          input: text,
           ...(op === "solve" ? { variable: solveFor } : {}),
         },
       };
     }
-    return advancedJob(op, { ...params, variable: solveFor || undefined });
+    return advancedJob(op, { ...params, variable: solveFor || undefined }, text);
   };
-  const advancedJob = (op: AnyOperation, params: AdvancedParams = {}): Job => ({
+  const advancedJob = (op: AnyOperation, params: AdvancedParams = {}, text = input): Job => ({
     engine: "advanced",
     op,
-    request: { op, input, params },
+    request: { op, input: text, params },
   });
 
   const start = (job: Job) => {
+    // An empty box reads as nothing at all (□ + 1 would be 1): fill it first.
+    if (hasEmptyBox(job.request.input)) {
+      composerRef.current?.nextBox();
+      return;
+    }
     if (job.engine === "advanced" && !consented()) {
       running?.controller.abort();
       setAsking(job);
@@ -305,6 +313,30 @@ export function ComputePanel({
   const run = (op: AnyOperation, params?: AdvancedParams) => start(jobFor(op, params));
   const cancel = () => running?.controller.abort();
 
+  /** Escape stops the computation, or clears the result; the panel stays open. */
+  const escape = () => {
+    if (running) cancel();
+    else if (asking) setAsking(null);
+    else if (outcome) setOutcome(null);
+    else return false;
+    return true;
+  };
+
+  const switchMode = (next: InputMode, remember = true) => {
+    if (next === mode) return;
+    if (next === "math") {
+      const latex = input.trim() ? asMath(input) : "";
+      if (latex === null) {
+        toast("This stays as text", { description: "Part of it can't be written as math." });
+        return;
+      }
+      setInput(latex);
+      setMathUnavailable(false);
+    }
+    if (remember) rememberMode(next);
+    setMode(next);
+  };
+
   const prepared = useDebounced(input, PREVIEW_MS);
   const advancedInput = useMemo(() => needsAdvanced(prepared), [prepared]);
   const reading = useMemo(
@@ -315,10 +347,9 @@ export function ComputePanel({
     [prepared, advancedInput],
   );
   const empty = !input.trim();
-  const defaultOp: ComputeOperation = /(?<![<>!:])=(?!=)/.test(input) ? "solve" : "evaluate";
+  const defaultOp = impliedOp(input);
 
   const padding = variant === "docked" ? "px-3" : "";
-  const fieldId = "compute-input";
 
   const statusText = !running
     ? ""
@@ -332,78 +363,44 @@ export function ComputePanel({
 
   return (
     <div className={`space-y-3 pb-6 ${padding}`}>
-      <div className="overflow-hidden rounded-lg border border-border bg-muted/30 focus-within:border-primary/50">
-        <textarea
-          id={fieldId}
-          ref={fieldRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && hasModKey(event.nativeEvent)) {
-              event.preventDefault();
-              if (!empty) run(defaultOp);
-            } else if (event.key === "Escape" && (running || outcome || asking)) {
-              // Stops the computation, or clears the result; the panel stays open.
-              event.preventDefault();
-              event.stopPropagation();
-              if (running) cancel();
-              else if (asking) setAsking(null);
-              else setOutcome(null);
-            }
-          }}
-          rows={2}
-          aria-label="Expression or equation (LaTeX or plain text)"
-          aria-describedby="compute-reading"
-          placeholder={
-            "1/2 + 1/3,  x^2 - 5x + 6 = 0,  \\int_0^1 x^2 dx\nX ~ N(0, 1) on one line, P(X < 1) on the next"
-          }
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          className="block min-h-16 w-full resize-y bg-transparent p-3 font-mono text-xs leading-relaxed outline-none placeholder:text-muted-foreground/70 coarse:text-sm"
-        />
-        <div className="flex items-center gap-1 border-t border-border/70 bg-background/90 px-1.5 py-1">
-          <button
-            type="button"
-            onClick={() => setMathOpen(true)}
-            title="Math keyboard"
-            aria-label="Math keyboard"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:h-10 coarse:w-10"
-          >
-            <Keyboard className="h-4 w-4" />
-          </button>
-          <span className="ml-auto pr-1.5 text-2xs text-muted-foreground coarse:hidden">
-            <kbd className="font-sans">{modKeyLabel}↵</kbd>{" "}
-            {OPERATION_LABELS[defaultOp].toLowerCase()}
-          </span>
-        </div>
-      </div>
-
-      <MathKeyboard
-        open={mathOpen}
-        onOpenChange={setMathOpen}
-        initialLatex={reading?.ok ? reading.latex : ""}
-        initialDisplay={false}
-        onInsert={(latex) => {
-          setInput(latex);
-          requestAnimationFrame(() => fieldRef.current?.focus({ preventScroll: true }));
+      <ComputeComposer
+        ref={composerRef}
+        mode={mode}
+        onModeChange={(next) => switchMode(next)}
+        onMathUnavailable={() => {
+          setMathUnavailable(true);
+          switchMode("text", false);
         }}
+        input={input}
+        onInput={setInput}
+        primary={defaultOp}
+        // Enter in the math field passes what the field holds right then: its
+        // input event can still be on its way when a fast Enter arrives.
+        onRun={(latest = input) => start(jobFor(impliedOp(latest), undefined, latest))}
+        onEscape={escape}
       />
 
       <NoteRenderContext.Provider value={render}>
-        {/* How the input reads, before anything is computed. */}
+        {/* How the input reads, before anything is computed. A math field
+            shows that itself, so there only what stands in the way. */}
         <div
           id="compute-reading"
-          className="min-h-5 px-1 text-xs text-muted-foreground"
+          className={`px-1 text-xs text-muted-foreground ${mode === "text" ? "min-h-5" : "empty:hidden"}`}
           aria-live="off"
         >
-          {reading?.ok ? (
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="shrink-0">Reads as</span>
-              <span className="min-w-0 overflow-x-auto overflow-y-hidden py-0.5 text-foreground">
-                <NoteMath latex={reading.latex} display={false} />
-              </span>
-            </div>
+          {mathUnavailable && mode === "text" ? (
+            <span>Math input couldn't load, so this is text for now.</span>
+          ) : mode === "math" && hasEmptyBox(input) ? (
+            <span>Fill in the empty boxes, then compute.</span>
+          ) : reading?.ok ? (
+            mode === "text" && (
+              <div className="flex min-w-0 items-baseline gap-2">
+                <span className="shrink-0">Reads as</span>
+                <span className="min-w-0 overflow-x-auto overflow-y-hidden py-0.5 text-foreground">
+                  <NoteMath latex={reading.latex} display={false} />
+                </span>
+              </div>
+            )
           ) : reading && reading.kind !== "empty" ? (
             <span>{reading.message}</span>
           ) : /\n|;/.test(prepared) ? (
@@ -411,40 +408,36 @@ export function ComputePanel({
           ) : null}
         </div>
 
-        <div className="space-y-1.5" role="group" aria-label="Compute">
-          <div className="grid grid-cols-3 gap-1.5">
-            {(["evaluate", "simplify", "approximate"] as const).map((op) => (
+        {/* The other operations; the one the input implies is the composer's button. */}
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Compute">
+          {(["evaluate", "simplify", "approximate", "solve"] as const)
+            .filter((op) => op !== defaultOp)
+            .map((op) => (
               <OpButton key={op} disabled={empty} onClick={() => run(op)}>
                 {op === "approximate" ? "Numeric" : OPERATION_LABELS[op]}
               </OpButton>
             ))}
-          </div>
-          <div className="flex items-center gap-1.5">
-            <OpButton disabled={empty} onClick={() => run("solve")}>
-              Solve
-            </OpButton>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              for
-              <input
-                id="compute-variable"
-                name="compute-variable"
-                value={variable}
-                onChange={(e) => setVariable(e.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !empty) {
-                    event.preventDefault();
-                    run("solve");
-                  }
-                }}
-                maxLength={12}
-                placeholder="auto"
-                aria-label="Unknown to solve for (leave empty to choose automatically)"
-                spellCheck={false}
-                autoCapitalize="off"
-                className="h-8 w-16 rounded-md border border-border bg-background px-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring coarse:h-11"
-              />
-            </label>
-          </div>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            {defaultOp === "solve" ? "Solve for" : "for"}
+            <input
+              id="compute-variable"
+              name="compute-variable"
+              value={variable}
+              onChange={(e) => setVariable(e.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !empty) {
+                  event.preventDefault();
+                  run("solve");
+                }
+              }}
+              maxLength={12}
+              placeholder="auto"
+              aria-label="Unknown to solve for (leave empty to choose automatically)"
+              spellCheck={false}
+              autoCapitalize="off"
+              className="h-7 w-14 rounded-md border border-border bg-background px-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring coarse:h-10"
+            />
+          </label>
         </div>
 
         <AdvancedTools
@@ -452,8 +445,10 @@ export function ComputePanel({
           onRun={(op: AdvancedOperation, params) => start(advancedJob(op, params))}
           onTemplate={(text) => {
             const next = input.trim() ? `${input.replace(/\s+$/, "")}\n${text}` : text;
+            // Examples are written as text, a line each.
+            switchMode("text", false);
             setInput(next);
-            requestAnimationFrame(() => fieldRef.current?.focus({ preventScroll: true }));
+            requestAnimationFrame(() => composerRef.current?.focus());
           }}
         />
 
@@ -876,7 +871,7 @@ function OpButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:hover:bg-background coarse:h-11"
+      className="inline-flex h-7 items-center justify-center rounded-full border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:hover:bg-background coarse:h-10"
     >
       {children}
     </button>

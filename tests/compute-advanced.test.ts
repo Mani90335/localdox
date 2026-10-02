@@ -456,3 +456,57 @@ test("wheels are checked against the pinned lock file", async () => {
   const lock = JSON.parse(assets.files.find((f) => f.name === "pyodide-lock.json")!.text!);
   assert.deepEqual(Object.keys(lock.packages).sort(), ["mpmath", "sympy"]);
 });
+
+test("d/dx applies to the term after it, as on paper", () => {
+  const scoped = (latex: string) => preprocessLatex(latex, newContext());
+  // The parser alone made this d/dx(x² + 4) = 2x.
+  assert.equal(answer("evaluate", "\\frac{d}{dx}\\left(x^{2}\\right)+4").exact, "2 x + 4");
+  assert.equal(answer("evaluate", "\\frac{d}{dx}x^{2}+4").exact, "2 x + 4");
+  assert.equal(
+    answer("evaluate", "\\frac{d}{dx}\\left(x^{2}\\right)+\\frac{d}{dx}\\left(x^{3}\\right)").exact,
+    "3 x^{2} + 2 x",
+  );
+  assert.equal(answer("evaluate", "\\frac{d^{2}}{dx^{2}}\\left(x^{3}\\right)-x").exact, "5 x");
+  assert.equal(
+    answer("evaluate", "\\frac{\\partial}{\\partial x}\\left(x^{2}y\\right)+1").exact,
+    "2 x y + 1",
+  );
+  // Its term runs to the next + or −: a product, and parentheses, stay inside.
+  assert.equal(answer("evaluate", "\\frac{d}{dx}\\left(x^{2}\\right)\\cdot3+1").exact, "6 x + 1");
+  assert.equal(answer("evaluate", "\\frac{d}{dx}\\left(x^{2}+4\\right)").exact, "2 x");
+  // An integral keeps its dx.
+  assert.equal(
+    scoped("\\int_0^1\\frac{d}{dx}x^2\\,dx"),
+    "\\int_0^1\\left(\\frac{d}{dx}x^2\\right)\\,dx",
+  );
+  assert.equal(
+    answer("evaluate", "\\int_{0}^{1}\\frac{d}{dx}\\left(x^{2}\\right)\\,dx").exact,
+    "1",
+  );
+  // Scoped once, even inside a rewritten \binom.
+  assert.equal(scoped("4+\\frac{d}{dx}(x^2)"), "4+\\left(\\frac{d}{dx}(x^2)\\right)");
+});
+
+test("E[…] written with \\left[ (as a math field writes it) keeps what's inside", () => {
+  // The parser read E\left[X^2\right] as E alone, and the bridge then crashed.
+  assert.equal(answer("evaluate", "X\\sim N\\left(0,1\\right);E\\left[X^{2}\\right]").exact, "1");
+  assert.equal(
+    answer("evaluate", "X\\sim N\\left(0,1\\right);E\\left\\lbrack X^{2}\\right\\rbrack").exact,
+    "1",
+  );
+  assert.equal(
+    answer("evaluate", "X\\sim N\\left(0,1\\right);\\mathbb{E}\\left[X^{2}\\right]+1").exact,
+    "2",
+  );
+  assert.equal(
+    answer("evaluate", "X\\sim\\operatorname{Exp}\\left(1\\right);E\\left[X\\mid X>1\\right]")
+      .exact,
+    "2",
+  );
+  assert.equal(
+    answer("evaluate", "X\\sim N\\left(0,1\\right);P\\left[X<1\\right]").exact,
+    answer("evaluate", "X\\sim N\\left(0,1\\right);P\\left(X<1\\right)").exact,
+  );
+  // Nothing inside: a labelled failure, not a crash.
+  assert.equal(failure("evaluate", "X\\sim N\\left(0,1\\right);E\\left[\\right]").kind, "syntax");
+});

@@ -36,9 +36,11 @@ const panel = (page: Page) => page.getByRole("region", { name: "Notes panel" });
 const field = (page: Page) => panel(page).getByRole("textbox", { name: /^Expression or equation/ });
 const button = (page: Page, name: string) => panel(page).getByRole("button", { name, exact: true });
 
+/** Opens Compute with Text input: these tests type plain text and LaTeX. */
 async function openCompute(page: Page) {
   await page.getByRole("button", { name: "Notes", exact: true }).click();
   await page.getByRole("tab", { name: "Compute" }).click();
+  await panel(page).getByRole("radio", { name: "Text" }).click();
   await expect(field(page)).toBeVisible();
 }
 
@@ -240,6 +242,58 @@ async function goOffline(context: BrowserContext, page: Page) {
   await context.setOffline(true);
   await context.route("**/*", (route) => route.abort("internetdisconnected"));
 }
+
+test("the math field's derivative and expectation read as written", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openGuide(page);
+  await page.getByRole("button", { name: "Notes", exact: true }).click();
+  await page.getByRole("tab", { name: "Compute" }).click();
+  const keypad = panel(page).getByRole("group", { name: "Math keyboard" });
+  const key = (name: string) => keypad.getByRole("button", { name, exact: true });
+  const math = panel(page).locator("math-field");
+  const value = () =>
+    math.evaluate((el) =>
+      (el as unknown as { getValue: (format: string) => string }).getValue("latex-unstyled"),
+    );
+  // MathLive takes focus a moment after a key moves it there.
+  const typeInField = async (text: string) => {
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.tagName))
+      .toBe("MATH-FIELD");
+    await page.keyboard.type(text);
+  };
+
+  // d/dx(x²) + 4: the derivative applies to x² alone, as on paper.
+  await keypad.getByRole("tab", { name: "Calculus" }).click();
+  await key("Derivative").click();
+  await keypad.getByRole("tab", { name: "Basic" }).click();
+  for (const name of ["x", "Square", "Move right", "Plus", "4"]) await key(name).click();
+  expect(await value()).toBe("\\frac{d}{dx}\\left(x^2\\right)+4");
+  await page.keyboard.press("Enter");
+  await panel(page)
+    .getByRole("region", { name: "Advanced engine" })
+    .getByRole("button", { name: "Download and compute" })
+    .click();
+  const result = panel(page).getByRole("region", { name: "Evaluate result" });
+  await expect(result).toContainText("2 x + 4", FIRST_LOAD);
+
+  // E[X²] as the keypad writes it, \left[…\right]: once read as E alone, and a crash.
+  await panel(page).getByRole("button", { name: "Clear input" }).click();
+  await typeInField("X");
+  await keypad.getByRole("tab", { name: "Greek and relations" }).click();
+  await key("Distributed as").click();
+  await typeInField("N(0,1");
+  await key("Move right").click();
+  await key("Next statement").click();
+  await key("Expectation").click();
+  await typeInField("X^2");
+  expect(await value()).toBe("X\\sim N\\left(0,1\\right);E\\left[X^2\\right]");
+  await page.keyboard.press("Enter");
+  // The input as written, then E[X²] = 1 for a standard normal.
+  await expect(result).toContainText("E\\left[X^2\\right]");
+  await expect(result).toContainText(/Result\s*1/);
+  await expect(panel(page).getByRole("region", { name: /^Evaluate: / })).toHaveCount(0);
+});
 
 test("once loaded, advanced math works offline after a reload", async ({ page, context }) => {
   await page.addInitScript(() => localStorage.setItem("localdox:advanced-math", "accepted"));

@@ -23,6 +23,10 @@ export function needsAdvanced(input: string): boolean {
   if (/\\frac\s*\{\s*(?:d|\\mathrm\{d\})(?:\s|\^|[a-zA-Z]|\})/.test(text)) return true;
   // primes, relations, lists and matrices, E[X], P(…)
   if (/'|<|>|≤|≥|≠|\\(?:le|ge|leq|geq|lt|gt|ne|neq)(?![a-zA-Z])|,|\[\s*\[/.test(text)) return true;
-  if (/(?:^|[^A-Za-z\\])(?:E\s*\[|P\s*\()/.test(text)) return true;
+  // E[X], P(…), also as a math field writes them: E\left[X\right], P\left(…\right).
+  if (
+    /(?:^|[^A-Za-z\\])(?:E\s*(?:\[|\\left\s*(?:\[|\\lbrack))|P\s*(?:\(|\\left\s*[([]))/.test(text)
+  )
+    return true;
   return false;
 }

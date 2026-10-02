@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { mathExpression, mathSeedFrom, type FormatAction } from "@/lib/markdown/markdown-format";
+import type { FormatAction } from "@/lib/markdown/markdown-format";
 import { toolbarShortcut } from "@/lib/markdown/markdown-toolbar-items";
 import { hashText } from "@/lib/workspace/draft-journal";
 import { hasModKey } from "@/lib/platform/keyboard";
@@ -19,7 +19,6 @@ import {
   type Scratchpad,
 } from "@/lib/workspace/rough-work";
 import { MarkdownToolbar } from "../editor/MarkdownToolbar";
-import { MathKeyboard } from "../editor/MathKeyboard";
 import { DraftJournalContext } from "../editor/draft-journal-context";
 
 /** Pause after typing before the text is handed to the workspace. */
@@ -46,8 +45,9 @@ interface Props {
 }
 
 /**
- * The rough-work field: Markdown source with the document editor's toolbar,
- * shortcuts and math keyboard.
+ * The rough-work field: Markdown source with the document editor's toolbar
+ * and shortcuts. Math is worked out in the Compute tab, which can add its
+ * results here; the field itself offers no math input.
  *
  * Mounted once per pad (keyed by id), so a draft can never be saved into a
  * different pad than it was typed into. Like the document editor it keeps its
@@ -183,22 +183,6 @@ export const ScratchpadEditor = forwardRef<ScratchpadEditorHandle, Props>(functi
     });
   }, []);
 
-  const [mathOpen, setMathOpen] = useState(false);
-  const mathSelection = useRef({ start: 0, end: 0 });
-  const [mathSeed, setMathSeed] = useState({ latex: "", display: false });
-  const openMath = () => {
-    const field = fieldRef.current;
-    const start = field?.selectionStart ?? 0;
-    const end = field?.selectionEnd ?? 0;
-    mathSelection.current = { start, end };
-    setMathSeed(mathSeedFrom(field?.value.slice(start, end) ?? ""));
-    setMathOpen(true);
-  };
-  const insertMath = (latex: string, display: boolean) =>
-    applyFormat(({ text: value }) =>
-      mathExpression(latex, display)({ text: value, ...mathSelection.current }),
-    );
-
   // Grows with its text up to a point, then scrolls: the preview below it
   // should stay reachable without scrolling past a wall of source.
   useLayoutEffect(() => {
@@ -229,15 +213,8 @@ export const ScratchpadEditor = forwardRef<ScratchpadEditorHandle, Props>(functi
 
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-muted/30 focus-within:border-primary/50">
-      <MathKeyboard
-        open={mathOpen}
-        onOpenChange={setMathOpen}
-        initialLatex={mathSeed.latex}
-        initialDisplay={mathSeed.display}
-        onInsert={insertMath}
-      />
       <div className="border-b border-border bg-background/90">
-        <MarkdownToolbar onAction={applyFormat} onMath={openMath} controls={fieldId} />
+        <MarkdownToolbar onAction={applyFormat} controls={fieldId} />
       </div>
       <textarea
         id={fieldId}
@@ -260,10 +237,8 @@ export const ScratchpadEditor = forwardRef<ScratchpadEditorHandle, Props>(functi
           event.preventDefault();
           applyFormat(item.action);
         }}
-        aria-label={`${pad.title} (Markdown, with $…$ for math)`}
-        placeholder={
-          "Work it out here. Markdown, with $…$ and $$…$$ for math.\n\n$$x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$$"
-        }
+        aria-label={`${pad.title} (Markdown)`}
+        placeholder="Work it out here, in Markdown. For math, use the Compute tab."
         spellCheck={false}
         className="block w-full resize-y bg-transparent p-3 font-mono text-xs leading-relaxed outline-none placeholder:text-muted-foreground/70 coarse:text-sm"
       />

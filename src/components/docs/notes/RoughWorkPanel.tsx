@@ -83,8 +83,8 @@ export interface RoughWorkProps {
 }
 
 /**
- * Rough work: scratchpads for trying equations and working things out
- * without touching the document. One pad is open at a time; the picker
+ * Rough work: scratchpads for working things out without touching the
+ * document. Math is done in Compute, whose results can be added to a pad. One pad is open at a time; the picker
  * switches between them, with the open document's pads listed first.
  */
 export function RoughWorkPanel({
@@ -137,7 +137,7 @@ export function RoughWorkPanel({
         <PencilRuler className="mb-3 h-5 w-5 text-muted-foreground" aria-hidden />
         <p className="text-sm font-medium text-foreground">No rough work yet</p>
         <p className="mt-1.5 max-w-64 text-xs leading-relaxed text-muted-foreground">
-          A private place to try equations and work through steps. Nothing here changes your
+          A private place to work through steps and jot things down. Nothing here changes your
           documents unless you insert it.
         </p>
         <button
