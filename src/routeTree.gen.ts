@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as MdReaderRouteImport } from './routes/md-reader'
+import { Route as CodeStudioRouteImport } from './routes/code-studio'
 import { Route as IndexRouteImport } from './routes/index'
 
 const SettingsRoute = SettingsRouteImport.update({
@@ -23,6 +24,11 @@ const MdReaderRoute = MdReaderRouteImport.update({
   path: '/md-reader',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CodeStudioRoute = CodeStudioRouteImport.update({
+  id: '/code-studio',
+  path: '/code-studio',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -31,30 +37,34 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/code-studio': typeof CodeStudioRoute
   '/md-reader': typeof MdReaderRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/code-studio': typeof CodeStudioRoute
   '/md-reader': typeof MdReaderRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/code-studio': typeof CodeStudioRoute
   '/md-reader': typeof MdReaderRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/md-reader' | '/settings'
+  fullPaths: '/' | '/code-studio' | '/md-reader' | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/md-reader' | '/settings'
-  id: '__root__' | '/' | '/md-reader' | '/settings'
+  to: '/' | '/code-studio' | '/md-reader' | '/settings'
+  id: '__root__' | '/' | '/code-studio' | '/md-reader' | '/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CodeStudioRoute: typeof CodeStudioRoute
   MdReaderRoute: typeof MdReaderRoute
   SettingsRoute: typeof SettingsRoute
 }
@@ -75,6 +85,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MdReaderRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/code-studio': {
+      id: '/code-studio'
+      path: '/code-studio'
+      fullPath: '/code-studio'
+      preLoaderRoute: typeof CodeStudioRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -87,6 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CodeStudioRoute: CodeStudioRoute,
   MdReaderRoute: MdReaderRoute,
   SettingsRoute: SettingsRoute,
 }

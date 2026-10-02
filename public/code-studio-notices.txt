@@ -1,0 +1,39 @@
+Code Studio architecture and trace compatibility acknowledgments
+
+Pathrise Python Tutor:
+https://github.com/pathrise-eng/pathrise-python-tutor
+Reviewed revision: 53253554f6fdb9176cb90e54df38b508d9529235
+Trace format, object reference encoding, stack/heap snapshot architecture.
+
+Original work Copyright (C) Philip J. Guo (philip@pgbovine.net)
+Modified work Copyright (C) 2019 Pathrise (dev@pathrise.com)
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+alg0.dev by midudev:
+https://github.com/midudev/alg0.dev
+Reviewed revision: 1d6960a67a96135b3209297a2d450e4889bf324a
+README identifies the project as MIT. Reviewed renderer dispatch,
+playback subscription, and per-step educational content. Code Studio's
+React UI, operation library, lesson text, motion primitives, and runtime
+adapters are newly implemented; alg0.dev source bodies are not vendored.
+
+Other libraries retain their respective licenses, including Mermaid,
+CodeMirror, Babel, React, and Radix UI. They are existing app dependencies.

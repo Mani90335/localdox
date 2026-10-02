@@ -1,4 +1,5 @@
-import { Menu, Search, Settings } from "lucide-react";
+import { Code2, Menu, Search, Settings } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 
 import { WorkspaceMenu } from "../workspace/WorkspaceMenu";
 import { WorkspaceSheet } from "../workspace/WorkspaceSheet";
@@ -92,6 +93,14 @@ export function Header({
 
       <div className="flex items-center gap-3">
         {saveIndicator}
+        <Link
+          to="/code-studio"
+          className="inline-flex h-10 items-center gap-2 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          title="Code Studio"
+        >
+          <Code2 className="h-4 w-4" />
+          <span className="hidden sm:inline">Code Studio</span>
+        </Link>
         {hasFiles && (
           <button
             onClick={onOpenPalette}
