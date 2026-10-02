@@ -69,7 +69,7 @@ test("convert, edit, repeat, reload and compare while preserving the original", 
   // The selected document's sidebar menu uses the existing source editor.
   await page.getByRole("button", { name: "Options", exact: true }).nth(1).click();
   await page.getByText("Edit", { exact: true }).click();
-  await page.locator("textarea").fill("# My edited copy\n\nKeep these edits.");
+  await page.locator("#markdown-source").fill("# My edited copy\n\nKeep these edits.");
   await page.getByRole("button", { name: /Done.*Preview/ }).click();
   await expect
     .poll(async () => (await storedFiles(page)).find((f) => f.id === copy.id)?.content)

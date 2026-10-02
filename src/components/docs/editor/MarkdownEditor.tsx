@@ -13,7 +13,7 @@ import {
   useState,
 } from "react";
 import { Eye } from "lucide-react";
-import { caretTop } from "@/lib/markdown/source-locate";
+import { MarkdownSource, type MarkdownSourceHandle } from "./MarkdownSource";
 import { mathExpression, type FormatAction } from "@/lib/markdown/markdown-format";
 import { TOOLBAR_ITEMS } from "@/lib/markdown/markdown-toolbar-items";
 import { MarkdownToolbar } from "./MarkdownToolbar";
@@ -132,7 +132,7 @@ function MarkdownEditorImpl(
   // impossible to form: every save checks that the draft's own id still matches
   // the document being edited, and drops the write if it doesn't.
   const [draft, setDraft] = useState(() => ({ fileId, text: initialContent }));
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sourceRef = useRef<MarkdownSourceHandle>(null);
   const setText = useCallback(
     (text: string | ((previous: string) => string)) =>
       setDraft((previous) => ({
@@ -165,12 +165,7 @@ function MarkdownEditorImpl(
     handleRef,
     () => ({
       select: (start, end) => {
-        const ta = textareaRef.current;
-        if (!ta) return;
-        ta.focus({ preventScroll: true });
-        ta.setSelectionRange(start, end);
-        ta.scrollTop = Math.max(0, caretTop(ta, start) - ta.clientHeight / 3);
-        ta.scrollIntoView({ behavior: "smooth", block: "center" });
+        sourceRef.current?.select(start, end);
       },
     }),
     [],
@@ -267,42 +262,14 @@ function MarkdownEditorImpl(
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  /**
-   * Run a formatting action against the live selection.
-   *
-   * The new selection is written back in the same frame as the text, so the
-   * reader never sees the caret jump to the end and come back. `setSelectionRange`
-   * has to wait for React to commit the new value — setting it against the old
-   * text would place it by the wrong offsets.
-   */
-  const applyFormat = useCallback(
-    (action: FormatAction) => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      const next = action({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd });
-      if (
-        next.text === ta.value &&
-        next.start === ta.selectionStart &&
-        next.end === ta.selectionEnd
-      ) {
-        return;
-      }
-      setText(next.text);
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (!el) return;
-        el.focus({ preventScroll: true });
-        el.setSelectionRange(next.start, next.end);
-      });
-    },
-    [setText],
-  );
+  // Toolbar edits are editor transactions, preserving undo and folded sections.
+  const applyFormat = useCallback((action: FormatAction) => {
+    sourceRef.current?.format(action);
+  }, []);
 
-  // Formatting shortcuts. Bound on the textarea rather than the window: these
-  // are edits to *this* field, and a global binding would fire while the reader
-  // was typing in the search box or a rename input.
+  // Capture formatting shortcuts before the editor's default key bindings.
   const onShortcut = useCallback(
-    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (!(event.metaKey || event.ctrlKey)) return;
       const key = event.key.toLowerCase();
       for (const item of TOOLBAR_ITEMS) {
@@ -327,10 +294,10 @@ function MarkdownEditorImpl(
   const [attaching, setAttaching] = useState(false);
   const attachmentSelection = useRef({ start: 0, end: 0 });
   const openAttachments = () => {
-    const textarea = textareaRef.current;
+    const selection = sourceRef.current?.selection();
     attachmentSelection.current = {
-      start: textarea?.selectionStart ?? 0,
-      end: textarea?.selectionEnd ?? 0,
+      start: selection?.start ?? 0,
+      end: selection?.end ?? 0,
     };
     setAttaching(true);
   };
@@ -349,11 +316,11 @@ function MarkdownEditorImpl(
   const mathSelection = useRef({ start: 0, end: 0 });
   const [mathSeed, setMathSeed] = useState({ latex: "", display: false });
   const openMath = () => {
-    const textarea = textareaRef.current;
-    const start = textarea?.selectionStart ?? 0;
-    const end = textarea?.selectionEnd ?? 0;
+    const selection = sourceRef.current?.selection();
+    const start = selection?.start ?? 0;
+    const end = selection?.end ?? 0;
     mathSelection.current = { start, end };
-    setMathSeed(mathSeedFrom(textarea?.value.slice(start, end) ?? ""));
+    setMathSeed(mathSeedFrom(selection?.text.slice(start, end) ?? ""));
     setMathOpen(true);
   };
   const insertMath = (latex: string, display: boolean) =>
@@ -382,7 +349,7 @@ function MarkdownEditorImpl(
       if (event.key === "Enter") {
         event.preventDefault();
         commitName();
-        textareaRef.current?.focus();
+        sourceRef.current?.focus();
       } else if (event.key === "Escape") {
         event.preventDefault();
         // Stop here rather than letting the app's Escape handling also read
@@ -403,7 +370,7 @@ function MarkdownEditorImpl(
     const context = draftsRef.current;
     if (context?.workspaceId) context.journal.discard(context.workspaceId, draftRef.current.fileId);
     setText(initialContent);
-    onCancel(textareaRef.current?.selectionStart);
+    onCancel(sourceRef.current?.selection().start);
   }, [initialContent, onCancel, setText]);
 
   return (
@@ -441,7 +408,7 @@ function MarkdownEditorImpl(
             onClick={() => {
               const pending = draftRef.current;
               onSaveRef.current(pending.fileId, pending.text);
-              onDone(textareaRef.current?.selectionStart, pending.text);
+              onDone(sourceRef.current?.selection().start, pending.text);
             }}
             className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90 active:scale-95 coarse:min-h-11 coarse:px-4"
           >
@@ -489,15 +456,14 @@ function MarkdownEditorImpl(
             onMath={openMath}
           />
         </div>
-        <textarea
-          id="markdown-source"
-          ref={textareaRef}
-          value={draft.text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onShortcut}
-          spellCheck={false}
-          className="min-h-[70vh] w-full resize-y bg-transparent p-4 font-mono text-sm leading-relaxed outline-none"
-        />
+        <div onKeyDownCapture={onShortcut}>
+          <MarkdownSource
+            key={fileId}
+            ref={sourceRef}
+            initialContent={initialContent}
+            onChange={setText}
+          />
+        </div>
       </div>
     </div>
   );
