@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 /**
  * Shared building blocks for the settings page, modelled on Apple's grouped
@@ -18,16 +18,16 @@ export function Section({
   action?: ReactNode;
   children: ReactNode;
 }) {
-  // Sentence case at text size, not shouty small-caps: a settings page is a
-  // list of choices, and the headings are signposts between them rather than
-  // labels demanding attention of their own.
+  const titleId = useId();
   return (
-    <section className="space-y-2.5">
+    <section aria-labelledby={titleId} className="space-y-3">
       <div className="flex items-end justify-between gap-4 px-0.5">
         <div className="min-w-0">
-          <h2 className="text-[13px] font-semibold tracking-tight text-foreground">{title}</h2>
+          <h3 id={titleId} className="text-sm font-semibold tracking-tight text-foreground">
+            {title}
+          </h3>
           {description && (
-            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{description}</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
           )}
         </div>
         {action}
@@ -41,7 +41,7 @@ export function Section({
 export function Group({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
     <div
-      className={`overflow-hidden rounded-xl border border-border bg-card divide-y divide-border ${className}`}
+      className={`overflow-hidden rounded-xl border border-border/80 bg-card divide-y divide-hairline ${className}`}
     >
       {children}
     </div>
@@ -61,10 +61,14 @@ export function Row({
   className?: string;
 }) {
   return (
-    <div className={`flex items-center justify-between gap-4 px-4 py-3 ${className}`}>
-      <div className="min-w-0">
-        <div className="truncate text-sm text-foreground">{label}</div>
-        {hint && <div className="mt-0.5 truncate text-xs text-muted-foreground">{hint}</div>}
+    <div className={`flex items-center justify-between gap-4 px-4 py-3.5 ${className}`}>
+      <div className="min-w-0 flex-1">
+        <div className="wrap-anywhere text-sm font-medium text-foreground">{label}</div>
+        {hint && (
+          <div className="mt-1 wrap-anywhere text-xs leading-relaxed text-muted-foreground">
+            {hint}
+          </div>
+        )}
       </div>
       {control && <div className="flex shrink-0 items-center gap-1">{control}</div>}
     </div>
