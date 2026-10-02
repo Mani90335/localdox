@@ -52,7 +52,10 @@ function stored(page: Page) {
   );
 }
 
-const panel = (page: Page) => page.getByRole("region", { name: "Notes panel" });
+const panel = (page: Page) =>
+  page
+    .getByRole("region", { name: "Notes panel" })
+    .or(page.getByRole("dialog", { name: "Notes", exact: true }));
 const field = (page: Page) => panel(page).getByRole("textbox", { name: /^Expression or equation/ });
 const button = (page: Page, name: string) => panel(page).getByRole("button", { name, exact: true });
 
@@ -62,6 +65,30 @@ async function openCompute(page: Page) {
   await page.getByRole("tab", { name: "Compute" }).click();
   await panel(page).getByRole("radio", { name: "Text" }).click();
   await expect(field(page)).toBeVisible();
+}
+
+for (const width of [1440, 390]) {
+  test(`one compute input beside notes and rough work at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await openGuide(page);
+    await openCompute(page);
+    await expect(panel(page).getByRole("group", { name: "Math area" })).toHaveCount(0);
+    await expect(panel(page).getByRole("combobox", { name: "Operation", exact: true })).toHaveCount(
+      0,
+    );
+    await field(page).fill("1/2 + 1/3");
+    await button(page, "Compute").click();
+    await expect(panel(page).getByRole("region", { name: "Evaluate result" })).toContainText(
+      "0.833333333333",
+    );
+    await page.getByRole("tab", { name: "Rough work" }).click();
+    await page.getByRole("tab", { name: "Compute" }).click();
+    await expect(field(page)).toHaveValue("1/2 + 1/3");
+    await expect(panel(page).getByRole("region", { name: "Evaluate result" })).toBeVisible();
+    await panel(page).screenshot({ path: testInfo.outputPath("compute-panel.png") });
+  });
 }
 
 test("evaluate, copy, add to rough work, then insert into the document only when confirmed", async ({
@@ -78,7 +105,7 @@ test("evaluate, copy, add to rough work, then insert into the document only when
   await field(page).fill("1/2 + 1/3");
   // How the input reads, drawn, before anything is computed.
   await expect(panel(page).locator("#compute-reading .katex")).toBeVisible();
-  await button(page, "Evaluate").click();
+  await button(page, "Compute").click();
 
   const result = panel(page).getByRole("region", { name: "Evaluate result" });
   await expect(result).toBeVisible();
@@ -100,7 +127,9 @@ test("evaluate, copy, add to rough work, then insert into the document only when
   const markdown = "$$\n1/2+1/3 = \\frac{5}{6} \\approx 0.833333333333\n$$";
   await result.getByRole("button", { name: "Copy" }).click();
   await expect(result.getByRole("button", { name: "Copied" })).toBeVisible();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(markdown);
+  // Windows uses CRLF in the system clipboard.
+  const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clipboard.replace(/\r\n/g, "\n")).toBe(markdown);
 
   // Computing, copying: no document or scratchpad changed.
   expect((await stored(page)).files.map((f) => f.content)).toEqual([GUIDE]);
@@ -145,7 +174,7 @@ test("a result goes straight into the document too, but only after its confirmat
   await openGuide(page);
   await openCompute(page);
   await field(page).fill("x^2 - 5x + 6 = 0");
-  await button(page, "Solve").click();
+  await button(page, "Compute").click();
   const result = panel(page).getByRole("region", { name: "Solve result" });
   await expect(result.locator("dl").getByRole("listitem")).toHaveCount(2);
   await expect(result).toContainText("Solutions");
@@ -183,20 +212,19 @@ test("unsupported and invalid input is labelled; a choice of unknown is asked fo
   await openGuide(page);
   await openCompute(page);
 
-  // Outside the basic engine: labelled, with the advanced engine offered.
+  // Unsupported operations are labelled without offering a download.
   await field(page).fill("5 \\mod 3");
-  await button(page, "Evaluate").click();
+  await button(page, "Compute").click();
   const unsupported = panel(page).getByRole("region", { name: "Evaluate: Not supported yet" });
   await expect(unsupported).toContainText("Remainders (mod) aren't supported yet");
-  await expect(unsupported.getByRole("button", { name: "Use the advanced engine" })).toBeVisible();
+  await expect(unsupported.getByRole("button", { name: "Use the advanced engine" })).toHaveCount(0);
 
-  // An integral goes to the advanced engine, which asks before downloading.
+  // Basic calculus uses the same worker.
   await field(page).fill("\\int_0^1 x\\,dx");
-  await button(page, "Evaluate").click();
-  await expect(panel(page).getByRole("region", { name: "Advanced engine" })).toContainText(
-    "Evaluate needs the advanced engine",
+  await button(page, "Compute").click();
+  await expect(panel(page).getByRole("region", { name: "Evaluate result" })).toContainText(
+    "upper number",
   );
-  await panel(page).getByRole("button", { name: "Not now" }).click();
 
   await field(page).fill("x +");
   await button(page, "Simplify").click();
@@ -211,7 +239,7 @@ test("unsupported and invalid input is labelled; a choice of unknown is asked fo
   await expect(panel(page).getByRole("region", { name: "Solve result" })).toContainText("x=2");
 
   await field(page).fill("a x + b = 0");
-  await button(page, "Solve").click();
+  await button(page, "Compute").click();
   const choose = panel(page).getByRole("region", { name: "Solve: Choose a variable" });
   await choose.getByRole("button", { name: "Solve for x" }).click();
   const result = panel(page).getByRole("region", { name: "Solve result" });
@@ -242,7 +270,7 @@ test("the engine works in a worker: the page stays responsive, and a long comput
   await openCompute(page);
   // Load the engine first, so what follows measures computing alone.
   await field(page).fill("2 + 2");
-  await button(page, "Evaluate").click();
+  await button(page, "Compute").click();
   await expect(panel(page).getByRole("region", { name: "Evaluate result" })).toBeVisible();
 
   const longest = () =>
@@ -261,30 +289,32 @@ test("the engine works in a worker: the page stays responsive, and a long comput
     () => ((window as unknown as { __longTasks: number[] }).__longTasks.length = 0),
   );
 
-  // About a second of work for the engine (exact 100000!, then its decimal).
+  // Substantial work in the engine (exact 100000!, then its decimal).
   await field(page).fill("100000!");
-  await button(page, "Evaluate").click();
-  await expect(panel(page).getByText("Computing…")).toBeVisible();
-  // Typing goes on while it computes.
+  await button(page, "Compute").click();
+  // A fast machine may finish before the delayed status appears. Typing must
+  // still remain responsive; the long-task check below measures the page.
   await panel(page)
     .getByRole("textbox", { name: /^Unknown to solve for/ })
     .pressSequentially("x");
-  // Too long to show exactly (456,574 digits), so its decimal alone.
-  await expect(panel(page).getByRole("region", { name: "Evaluate result" })).toContainText(
-    "2.82422940796",
-    { timeout: 30_000 },
-  );
+  // Show its decimal if it finishes; on a busy or slow machine, the documented
+  // engine time limit can stop this workload. Both must leave the page usable.
+  await expect(
+    panel(page).getByRole("region", {
+      name: /^Evaluate(?: result|: Too complex|: Took too long)$/,
+    }),
+  ).toContainText(/2\.82422940796|Stopped after/, { timeout: 15_000 });
   // On the page's own thread this would be one task of a second or more.
   expect(await longest()).toBeLessThan(250);
 
-  await field(page).fill("400000!");
-  await button(page, "Evaluate").click();
+  await field(page).fill("4000000!");
+  await button(page, "Compute").click();
   await expect(panel(page).getByText("Computing…")).toBeVisible();
   await panel(page).getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(panel(page).getByRole("region", { name: "Evaluate: Cancelled" })).toBeVisible();
   // A fresh engine serves the next request.
   await field(page).fill("6 * 7");
-  await button(page, "Evaluate").click();
+  await button(page, "Compute").click();
   await expect(panel(page).getByRole("region", { name: "Evaluate result" })).toContainText("42");
 });
 
@@ -370,7 +400,7 @@ test("once loaded, Compute works offline after a reload", async ({ page, context
   });
   await openCompute(page);
   await field(page).fill("1/2 + 1/3");
-  await button(page, "Evaluate").click();
+  await button(page, "Compute").click();
   await expect(panel(page).getByRole("region", { name: "Evaluate result" })).toBeVisible();
   // Let the service worker store what this first use fetched.
   await page.waitForTimeout(500);
@@ -381,7 +411,7 @@ test("once loaded, Compute works offline after a reload", async ({ page, context
   // The panel and its tab come back; the engine starts from the cache.
   await expect(page.getByRole("tab", { name: "Compute" })).toHaveAttribute("aria-selected", "true");
   await field(page).fill("x^2 = 2");
-  await button(page, "Solve").click();
+  await button(page, "Compute").click();
   const result = panel(page).getByRole("region", { name: "Solve result" });
   await expect(result.locator("dl").getByRole("listitem")).toHaveCount(2);
   await expect(result).toContainText("1.41421356237");

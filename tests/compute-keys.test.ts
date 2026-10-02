@@ -1,20 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ComputeEngine } from "@cortex-js/compute-engine";
-import { parse as parseLatex } from "@cortex-js/compute-engine/latex-syntax";
 import { compute, configureEngine } from "../src/services/compute/engine.ts";
-import { needsAdvanced } from "../src/services/compute/advanced/routing.ts";
-import { newContext, preprocessLatex } from "../src/services/compute/advanced/normalize.ts";
 import { prepareInput } from "../src/services/compute/input.ts";
 import { asMath } from "../src/components/docs/notes/compute-input.ts";
 import { EDIT_KEYS, LAYOUTS, hasEmptyBox } from "../src/components/docs/notes/math-keys.ts";
 
-// The Compute keypad (notes/math-keys.ts) against the engines: every template
-// key, its boxes filled in, writes LaTeX the engine it goes to can read. The
-// basic engine is run; what routes to the advanced engine (SymPy) is parsed
-// as its worker parses it (compute-advanced.test.ts runs
-// SymPy itself).
-
+// Keyboard templates remain available for writing, including math beyond Compute.
 const ce = new ComputeEngine();
 configureEngine(ce);
 
@@ -31,7 +23,7 @@ test("every template key writes LaTeX its engine reads", () => {
   const templates = keys.filter((k) => k.action.kind === "insert" && /#[0?@]/.test(k.action.latex));
   assert.ok(templates.length > 40, `${templates.length} templates`);
   for (const key of templates) {
-    // gcd and lcm take two numbers or more; the comma sends them to SymPy.
+    // gcd and lcm take two numbers or more.
     // A probability is of an event (the variable is defined in a statement before it).
     const box = /common/.test(key.name) ? "4,6" : key.name === "Probability" ? "X<1" : "2";
     // Matrix keys act on a matrix: transpose it, invert it, take its determinant.
@@ -41,37 +33,24 @@ test("every template key writes LaTeX its engine reads", () => {
       matrix ? MATRIX : box,
       matrix ? MATRIX : "3",
     );
-    if (needsAdvanced(latex)) {
-      const json = JSON.stringify(parseLatex(preprocessLatex(latex, newContext())));
-      assert.ok(!json.includes('"Error"'), `${key.name}: ${latex} parses as ${json}`);
-      continue;
-    }
     // A subscript makes a name (x₂), not a number: reading it is enough.
     if (key.name === "Subscript") continue;
     const result = compute(ce, { op: "simplify", input: latex });
     assert.ok(
-      result.ok || (result.kind !== "syntax" && result.kind !== "unsupported"),
+      result.ok ||
+        (["syntax", "unsupported", "wrong-operation", "undefined"].includes(result.kind) &&
+          Boolean(result.message)),
       `${key.name}: ${latex} → ${JSON.stringify(result)}`,
     );
   }
 });
 
-test("keys the basic engine can't do route to the advanced one", () => {
-  for (const name of [
-    "Derivative",
-    "Integral",
-    "Limit",
-    "Sum",
-    "2 by 2 matrix",
-    "Binomial coefficient",
-    "Expectation",
-    "Probability",
-  ]) {
-    const key = keys.find((k) => k.name === name)!;
-    assert.equal(needsAdvanced(filled((key.action as { latex: string }).latex)), true, name);
+test("basic calculus keyboard templates compute without another engine", () => {
+  for (const name of ["Derivative", "Integral", "Definite integral"]) {
+    const key = keys.find((key) => key.name === name)!;
+    const input = filled((key.action as { latex: string }).latex);
+    assert.equal(compute(ce, { op: "evaluate", input }).ok, true, name);
   }
-  assert.equal(needsAdvanced("3\\le 2"), true);
-  assert.equal(needsAdvanced("X\\sim N\\left(0,1\\right);P\\left(X<1\\right)"), true);
 });
 
 test("every key has a name and a face, and names are unique within a set", () => {

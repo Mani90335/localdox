@@ -10,7 +10,6 @@ import { pdfjsAssets } from "./build/vite-pdfjs-assets";
 import { offlineShell } from "./build/vite-offline-shell";
 import { interactiveRuntime } from "./build/vite-interactive-runtime";
 import { bundleReport } from "./build/vite-bundle-report";
-import { pyodide } from "./build/vite-pyodide";
 
 export default defineConfig({
   plugins: [
@@ -35,8 +34,6 @@ export default defineConfig({
     // The ```interactive-react preview runtime, inlined into its sandboxed
     // frame. See the plugin's header.
     interactiveRuntime(),
-    // The advanced math engine (Pyodide + SymPy), published under /pyodide/.
-    pyodide(),
     // Emits /sw.js so the app reopens offline. See the plugin's header.
     offlineShell({
       // Lazy, but needed offline without a download: reading and editing

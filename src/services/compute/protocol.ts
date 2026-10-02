@@ -11,8 +11,8 @@ export const OPERATION_LABELS: Readonly<Record<ComputeOperation, string>> = {
 };
 
 /**
- * Operations only the advanced engine (SymPy, see advanced/) performs. The
- * four basic operations above run there too when the basic engine can't.
+ * Types retained for the development-only SymPy benchmark reference under
+ * scripts/compute-reference. The app runs only the basic operations above.
  */
 export type AdvancedOperation =
   | "differentiate"
@@ -97,7 +97,7 @@ export interface AdvancedParams {
 
 export interface AdvancedRequest {
   op: AnyOperation;
-  /** One or more statements (see advanced/statements.ts). */
+  /** One or more statements in the benchmark reference. */
   input: string;
   params?: AdvancedParams;
 }

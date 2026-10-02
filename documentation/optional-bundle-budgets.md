@@ -28,7 +28,6 @@ contains a math label. These prerequisites matter when interpreting the totals.
 | First interactive React example | 764.7 | 764.7 | 840 |
 | First math keyboard | 215.0 | 215.0 | 240 |
 | First Compute result, typed in the math field (MathLive 214.9 + engine 302.7; updated 2026-10-02; macOS, Chromium) | — | 519.2 | 540 |
-| First advanced (SymPy) result, incl. the basic engine (added 2026-10-02) | — | 11034.1 | 12000 |
 
 The source editor was remeasured on 2026-10-02 with Windows, Edge, Node 24.18.0, and the locked Vite 8.3.1 build. Highlighting, folding, and editor history replace the textarea and add CodeMirror plus its parsers. The 210 KiB ceiling gives the measured 193.2 KiB first edit modest headroom. These packages stay behind the lazy editor; the gate now also rejects CodeMirror and Lezer modules in the startup shell. The other table entries retain their original measurement dates.
 
@@ -121,3 +120,7 @@ establish equivalent performance or an improvement. The intermittent CSP event
 assertion also reproduces on baseline and passes the final static-build rerun.
 No existing threshold or assertion was weakened. Full counts and server-specific
 limitations are in [`verification.json`](../docs/b03-bundles/verification.json).
+
+SymPy/Pyodide was removed from the shipped app on 2026-10-02. The advanced
+journey is gone; the existing Compute ceiling remains. See
+[the compute comparison](../docs/performance/compute-benchmark.md).

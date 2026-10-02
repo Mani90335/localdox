@@ -1,7 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { CornerDownLeft, Keyboard, X } from "lucide-react";
 import { hasModKey, modKeyLabel } from "@/lib/platform/keyboard";
-import { OPERATION_LABELS, type ComputeOperation } from "@/services/compute/protocol";
 import { keypadPreferred, rememberKeypad, type InputMode } from "./compute-input";
 import { MathField, type MathFieldHandle } from "./MathField";
 import { MathKeypad } from "./MathKeypad";
@@ -18,8 +17,8 @@ const coarsePointer = () =>
 /**
  * Where the reader writes what to compute: a math field with an embedded
  * keypad (Math), or a plain textarea for text and LaTeX (Text), and the
- * button for the operation the input implies (Evaluate, or Solve for an
- * equation). Enter computes in Math, where there is one line; Text keeps
+ * Compute button.
+ * Enter computes in Math, where there is one line; Text keeps
  * Enter for new lines and computes on {mod}+Enter.
  */
 export const ComputeComposer = forwardRef<
@@ -31,7 +30,7 @@ export const ComputeComposer = forwardRef<
     onMathUnavailable: () => void;
     input: string;
     onInput: (value: string) => void;
-    primary: ComputeOperation;
+    primary: string;
     /** `latest`: the math field's value at Enter, which may be ahead of `input`. */
     onRun: (latest?: string) => void;
     /** Escape, outside LaTeX entry; returns whether it was used. */
@@ -61,7 +60,7 @@ export const ComputeComposer = forwardRef<
     setKeypad(!keypad);
   };
 
-  const label = OPERATION_LABELS[primary];
+  const label = primary;
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs transition-colors focus-within:border-primary/50">
       <div className="relative">
@@ -98,9 +97,7 @@ export const ComputeComposer = forwardRef<
             rows={2}
             aria-label="Expression or equation (LaTeX or plain text)"
             aria-describedby="compute-reading"
-            placeholder={
-              "1/2 + 1/3,  x^2 - 5x + 6 = 0,  \\int_0^1 x^2 dx\nX ~ N(0, 1) on one line, P(X < 1) on the next"
-            }
+            placeholder={"1/2 + 1/3,  x^2 - 5x + 6 = 0,  \\int_0^1 x^2 dx"}
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"

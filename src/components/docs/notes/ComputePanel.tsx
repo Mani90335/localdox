@@ -5,7 +5,6 @@ import {
   Check,
   ChevronRight,
   Copy,
-  Cpu,
   FileInput,
   Info,
   Loader2,
@@ -13,18 +12,12 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { PYODIDE_DOWNLOAD_BYTES } from "virtual:pyodide-assets";
 import { copyText } from "@/lib/workspace/share";
 import { cancelIdleCallbackSafe, requestIdleCallbackSafe } from "@/lib/platform/keyboard";
 import { prepareInput } from "@/services/compute/input";
-import { needsAdvanced } from "@/services/compute/advanced/routing";
 import {
   OPERATION_LABELS,
   operationLabel,
-  type AdvancedOperation,
-  type AdvancedParams,
-  type AdvancedRequest,
-  type AnyOperation,
   type ComputeAnswer,
   type ComputeFailure,
   type ComputeOperation,
@@ -39,7 +32,6 @@ import type {
   RunOptions,
 } from "@/services/compute/compute-client";
 import type { MathRendererType } from "@/services/math/types";
-import { AdvancedTools } from "./AdvancedTools";
 import { ComputeComposer, type ComposerHandle } from "./ComputeComposer";
 import { asMath, preferredMode, rememberMode, type InputMode } from "./compute-input";
 import { hasEmptyBox } from "./math-keys";
@@ -60,17 +52,14 @@ type Failure = Omit<ComputeFailure, "ok" | "op" | "kind"> & {
   kind: ComputeFailure["kind"] | ComputeErrorKind;
 };
 
-/** One computation: which engine, and exactly what it was asked. */
-type Job =
-  | { engine: "basic"; op: ComputeOperation; request: ComputeRequest }
-  | { engine: "advanced"; op: AnyOperation; request: AdvancedRequest };
+/** One computation, including whether the primary button chose the operation. */
+type Job = { op: ComputeOperation; request: ComputeRequest; automatic?: boolean };
 
 type Outcome = { job: Job; answer: ComputeAnswer } | { job: Job; failure: Failure };
 
 type Client<Request> = Pick<ComputeClient<Request, ComputeResult>, "run" | "stats" | "warm">;
 
-// The engine clients, imported on first use: each module names its worker,
-// and the worker holds the engine (services/compute/compute.ts, advanced/advanced.ts).
+// Import the client on first use, keeping the engine inside its lazy worker.
 function lazyClient<Request>(load: () => Promise<Client<Request>>) {
   let promise: Promise<Client<Request>> | null = null;
   return () =>
@@ -82,29 +71,6 @@ function lazyClient<Request>(load: () => Promise<Client<Request>>) {
 const basicClient = lazyClient(() =>
   import("@/services/compute/compute").then((m) => m.computeClient),
 );
-const advancedClient = lazyClient(() =>
-  import("@/services/compute/advanced/advanced").then((m) => m.advancedClient),
-);
-
-/** The reader agreed to the advanced engine's download, on this device. */
-const CONSENT_KEY = "localdox:advanced-math";
-function consented(): boolean {
-  try {
-    return localStorage.getItem(CONSENT_KEY) === "accepted";
-  } catch {
-    return false;
-  }
-}
-function rememberConsent() {
-  try {
-    localStorage.setItem(CONSENT_KEY, "accepted");
-  } catch {
-    // Asked again next time; nothing else depends on it.
-  }
-}
-
-const DOWNLOAD_MB = (PYODIDE_DOWNLOAD_BYTES / 1_000_000).toFixed(1);
-
 /** Whether worked steps are shown under a result: on, unless the reader hid them. */
 const STEPS_KEY = "localdox:compute-steps";
 function stepsPreferred(): boolean {
@@ -126,11 +92,18 @@ function rememberSteps(shown: boolean) {
  * What the tab holds between visits in this session: switching to Notes and
  * back keeps the input and the last result. Nothing here is stored.
  */
-const session: { input: string; variable: string; outcome: Outcome | null; run: number } = {
+const session: {
+  input: string;
+  variable: string;
+  outcome: Outcome | null;
+  run: number;
+  mode: InputMode | null;
+} = {
   input: "",
   variable: "",
   outcome: null,
   run: 0,
+  mode: null,
 };
 
 const FAILURE_TITLES: Record<Failure["kind"], string> = {
@@ -149,12 +122,6 @@ const FAILURE_TITLES: Record<Failure["kind"], string> = {
   cancelled: "Cancelled",
 };
 
-/** What the advanced engine is doing while the reader waits. */
-const STAGES: Record<string, string> = {
-  runtime: `Loading Python (the first time downloads ${DOWNLOAD_MB} MB)…`,
-  sympy: "Loading SymPy…",
-};
-
 /** What computing the input means by default: solving an equation, evaluating anything else. */
 function impliedOp(input: string): ComputeOperation {
   return /(?<![<>!:])=(?!=)/.test(input) ? "solve" : "evaluate";
@@ -163,18 +130,8 @@ function impliedOp(input: string): ComputeOperation {
 /** Waits this long before showing "Computing…", so instant answers don't flash it. */
 const STATUS_DELAY_MS = 150;
 const PREVIEW_MS = 250;
-const BASIC_OPS: readonly string[] = ["evaluate", "simplify", "approximate", "solve"];
 
-/**
- * The Compute tab: evaluate, simplify, solve and approximate, in a worker,
- * with an advanced engine (SymPy) for calculus, linear algebra, probability,
- * statistics and transforms, downloaded only after the reader agrees.
- *
- * What the reader wrote and what the engine computed stay apart. The input
- * is never changed by a result; a result names its own input and operation;
- * and a result reaches rough work or a document only through an explicit
- * action (Add to rough work, Insert into document…, which asks first).
- */
+/** Local math in a lazy worker, with results shared only on request. */
 export function ComputePanel({
   onAddToRoughWork,
   insertTarget,
@@ -191,10 +148,8 @@ export function ComputePanel({
     stage?: string;
     controller: AbortController;
   } | null>(null);
-  /** An advanced job waiting for the reader to agree to the download. */
-  const [asking, setAsking] = useState<Job | null>(null);
   const [showStatus, setShowStatus] = useState(false);
-  const [mode, setMode] = useState<InputMode>(preferredMode);
+  const [mode, setMode] = useState<InputMode>(() => session.mode ?? preferredMode());
   /** MathLive didn't load (offline on first use): text until it can. */
   const [mathUnavailable, setMathUnavailable] = useState(false);
   const [insert, setInsert] = useState<{ markdown: string; target: InsertTarget | null } | null>(
@@ -238,37 +193,19 @@ export function ComputePanel({
     [mathRenderer],
   );
 
-  // A new result, failure or question is brought into view: with the advanced
-  // section open it can land below the fold.
+  // Bring a new result or failure into view.
   const outputRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!outcome && !asking) return;
+    if (!outcome) return;
     outputRef.current?.firstElementChild?.scrollIntoView?.({
       block: "nearest",
       behavior: "smooth",
     });
-  }, [outcome, asking]);
+  }, [outcome]);
 
-  /** The job for an operation on the input (the current one unless given), on the engine that can do it. */
-  const jobFor = (op: AnyOperation, params: AdvancedParams = {}, text = input): Job => {
-    const solveFor = params.variable ?? (op === "solve" ? variable.trim() : undefined);
-    if (BASIC_OPS.includes(op) && !needsAdvanced(text)) {
-      return {
-        engine: "basic",
-        op: op as ComputeOperation,
-        request: {
-          op: op as ComputeOperation,
-          input: text,
-          ...(op === "solve" ? { variable: solveFor } : {}),
-        },
-      };
-    }
-    return advancedJob(op, { ...params, variable: solveFor || undefined }, text);
-  };
-  const advancedJob = (op: AnyOperation, params: AdvancedParams = {}, text = input): Job => ({
-    engine: "advanced",
+  const jobFor = (op: ComputeOperation, chosen = variable, text = input): Job => ({
     op,
-    request: { op, input: text, params },
+    request: { op, input: text, ...(op === "solve" ? { variable: chosen.trim() } : {}) },
   });
 
   const start = (job: Job) => {
@@ -277,12 +214,6 @@ export function ComputePanel({
       composerRef.current?.nextBox();
       return;
     }
-    if (job.engine === "advanced" && !consented()) {
-      running?.controller.abort();
-      setAsking(job);
-      return;
-    }
-    setAsking(null);
     void execute(job);
   };
 
@@ -298,20 +229,16 @@ export function ComputePanel({
       onProgress: (stage) => current() && setRunning((r) => r && { ...r, stage }),
     };
     try {
-      let result: ComputeResult;
-      if (job.engine === "basic") {
-        const client = await basicClient();
-        if (client.stats().ready) setRunning((r) => r && { ...r, phase: "computing" });
-        result = await client.run(job.request, options);
-        // What the basic engine can't read, the advanced one may: once the
-        // reader has agreed to it, without asking again.
-        if (!result.ok && result.kind === "unsupported" && consented() && current()) {
-          setRunning(null);
-          return void execute(advancedJob(job.op));
-        }
-      } else {
-        const client = await advancedClient();
-        if (client.stats().ready) setRunning((r) => r && { ...r, phase: "computing" });
+      const client = await basicClient();
+      if (client.stats().ready) setRunning((r) => r && { ...r, phase: "computing" });
+      let result = await client.run(job.request, options);
+      if (
+        job.automatic &&
+        !result.ok &&
+        result.kind === "wrong-operation" &&
+        result.suggest === "simplify"
+      ) {
+        job = { ...job, op: "simplify", request: { ...job.request, op: "simplify" } };
         result = await client.run(job.request, options);
       }
       if (!current()) return;
@@ -329,13 +256,12 @@ export function ComputePanel({
     }
   };
 
-  const run = (op: AnyOperation, params?: AdvancedParams) => start(jobFor(op, params));
+  const run = (op: ComputeOperation, chosen?: string) => start(jobFor(op, chosen));
   const cancel = () => running?.controller.abort();
 
   /** Escape stops the computation, or clears the result; the panel stays open. */
   const escape = () => {
     if (running) cancel();
-    else if (asking) setAsking(null);
     else if (outcome) setOutcome(null);
     else return false;
     return true;
@@ -353,32 +279,20 @@ export function ComputePanel({
       setMathUnavailable(false);
     }
     if (remember) rememberMode(next);
+    session.mode = next;
     setMode(next);
   };
 
   const prepared = useDebounced(input, PREVIEW_MS);
-  const advancedInput = useMemo(() => needsAdvanced(prepared), [prepared]);
   const reading = useMemo(
-    () =>
-      prepared.trim() && !/\n|;/.test(prepared)
-        ? prepareInput(prepared, { advanced: advancedInput })
-        : null,
-    [prepared, advancedInput],
+    () => (prepared.trim() && !/\n|;/.test(prepared) ? prepareInput(prepared) : null),
+    [prepared],
   );
   const empty = !input.trim();
   const defaultOp = impliedOp(input);
-
   const padding = variant === "docked" ? "px-3" : "";
 
-  const statusText = !running
-    ? ""
-    : running.phase === "computing"
-      ? running.job.engine === "advanced"
-        ? "Computing with SymPy…"
-        : "Computing…"
-      : running.job.engine === "advanced"
-        ? (STAGES[running.stage ?? "runtime"] ?? STAGES.runtime)
-        : "Loading the math engine…";
+  const statusText = running?.phase === "computing" ? "Computing…" : "Loading the math engine…";
 
   return (
     <div className={`space-y-3 pb-6 ${padding}`}>
@@ -392,10 +306,12 @@ export function ComputePanel({
         }}
         input={input}
         onInput={setInput}
-        primary={defaultOp}
+        primary="Compute"
         // Enter in the math field passes what the field holds right then: its
         // input event can still be on its way when a fast Enter arrives.
-        onRun={(latest = input) => start(jobFor(impliedOp(latest), undefined, latest))}
+        onRun={(latest = input) => {
+          start({ ...jobFor(impliedOp(latest), variable, latest), automatic: true });
+        }}
         onEscape={escape}
       />
 
@@ -423,53 +339,43 @@ export function ComputePanel({
           ) : reading && reading.kind !== "empty" ? (
             <span>{reading.message}</span>
           ) : /\n|;/.test(prepared) ? (
-            <span>Several statements: definitions first, then what to compute.</span>
+            <span>Compute one expression or equation at a time.</span>
           ) : null}
         </div>
 
         {/* The other operations; the one the input implies is the composer's button. */}
-        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Compute">
-          {(["evaluate", "simplify", "approximate", "solve"] as const)
-            .filter((op) => op !== defaultOp)
-            .map((op) => (
-              <OpButton key={op} disabled={empty} onClick={() => run(op)}>
-                {op === "approximate" ? "Numeric" : OPERATION_LABELS[op]}
-              </OpButton>
-            ))}
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            {defaultOp === "solve" ? "Solve for" : "for"}
-            <input
-              id="compute-variable"
-              name="compute-variable"
-              value={variable}
-              onChange={(e) => setVariable(e.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !empty) {
-                  event.preventDefault();
-                  run("solve");
-                }
-              }}
-              maxLength={12}
-              placeholder="auto"
-              aria-label="Unknown to solve for (leave empty to choose automatically)"
-              spellCheck={false}
-              autoCapitalize="off"
-              className="h-7 w-14 rounded-md border border-border bg-background px-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring coarse:h-10"
-            />
-          </label>
-        </div>
-
-        <AdvancedTools
-          disabled={empty}
-          onRun={(op: AdvancedOperation, params) => start(advancedJob(op, params))}
-          onTemplate={(text) => {
-            const next = input.trim() ? `${input.replace(/\s+$/, "")}\n${text}` : text;
-            // Examples are written as text, a line each.
-            switchMode("text", false);
-            setInput(next);
-            requestAnimationFrame(() => composerRef.current?.focus());
-          }}
-        />
+        {
+          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Compute">
+            {(["evaluate", "simplify", "approximate", "solve"] as const)
+              .filter((op) => op !== defaultOp)
+              .map((op) => (
+                <OpButton key={op} disabled={empty} onClick={() => run(op)}>
+                  {op === "approximate" ? "Numeric" : OPERATION_LABELS[op]}
+                </OpButton>
+              ))}
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              Solve for
+              <input
+                id="compute-variable"
+                name="compute-variable"
+                value={variable}
+                onChange={(e) => setVariable(e.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !empty) {
+                    event.preventDefault();
+                    run("solve");
+                  }
+                }}
+                maxLength={12}
+                placeholder="auto"
+                aria-label="Unknown to solve for (leave empty to choose automatically)"
+                spellCheck={false}
+                autoCapitalize="off"
+                className="h-7 w-14 rounded-md border border-border bg-background px-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring coarse:h-10"
+              />
+            </label>
+          </div>
+        }
 
         <div ref={outputRef} aria-live="polite" className="space-y-3">
           {running && showStatus && (
@@ -486,20 +392,7 @@ export function ComputePanel({
             </div>
           )}
 
-          {asking && (
-            <ConsentCard
-              op={asking.op}
-              onAccept={() => {
-                rememberConsent();
-                const job = asking;
-                setAsking(null);
-                void execute(job);
-              }}
-              onDecline={() => setAsking(null)}
-            />
-          )}
-
-          {!asking && outcome && "answer" in outcome && (
+          {outcome && "answer" in outcome && (
             <ResultCard
               answer={outcome.answer}
               onClear={() => setOutcome(null)}
@@ -510,40 +403,20 @@ export function ComputePanel({
               }}
               onAddToRoughWork={onAddToRoughWork}
               onInsert={(markdown) => setInsert({ markdown, target: insertTarget() })}
-              // An incomplete basic answer: SymPy may find every solution.
-              onAdvanced={
-                outcome.job.engine === "basic" &&
-                outcome.answer.op === "solve" &&
-                outcome.answer.complete === false
-                  ? () => start(advancedJob("solve", { variable: variable.trim() || undefined }))
-                  : undefined
-              }
             />
           )}
-          {!asking && outcome && "failure" in outcome && (
+          {outcome && "failure" in outcome && (
             <FailureCard
               failure={outcome.failure}
               op={outcome.job.op}
               onClear={() => setOutcome(null)}
               onRun={(op, chosen) => {
-                if (outcome.job.engine === "advanced") {
-                  const params = { ...outcome.job.request.params, variable: chosen };
-                  return start(
-                    advancedJob(op, chosen === undefined ? outcome.job.request.params : params),
-                  );
-                }
                 if (chosen !== undefined) setVariable(chosen);
-                run(op, chosen === undefined ? undefined : { variable: chosen });
+                run(op, chosen);
               }}
-              onAdvanced={
-                outcome.job.engine === "basic" &&
-                (outcome.failure.kind === "unsupported" || outcome.failure.kind === "syntax")
-                  ? () => start(advancedJob(outcome.job.op))
-                  : undefined
-              }
             />
           )}
-          {!outcome && !running && !asking && <Intro />}
+          {!outcome && !running && <Intro />}
         </div>
       </NoteRenderContext.Provider>
 
@@ -572,57 +445,10 @@ function Intro() {
       <Calculator className="mb-3 h-5 w-5 text-muted-foreground" aria-hidden />
       <p className="text-sm font-medium text-foreground">Compute</p>
       <p className="mt-1.5 max-w-64 text-xs leading-relaxed text-muted-foreground">
-        Evaluate, simplify and solve, on this device. Results stay here until you copy them, add
-        them to rough work or insert them into a document.
+        Enter your math using the keyboard, then compute. Work with numbers, equations and simple
+        derivatives and integrals. Copy the answer or add the steps to rough work.
       </p>
     </div>
-  );
-}
-
-/** Asks before the advanced engine's one-time download. */
-function ConsentCard({
-  op,
-  onAccept,
-  onDecline,
-}: {
-  op: AnyOperation;
-  onAccept: () => void;
-  onDecline: () => void;
-}) {
-  return (
-    <section
-      aria-label="Advanced engine"
-      className="space-y-2 rounded-lg border border-border/70 bg-card px-3 py-3 text-sm"
-    >
-      <div className="flex items-center gap-2">
-        <Cpu className="h-4 w-4 text-muted-foreground" aria-hidden />
-        <p className="font-medium text-foreground">
-          {operationLabel(op)} needs the advanced engine
-        </p>
-      </div>
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        SymPy, a full computer algebra system, runs here on your device: calculus, linear algebra,
-        probability, statistics and transforms. The first use downloads {DOWNLOAD_MB} MB; after that
-        it works offline. What you type never leaves the device.
-      </p>
-      <div className="flex flex-wrap gap-1.5">
-        <button
-          type="button"
-          autoFocus
-          onClick={onAccept}
-          className="inline-flex h-8 items-center rounded-md bg-foreground px-3 text-xs font-medium text-background transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 coarse:h-11"
-        >
-          Download and compute
-        </button>
-        <button
-          type="button"
-          onClick={onDecline}
-          className="inline-flex h-8 items-center rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-accent coarse:h-11"
-        >
-          Not now
-        </button>
-      </div>
-    </section>
   );
 }
 
@@ -632,15 +458,12 @@ function ResultCard({
   onCopy,
   onAddToRoughWork,
   onInsert,
-  onAdvanced,
 }: {
   answer: ComputeAnswer;
   onClear: () => void;
   onCopy: (markdown: string) => Promise<boolean>;
   onAddToRoughWork: (markdown: string) => void;
   onInsert: (markdown: string) => void;
-  /** Offered when the basic engine's answer may be incomplete. */
-  onAdvanced?: () => void;
 }) {
   const [showSteps, setShowSteps] = useState(stepsPreferred);
   const hasSteps = Boolean(answer.steps?.length);
@@ -666,7 +489,7 @@ function ResultCard({
   } else if (answer.op !== "solve" || answer.exact) {
     if (answer.exact) {
       rows.push({
-        label: answer.op === "solve" ? "Result" : answer.engine === "advanced" ? "Result" : "Exact",
+        label: answer.op === "solve" ? "Result" : "Exact",
         latex: answer.exact,
       });
     }
@@ -682,14 +505,6 @@ function ResultCard({
         <h3 className="flex-1 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
           {label}
         </h3>
-        {answer.engine === "advanced" && (
-          <span
-            title="Computed by SymPy, on this device"
-            className="rounded bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground"
-          >
-            SymPy
-          </span>
-        )}
         <ClearButton onClick={onClear} />
       </header>
       <dl className="space-y-2.5 px-3 py-2.5 text-sm">
@@ -780,11 +595,6 @@ function ResultCard({
         <ActionButton onClick={() => onInsert(markdown)}>
           <FileInput className="h-3.5 w-3.5" /> Insert into document…
         </ActionButton>
-        {onAdvanced && (
-          <ActionButton onClick={onAdvanced} title="Solve again with SymPy">
-            <Cpu className="h-3.5 w-3.5" /> Try the advanced engine
-          </ActionButton>
-        )}
       </footer>
     </section>
   );
@@ -871,14 +681,11 @@ function FailureCard({
   op,
   onClear,
   onRun,
-  onAdvanced,
 }: {
   failure: Failure;
-  op: AnyOperation;
+  op: ComputeOperation;
   onClear: () => void;
-  onRun: (op: AnyOperation, variable?: string) => void;
-  /** Offered when the basic engine couldn't read the input. */
-  onAdvanced?: () => void;
+  onRun: (op: ComputeOperation, variable?: string) => void;
 }) {
   const quiet = failure.kind === "cancelled" || failure.kind === "empty";
   return (
@@ -900,13 +707,8 @@ function FailureCard({
         </div>
         <ClearButton onClick={onClear} />
       </div>
-      {(failure.suggest || failure.variables?.length || onAdvanced) && (
+      {(failure.suggest || failure.variables?.length) && (
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {onAdvanced && (
-            <ActionButton onClick={onAdvanced}>
-              <Cpu className="h-3.5 w-3.5" /> Use the advanced engine
-            </ActionButton>
-          )}
           {failure.suggest && (
             <ActionButton onClick={() => onRun(failure.suggest!)}>
               {operationLabel(failure.suggest)} instead

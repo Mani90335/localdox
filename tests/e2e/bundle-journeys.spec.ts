@@ -26,7 +26,6 @@ const budgets = {
   // The engine worker (~303 KiB) and, since Compute's input became a math
   // field, MathLive (~215 KiB; the keyboard journey's library).
   compute: 540,
-  advanced: 12000,
 } as const;
 type Journey = keyof typeof budgets;
 const optional =
@@ -122,12 +121,12 @@ for (const journey of Object.keys(budgets) as Journey[]) {
       ).toEqual([]);
     }
 
-    if (["edit", "export", "keyboard", "compute", "advanced"].includes(journey)) {
+    if (["edit", "export", "keyboard", "compute"].includes(journey)) {
       await upload(page, "budget.md", "# Budget note\n\nA **complete** note with $E=mc^2$.\n");
       await expect(page.locator("article .katex")).toHaveCount(1);
       if (journey === "keyboard") await edit(page);
       // The Notes panel itself is a prerequisite; the engine is the feature.
-      if (journey === "compute" || journey === "advanced") {
+      if (journey === "compute") {
         await page.getByRole("button", { name: "Notes", exact: true }).click();
         await expect(page.getByRole("tab", { name: "Compute" })).toBeVisible();
       }
@@ -214,27 +213,13 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         await page.getByRole("button", { name: "Insert equation", exact: true }).click();
         await expect(page.locator("math-field")).toBeVisible();
         break;
-      case "advanced":
-        await page.getByRole("tab", { name: "Compute" }).click();
-        // LaTeX typed as text: the engine is the feature, not the math field.
-        await page.getByRole("radio", { name: "Text" }).click();
-        await page
-          .getByRole("textbox", { name: /^Expression or equation/ })
-          .fill("\\int_0^1 x^2\\,dx");
-        await page.getByRole("button", { name: "Evaluate", exact: true }).click();
-        await page.getByRole("button", { name: "Download and compute" }).click();
-        await expect(page.getByRole("region", { name: "Evaluate result" })).toContainText(
-          "0.333333333333",
-          { timeout: 120_000 },
-        );
-        break;
       case "compute":
         // As a reader first meets it: the math field (MathLive) and its keypad.
         await page.getByRole("tab", { name: "Compute" }).click();
         for (const key of ["1", "Fraction", "2", "Move right", "Plus", "1", "Fraction", "3"]) {
           await page.getByRole("button", { name: key, exact: true }).click();
         }
-        await page.getByRole("button", { name: "Evaluate", exact: true }).click();
+        await page.getByRole("button", { name: "Compute", exact: true }).click();
         await expect(page.getByRole("region", { name: "Evaluate result" })).toContainText(
           "0.833333333333",
         );
@@ -281,7 +266,6 @@ for (const journey of Object.keys(budgets) as Journey[]) {
         interactive: /compiler\.worker/,
         keyboard: /mathlive\.min/,
         compute: /compute\.worker/,
-        advanced: /sympy-[\d.]+-py3-none-any\.whl$/,
         diagram: /katex-[^.]+\.js$/,
       };
       if (required[journey])
@@ -315,6 +299,9 @@ test("the math engine ships only inside its worker", async () => {
   expect(onPage.map((file: ReportFile) => file.file)).toEqual([]);
   const worker = report.files.filter((file: ReportFile) => /compute\.worker/.test(file.file));
   expect(worker).toHaveLength(1);
+  expect(
+    report.files.filter((file: ReportFile) => /pyodide|advanced\.worker|\.whl$/.test(file.file)),
+  ).toEqual([]);
   // Precached only once used (or downloaded on request), like other optional engines.
   const sw = await readFile(".output/public/sw.js", "utf8");
   const manifest = JSON.parse(sw.slice(sw.indexOf("=") + 1, sw.indexOf(";\n")));
