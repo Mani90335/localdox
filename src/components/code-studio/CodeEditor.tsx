@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Compartment, EditorState, StateEffect, StateField } from "@codemirror/state";
+import { Annotation, Compartment, EditorState, StateEffect, StateField } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -14,6 +14,7 @@ import { languages } from "@codemirror/language-data";
 import type { Language } from "@/services/code-studio/protocol";
 
 const markLine = StateEffect.define<number>();
+const externalUpdate = Annotation.define<boolean>();
 const highlight = StateField.define({
   create: () => Decoration.none,
   update(value, tr) {
@@ -80,7 +81,8 @@ export function CodeEditor({
           ]),
           EditorView.contentAttributes.of({ "aria-label": "Code editor", spellcheck: "false" }),
           EditorView.updateListener.of((update) => {
-            if (update.docChanged) callbacks.current.onChange(update.state.doc.toString());
+            if (update.transactions.some((tr) => tr.docChanged && !tr.annotation(externalUpdate)))
+              callbacks.current.onChange(update.state.doc.toString());
           }),
           EditorView.theme({
             "&": { height: "100%", fontSize: "13px", background: "transparent" },
@@ -112,7 +114,10 @@ export function CodeEditor({
   useEffect(() => {
     const editor = view.current;
     if (editor && editor.state.doc.toString() !== source)
-      editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: source } });
+      editor.dispatch({
+        changes: { from: 0, to: editor.state.doc.length, insert: source },
+        annotations: externalUpdate.of(true),
+      });
   }, [source]);
   useEffect(() => {
     let active = true;
