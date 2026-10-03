@@ -7,12 +7,125 @@ import { traceSchema } from "../src/services/code-studio/protocol.ts";
 import { changesBetween, explain } from "../src/services/code-studio/operations.ts";
 import { LESSONS, lessonTrace } from "../src/services/code-studio/lessons.ts";
 import { importPythonTutor } from "../src/services/code-studio/python-tutor.ts";
+import { TEACHING } from "../src/services/code-studio/teaching.ts";
+import { presentTrace } from "../src/services/code-studio/presentation.ts";
+
+test("beginner C++ projection removes startup machinery and keeps stable picture addresses", () => {
+  const recording = traceSchema.parse({
+    version: 1,
+    language: "cpp",
+    origin: "execution",
+    source: "int main() {}",
+    notes: [],
+    steps: [
+      {
+        line: 1,
+        event: "before",
+        frames: [
+          {
+            id: "0xFFFF",
+            name: "_GLOBAL__sub_I_main",
+            locals: { "std::__ioinit": { special: "Not yet initialized at this source position" } },
+          },
+        ],
+        heap: {},
+        stdout: "",
+      },
+      {
+        line: 2,
+        event: "before",
+        frames: [
+          {
+            id: "0xFFFF",
+            name: "main",
+            locals: {
+              "std::__ioinit": 0,
+              answer: { special: "Not yet initialized at this source position" },
+              _mine: 21,
+              first: { ref: "0xABCDEF" },
+              alias: { ref: "0xABCDEF" },
+            },
+          },
+        ],
+        heap: {
+          "0xABCDEF": { type: "Node", entries: [["next", { ref: "0xABCDEF" }]] },
+          runtime: { type: "internal", entries: [] },
+        },
+        stdout: "",
+      },
+      {
+        line: 3,
+        event: "end",
+        frames: [
+          {
+            id: "0xFFFF",
+            name: "main",
+            locals: { answer: 42, first: { ref: "0xABCDEF" }, second: { ref: "0xABC000" } },
+          },
+        ],
+        heap: {
+          "0xABC000": { type: "Array", entries: [["0", 7]] },
+          "0xABCDEF": { type: "Node", entries: [["next", null]] },
+        },
+        stdout: "42\n",
+      },
+    ],
+  });
+  const original = JSON.stringify(recording);
+  const shown = presentTrace(recording);
+  assert.equal(shown.steps.length, 2);
+  assert.deepEqual(shown.steps[0].frames[0].locals, {
+    _mine: 21,
+    first: { ref: "0x1" },
+    alias: { ref: "0x1" },
+  });
+  assert.deepEqual(shown.steps[0].heap["0x1"].entries, [["next", { ref: "0x1" }]]);
+  assert.deepEqual(shown.steps[1].frames[0].locals.second, { ref: "0x2" });
+  assert.equal(shown.steps[1].frames[0].locals.answer, 42);
+  assert.equal(shown.steps[1].stdout, "42\n");
+  assert.equal(Object.keys(shown.steps[0].heap).length, 1);
+  assert.equal(JSON.stringify(recording), original, "export retains the original trace");
+  assert.doesNotMatch(
+    JSON.stringify(shown),
+    /0xABCDEF|0xFFFF|std::__ioinit|_GLOBAL__|Not yet initialized/,
+  );
+});
+
+test("authored focus targets follow remapped object identities", () => {
+  const trace = presentTrace(
+    lessonTrace(
+      LESSONS.find((l) => l.id === "arrays")!,
+      "javascript",
+    ),
+  );
+  for (const step of trace.steps)
+    for (const focus of step.lesson?.focus ?? [])
+      assert.ok(step.heap[focus.slice(0, focus.lastIndexOf(":"))]);
+});
 
 function run(source: string, stdin = "") {
   return traceSchema.parse(
     runJavaScript({ source, stdin, compiled: instrument(transform, source) }),
   );
 }
+test("the introductory teaching highlights match the example in all three languages", () => {
+  const lesson = LESSONS[0];
+  for (const language of ["javascript", "python", "cpp"] as const) {
+    const lines = lesson.code[language].split("\n");
+    const mapping = TEACHING[lesson.id].lines![language];
+    assert.match(lines[mapping[1] - 1], /number = 21/);
+    assert.match(lines[mapping[2] - 1], /answer = number \* 2/);
+    assert.match(lines[mapping[3] - 1], /console.log\(answer\)|print\(answer\)|cout << answer/);
+  }
+});
+
+test("recorded change explanations use the program's names rather than internal frame paths", () => {
+  const result = run("const values = [4]; values[0] = 9;");
+  const messages = result.steps.map((step, i) => explain(result.steps[i - 1], step).explanation);
+  assert.ok(messages.some((message) => message.includes("values[0] changed from 4 to 9")));
+  assert.ok(messages.every((message) => !message.includes("Global.values")));
+});
+
 test("executes edited code rather than a matched algorithm template", () => {
   const result = run(
     "const x = 13; let result = 0; for (let i = 0; i < x; i++) result += i; console.log(result);",

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
@@ -35,25 +35,29 @@ import { explain, OPERATIONS } from "@/services/code-studio/operations";
 import { execute } from "@/services/code-studio/client";
 import { CodeEditor } from "./CodeEditor";
 import { Computer, Memory, Structures } from "./Visualizations";
+import { FirstProgram } from "./Teaching";
+import { TEACHING } from "@/services/code-studio/teaching";
+import { presentTrace } from "@/services/code-studio/presentation";
 import "./code-studio.css";
 
 const MemoryDiagram = lazy(() =>
   import("./MemoryDiagram").then((m) => ({ default: m.MemoryDiagram })),
 );
-const INITIAL = LESSONS[1];
+const INITIAL = LESSONS[0];
 type Tab = "structure" | "memory" | "connections" | "computer";
 export function CodeStudio() {
   const [language, setLanguage] = useState<Language>("javascript"),
     [source, setSource] = useState(INITIAL.code.javascript),
     [stdin, setStdin] = useState("");
   const [lessonId, setLessonId] = useState(INITIAL.id),
-    [trace, setTrace] = useState<Trace>(() => lessonTrace(INITIAL, "javascript")),
+    [recording, setTrace] = useState<Trace>(() => lessonTrace(INITIAL, "javascript")),
     [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false),
     [speed, setSpeed] = useState(1),
     [tab, setTab] = useState<Tab>("structure"),
-    [course, setCourse] = useState(false),
-    [sidebar, setSidebar] = useState(true);
+    [course, setCourse] = useState(true),
+    [sidebar, setSidebar] = useState(false),
+    [moreViews, setMoreViews] = useState(false);
   const [running, setRunning] = useState(false),
     [error, setError] = useState(""),
     [answer, setAnswer] = useState<number | null>(null),
@@ -66,6 +70,9 @@ export function CodeStudio() {
     runVersion = useRef(0);
   const importInput = useRef<HTMLInputElement>(null);
   const lesson = LESSONS.find((l) => l.id === lessonId) ?? INITIAL;
+  const teaching = TEACHING[lesson.id];
+  const trace = useMemo(() => presentTrace(recording), [recording]);
+  const guided = course && trace.origin === "lesson";
   const step = trace.steps[Math.min(index, trace.steps.length - 1)],
     previous = trace.steps[index - 1];
   const explanation = explain(previous, step),
@@ -81,7 +88,6 @@ export function CodeStudio() {
     const media = matchMedia("(max-width: 900px)");
     const resize = () => setMobile(media.matches);
     resize();
-    setSidebar(!media.matches);
     media.addEventListener("change", resize);
     try {
       const stored = JSON.parse(localStorage.getItem("localdox-code-studio-v1") ?? "null");
@@ -93,6 +99,15 @@ export function CodeStudio() {
         ) {
           setLanguage(stored.language);
           setSource(stored.source);
+          const restored =
+            LESSONS.find((l) => l.id === stored.lessonId) ??
+            LESSONS.find((l) => l.code[stored.language as Language] === stored.source) ??
+            INITIAL;
+          setLessonId(restored.id);
+          setTrace(lessonTrace(restored, stored.language));
+          setCourse(
+            stored.course !== false && restored.code[stored.language as Language] === stored.source,
+          );
         }
         if (Array.isArray(stored.completed))
           setCompleted(stored.completed.filter((id: unknown) => typeof id === "string"));
@@ -112,7 +127,7 @@ export function CodeStudio() {
       try {
         localStorage.setItem(
           "localdox-code-studio-v1",
-          JSON.stringify({ language, source, completed }),
+          JSON.stringify({ language, source, completed, lessonId, course }),
         );
         setSaved(true);
       } catch {
@@ -120,21 +135,24 @@ export function CodeStudio() {
       }
     }, 400);
     return () => clearTimeout(timer);
-  }, [language, source, completed, ready]);
+  }, [language, source, completed, lessonId, course, ready]);
   useEffect(() => {
     if (!playing || stale) return;
-    const timer = setInterval(() => {
-      if (document.hidden) return;
-      setIndex((i) => {
-        if (i >= trace.steps.length - 1) {
-          setPlaying(false);
-          return i;
-        }
-        return i + 1;
-      });
-    }, 1000 / speed);
+    const timer = setInterval(
+      () => {
+        if (document.hidden) return;
+        setIndex((i) => {
+          if (i >= trace.steps.length - 1) {
+            setPlaying(false);
+            return i;
+          }
+          return i + 1;
+        });
+      },
+      (guided ? 5500 : 1500) / speed,
+    );
     return () => clearInterval(timer);
-  }, [playing, speed, trace, stale]);
+  }, [playing, speed, trace, stale, guided]);
   const run = useCallback(async () => {
     cancel();
     const version = ++runVersion.current;
@@ -161,10 +179,11 @@ export function CodeStudio() {
   }, [language, source, stdin, cancel]);
   const seek = useCallback(
     (i: number) => {
+      if (stale || running) return;
       setPlaying(false);
       setIndex(Math.max(0, Math.min(trace.steps.length - 1, i)));
     },
-    [trace.steps.length],
+    [trace.steps.length, stale, running],
   );
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -197,7 +216,10 @@ export function CodeStudio() {
     setIndex(0);
     setError("");
     setAnswer(null);
-    if (mobile) setSidebar(false);
+    setCourse(true);
+    setMoreViews(false);
+    setTab("structure");
+    setSidebar(false);
   };
   const changeLanguage = (value: Language) => {
     cancel();
@@ -211,7 +233,7 @@ export function CodeStudio() {
   };
   const download = () => {
     const url = URL.createObjectURL(
-      new Blob([JSON.stringify(trace, null, 2)], { type: "application/json" }),
+      new Blob([JSON.stringify(recording, null, 2)], { type: "application/json" }),
     );
     const a = document.createElement("a");
     a.href = url;
@@ -230,6 +252,7 @@ export function CodeStudio() {
       setTrace(next);
       setSource(next.source);
       setLanguage(next.language);
+      setCourse(false);
       setIndex(0);
       setError("");
     } catch {
@@ -240,7 +263,7 @@ export function CodeStudio() {
     }
   };
   return (
-    <div className="code-studio">
+    <div className={`code-studio ${course ? "cs-guided-mode" : ""}`}>
       <fieldset className="cs-interactive" disabled={!ready} aria-busy={!ready}>
         <header className="cs-header">
           <div className="cs-brand">
@@ -308,15 +331,15 @@ export function CodeStudio() {
                 onClick={() => setCourse(false)}
               >
                 <Code2 size={17} />
-                <span>Playground</span>
+                <span>Try my own code</span>
                 <span className="cs-shortcut">⌘ ↵</span>
               </button>
               <button
                 className={`cs-nav-item ${course ? "is-selected" : ""}`}
-                onClick={() => setCourse(true)}
+                onClick={() => selectLesson(lessonId)}
               >
                 <BookOpen size={17} />
-                <span>Foundations</span>
+                <span>Learn step by step</span>
                 <small>
                   {completed.length}/{LESSONS.length}
                 </small>
@@ -351,7 +374,9 @@ export function CodeStudio() {
                 <div className="cs-progress-track">
                   <span style={{ width: `${(completed.length / LESSONS.length) * 100}%` }} />
                 </div>
-                <p>{completed.length} chapters understood. Keep exploring.</p>
+                <p>
+                  {completed.length} of {LESSONS.length} lessons completed.
+                </p>
                 <button className="cs-nav-item" onClick={() => setLibrary(true)}>
                   <Layers3 size={16} />
                   <span>Operation library</span>
@@ -365,35 +390,52 @@ export function CodeStudio() {
               <div>
                 {!sidebar && (
                   <button
-                    className="cs-icon-button cs-open-sidebar"
+                    className="cs-lessons-toggle"
                     onClick={() => setSidebar(true)}
                     aria-label="Show foundations"
                   >
                     <PanelLeftOpen size={18} />
+                    Lessons
                   </button>
                 )}
-                <span className="cs-eyebrow">
-                  {course ? "LEARN BY DOING" : "THE CODE → THE BIG PICTURE"}
-                </span>
-                <h1>{course ? lesson.title : "Every line has a story."}</h1>
-                <p>{course ? lesson.subtitle : "Write it. Run it. Understand what happens."}</p>
+                <h1>{course ? lesson.title : "See what your code does."}</h1>
               </div>
-              <span className="cs-language-count">
-                JS <span>·</span> PY <span>·</span> C++
-              </span>
+              <div className="cs-mode-switch" role="group" aria-label="Learning mode">
+                <button
+                  aria-pressed={course}
+                  onClick={() => {
+                    if (!course) {
+                      setSidebar(true);
+                      return;
+                    }
+                    setCourse(true);
+                    setPlaying(false);
+                    setTab("structure");
+                  }}
+                >
+                  <BookOpen size={16} /> Learn step by step
+                </button>
+                <button
+                  aria-pressed={!course}
+                  onClick={() => {
+                    setCourse(false);
+                    setPlaying(false);
+                  }}
+                >
+                  <Code2 size={16} /> Try my own code
+                </button>
+              </div>
             </div>
-            {course && (
-              <section className="cs-lesson-intro">
-                <span>
-                  <BookOpen size={18} />
-                  {lesson.minutes} min
-                </span>
-                <p>{lesson.concept}</p>
-              </section>
-            )}
             <section className="cs-workbench" aria-label="Code visualization workspace">
-              <ResizablePanelGroup orientation={mobile ? "vertical" : "horizontal"}>
-                <ResizablePanel defaultSize="43%" minSize={mobile ? "260px" : "28%"}>
+              <ResizablePanelGroup
+                key={mobile ? "mobile" : "desktop"}
+                orientation={mobile ? "vertical" : "horizontal"}
+                style={{ height: mobile ? 740 : "clamp(500px, calc(100dvh - 240px), 850px)" }}
+              >
+                <ResizablePanel
+                  defaultSize={mobile ? "34%" : "40%"}
+                  minSize={mobile ? "230px" : "28%"}
+                >
                   <div className="cs-editor-pane">
                     <div className="cs-pane-toolbar">
                       <div className="cs-file-label">
@@ -418,16 +460,25 @@ export function CodeStudio() {
                     <CodeEditor
                       source={source}
                       language={language}
-                      line={stale || trace.origin === "lesson" ? 0 : step.line}
+                      line={
+                        stale
+                          ? 0
+                          : guided
+                            ? (teaching.lines?.[language]?.[index] ?? 0)
+                            : trace.origin === "lesson"
+                              ? 0
+                              : step.line
+                      }
                       onChange={(text) => {
                         setSource(text);
+                        setCourse(false);
                         cancel();
                       }}
                       onRun={run}
                     />
                     <details className="cs-input">
                       <summary>
-                        Program input <span>stdin / prompt</span>
+                        Program input <span>if your code asks for a value</span>
                       </summary>
                       <textarea
                         aria-label="Program input"
@@ -437,9 +488,6 @@ export function CodeStudio() {
                       />
                     </details>
                     <div className="cs-editor-footer">
-                      <span>
-                        {source.split("\n").length} lines <span>·</span> UTF-8
-                      </span>
                       <button className="cs-run-button" onClick={running ? cancel : run}>
                         {running ? (
                           <>
@@ -460,6 +508,19 @@ export function CodeStudio() {
                 <ResizablePanel minSize={mobile ? "350px" : "34%"}>
                   <div className="cs-visual-pane">
                     <div className="cs-viz-toolbar">
+                      {
+                        <button
+                          className="cs-more-views"
+                          aria-expanded={moreViews}
+                          onClick={() => {
+                            setMoreViews(!moreViews);
+                            setTab("structure");
+                          }}
+                        >
+                          {moreViews ? "Back to the picture" : "Look inside the computer"}
+                          <ChevronRight size={15} />
+                        </button>
+                      }
                       <div
                         role="tablist"
                         aria-label="Visualization view"
@@ -491,30 +552,32 @@ export function CodeStudio() {
                             { id: "connections", label: "Connections", icon: GitBranch },
                             { id: "computer", label: "Computer", icon: Cpu },
                           ] as const
-                        ).map((t) => (
-                          <button
-                            id={`cs-tab-${t.id}`}
-                            key={t.id}
-                            role="tab"
-                            aria-controls={`cs-panel-${t.id}`}
-                            aria-selected={tab === t.id}
-                            tabIndex={tab === t.id ? 0 : -1}
-                            onClick={() => setTab(t.id)}
-                          >
-                            <t.icon size={14} />
-                            <span>{t.label}</span>
-                          </button>
-                        ))}
+                        )
+                          .filter((t) => moreViews || t.id === "structure")
+                          .map((t) => (
+                            <button
+                              id={`cs-tab-${t.id}`}
+                              key={t.id}
+                              role="tab"
+                              aria-controls={`cs-panel-${t.id}`}
+                              aria-selected={tab === t.id}
+                              tabIndex={tab === t.id ? 0 : -1}
+                              onClick={() => setTab(t.id)}
+                            >
+                              <t.icon size={14} />
+                              <span>{t.id === "structure" ? "Watch it happen" : t.label}</span>
+                            </button>
+                          ))}
                       </div>
                     </div>
-                    <div className="cs-trace-kind">
+                    <div className="cs-trace-kind sr-only">
                       <span>
                         <i className={trace.origin === "execution" ? "is-live" : ""} />
                         {trace.origin === "lesson" ? "Guided animation" : "Recorded execution"}
                       </span>
                       <span>
                         {trace.origin === "lesson"
-                          ? "Conceptual model"
+                          ? "Example walkthrough"
                           : `Line ${step.line} · ${step.event}`}
                       </span>
                     </div>
@@ -546,10 +609,13 @@ export function CodeStudio() {
                         <div className="cs-running">
                           <LoaderCircle className="cs-spin" />
                           <h3>Recording each step…</h3>
-                          <p>Capturing values, objects, and function calls.</p>
                         </div>
                       ) : tab === "structure" ? (
-                        <Structures step={step} previous={previous} />
+                        guided && lesson.id === "first-instruction" ? (
+                          <FirstProgram step={step} />
+                        ) : (
+                          <Structures step={step} previous={previous} />
+                        )
                       ) : tab === "memory" ? (
                         <Memory step={step} />
                       ) : tab === "computer" ? (
@@ -562,16 +628,21 @@ export function CodeStudio() {
                         </Suspense>
                       )}
                     </div>
-                    <div className="cs-explanation" aria-live={playing ? "off" : "polite"}>
-                      <span className="cs-step-badge">{String(index + 1).padStart(2, "0")}</span>
+                    <div
+                      className="cs-explanation cs-caption"
+                      aria-live={playing ? "off" : "polite"}
+                    >
                       <div>
-                        <span className="cs-eyebrow">
-                          {trace.origin === "lesson" ? "WHAT'S HAPPENING" : "OBSERVED AT THIS STEP"}
-                        </span>
                         <h3>{explanation.title}</h3>
-                        <p>{explanation.explanation}</p>
+                        {["error", "limit"].includes(step.event) && <p>{step.message}</p>}
                       </div>
                     </div>
+                    {step.stdout && (
+                      <div className="cs-scene-output" key={step.stdout}>
+                        <Terminal size={17} aria-hidden="true" />
+                        <pre aria-label="Program output">{step.stdout}</pre>
+                      </div>
+                    )}
                   </div>
                 </ResizablePanel>
               </ResizablePanelGroup>
@@ -579,19 +650,20 @@ export function CodeStudio() {
                 <div className="cs-playback-buttons">
                   <button
                     className="cs-icon-button"
-                    disabled={index === 0 || running}
+                    disabled={index === 0 || running || stale}
                     onClick={() => seek(0)}
                     aria-label="First step"
                   >
                     <SkipBack size={15} />
                   </button>
                   <button
-                    className="cs-icon-button"
-                    disabled={index === 0 || running}
+                    className="cs-back-step"
+                    disabled={index === 0 || running || stale}
                     onClick={() => seek(index - 1)}
                     aria-label="Previous step"
                   >
                     <ChevronLeft size={18} />
+                    <span>Back</span>
                   </button>
                   <button
                     className="cs-play-button"
@@ -609,18 +681,22 @@ export function CodeStudio() {
                     ) : (
                       <Play size={15} fill="currentColor" />
                     )}
+                    <span>
+                      {playing ? "Pause" : index === trace.steps.length - 1 ? "Replay" : "Play"}
+                    </span>
                   </button>
                   <button
-                    className="cs-icon-button"
-                    disabled={index === trace.steps.length - 1 || running}
+                    className="cs-next-step"
+                    disabled={index === trace.steps.length - 1 || running || stale}
                     onClick={() => seek(index + 1)}
                     aria-label="Next step"
                   >
+                    <span>Next step</span>
                     <ChevronRight size={18} />
                   </button>
                   <button
                     className="cs-icon-button"
-                    disabled={index === trace.steps.length - 1 || running}
+                    disabled={index === trace.steps.length - 1 || running || stale}
                     onClick={() => seek(trace.steps.length - 1)}
                     aria-label="Last step"
                   >
@@ -628,11 +704,12 @@ export function CodeStudio() {
                   </button>
                 </div>
                 <span className="cs-step-count">
-                  {index + 1}
+                  Step {index + 1}
                   <span> / {trace.steps.length}</span>
                 </span>
                 <input
                   aria-label="Execution step"
+                  disabled={stale || running}
                   type="range"
                   min={0}
                   max={trace.steps.length - 1}
@@ -652,30 +729,9 @@ export function CodeStudio() {
                 </select>
               </div>
             </section>
-            <div className="cs-below-workbench">
-              <section className="cs-console">
-                <div>
-                  <Terminal size={14} />
-                  <h2>Output</h2>
-                  <span>{step.stdout ? "stdout" : "Waiting for output"}</span>
-                </div>
-                <pre aria-label="Program output">
-                  {step.stdout || "Your program's output will appear here."}
-                </pre>
-              </section>
-              <section className="cs-learning-note">
-                <span className="cs-note-icon">
-                  <BookOpen size={17} />
-                </span>
-                <div>
-                  <h2>From this lesson · {lesson.title}</h2>
-                  <p>{lesson.optimize}</p>
-                </div>
-              </section>
-            </div>
-            {course && (
+            {guided && !stale && index === trace.steps.length - 1 && (
               <section className="cs-checkpoint">
-                <span className="cs-eyebrow">CHECK YOUR UNDERSTANDING</span>
+                <span className="cs-eyebrow">YOUR TURN</span>
                 <h2>{lesson.question}</h2>
                 <div>
                   {lesson.answers.map((a, i) => (
@@ -709,16 +765,20 @@ export function CodeStudio() {
                         selectLesson(LESSONS[LESSONS.findIndex((l) => l.id === lesson.id) + 1].id)
                       }
                     >
-                      Next chapter
+                      Next lesson
                       <ArrowRight size={16} />
                     </button>
                   )}
               </section>
             )}
             <footer className="cs-bottom-note">
-              <span>{trace.notes[0]}</span>
               <details>
                 <summary>Scope & credits</summary>
+                <p>{trace.notes[0]}</p>
+                <p>
+                  Memory labels such as 0x1 are stable picture labels, not real machine addresses.
+                  Computer animations are teaching models.
+                </p>
                 <p>
                   JavaScript: synchronous programs in an isolated browser worker. Python and C++: a
                   separately configured isolated runner. DOM, network, asynchronous JavaScript,

@@ -3,7 +3,7 @@ import { displayValue, type Snapshot, type Value } from "./protocol.ts";
 // A vocabulary, not a claim that every source-level trace exposes each operation.
 export const OPERATIONS = {
   read: ["Read", "Look up a value without changing it."],
-  write: ["Write", "Store a new value in a named place."],
+  write: ["Save a value", "Keep a value under a name so the program can use it again."],
   allocate: ["Create an object", "Reserve a place to keep a group of values."],
   reference: ["Follow a reference", "Use an address-like label to find an existing object."],
   compare: ["Compare", "Ask how two values relate before choosing what to do."],
@@ -46,6 +46,32 @@ export const OPERATIONS = {
 export type Operation = keyof typeof OPERATIONS;
 export type Change = { target: string; before?: Value; after?: Value };
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+function describeChange(change: Change, current: Snapshot, previous?: Snapshot): string {
+  let name = change.target;
+  const object = /^#(.+)\[(.*)\]$/.exec(name);
+  if (object) {
+    const [, id, key] = object;
+    const binding = [...current.frames, ...(previous?.frames ?? [])]
+      .flatMap((frame) => Object.entries(frame.locals))
+      .find(
+        ([, value]) =>
+          typeof value === "object" && value !== null && "ref" in value && value.ref === id,
+      );
+    name = binding ? `${binding[0]}[${key}]` : `Object ${id}, entry ${key}`;
+  } else {
+    name = name.slice(name.indexOf(".") + 1);
+  }
+  const value = (v: Value) =>
+    typeof v === "object" && v !== null && "ref" in v
+      ? `a link to object ${v.ref}`
+      : displayValue(v);
+  return change.after === undefined
+    ? `${name} was removed.`
+    : change.before === undefined
+      ? `${name} now holds ${value(change.after)}.`
+      : `${name} changed from ${value(change.before)} to ${value(change.after)}.`;
+}
 
 export function changesBetween(previous: Snapshot | undefined, current: Snapshot): Change[] {
   if (!previous) return [];
@@ -113,13 +139,10 @@ export function explain(previous: Snapshot | undefined, current: Snapshot) {
       (changes.length
         ? changes
             .slice(0, 3)
-            .map(
-              (c) =>
-                `${c.target} ${c.after === undefined ? "was removed" : c.before === undefined ? `now holds ${displayValue(c.after)}` : `changed from ${displayValue(c.before)} to ${displayValue(c.after)}`}.`,
-            )
+            .map((c) => describeChange(c, current, previous))
             .join(" ")
         : current.event === "before"
-          ? `Line ${current.line} is about to run. The memory below shows the state before this instruction.`
+          ? `Line ${current.line} is next. The picture shows what the program has remembered so far. Use Next step to see what changes.`
           : description),
     changes,
   };

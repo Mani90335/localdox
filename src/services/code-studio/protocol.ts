@@ -52,7 +52,7 @@ export const LANGUAGES: Record<Language, { label: string; file: string }> = {
 export const isRef = (value: Value): value is { ref: string } =>
   typeof value === "object" && value !== null && "ref" in value;
 export function displayValue(value: Value): string {
-  if (isRef(value)) return `→ #${value.ref}`;
+  if (isRef(value)) return `→ ${value.ref.startsWith("0x") ? value.ref : `#${value.ref}`}`;
   if (value && typeof value === "object") return value.special;
   return typeof value === "string" ? JSON.stringify(value) : String(value);
 }

@@ -30,9 +30,7 @@ function memoryMermaid(step: Snapshot): string {
   for (const frame of step.frames)
     for (const [name, value] of Object.entries(frame.locals)) {
       const id = `v${index++}`;
-      nodes.push(
-        `${id}["${label(`${frame.name} · ${name}${isRef(value) ? "" : ` = ${displayValue(value)}`}`)}"]`,
-      );
+      nodes.push(`${id}["${label(`${name}${isRef(value) ? "" : ` = ${displayValue(value)}`}`)}"]`);
       if (isRef(value) && ids.has(value.ref)) links.push(`${id} --> ${ids.get(value.ref)}`);
     }
   for (const [id, obj] of Object.entries(step.heap)) {
@@ -41,7 +39,7 @@ function memoryMermaid(step: Snapshot): string {
       .slice(0, 8)
       .map(([k, v]) => `${k}: ${displayValue(v)}`)
       .join(" · ");
-    nodes.push(`${ids.get(id)}["${label(`#${id} ${obj.type} | ${fields}`)}"]`);
+    nodes.push(`${ids.get(id)}["${label(`${id} | ${fields}`)}"]`);
     for (const [key, value] of obj.entries)
       if (isRef(value) && ids.has(value.ref))
         links.push(`${ids.get(id)} -->|"${label(key)}"| ${ids.get(value.ref)}`);

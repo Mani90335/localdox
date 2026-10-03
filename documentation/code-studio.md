@@ -8,6 +8,24 @@ Mermaid reference graphs, an explicitly conceptual computer view, guided
 foundations, checkpoints, local draft/progress persistence, and JSON trace
 import/export. Python Tutor trace imports use the currently selected language.
 
+First-time visitors start with a four-step lesson that doubles 21. The main screen
+contains code, a visual scene, one action caption and playback controls. Reusable
+value boxes, collection rows, connected nodes and the calculation scene are
+populated from recorded snapshots. Movement and swap motion live in the shared
+animation library. Output appears only when the program produces it. Memory,
+connections and the conceptual computer model are available behind an explore
+control. Quizzes appear after the walkthrough. Manual stepping is the default.
+Editing switches to the personal-code workspace. Lesson selection, language
+and draft preferences survive reloads; loading an example does not count as an edit.
+
+The presentation layer assigns stable display addresses (`0x1`, `0x2`, …) across
+the whole trace, preserving aliases and cycles. These are diagram labels, not
+physical addresses. C++ startup functions and variables from library headers are
+excluded by the tracer; older imported recordings are filtered for presentation
+as well. Values not yet initialized are omitted until observed. Exports retain
+the original recording. Diagnostics and scope details remain available without
+putting debugger messages in the normal learning flow.
+
 ## What runs today
 
 | Language   | Execution                                                             | Important boundaries                                                                                                                                                                   |
@@ -104,9 +122,9 @@ Do not carry this loopback endpoint into a public deployment configuration.
 
 ## Verification
 
-The JavaScript runtime has 15 tests covering arbitrary edited code, aliases,
+The runtime and presentation layer have 19 tests covering arbitrary edited code, aliases,
 cycles, recursion, closures, getters, limits, input, imports and course examples.
-The Python tracer has six tests. Six integration tests use the real restricted
+The Python tracer has six tests. Seven integration tests use the real restricted
 Docker runner, including GCC/GDB execution, STL values, pointer cycles,
 compilation diagnostics and disabled networking. All 27 programs in the nine
 lessons have executed successfully in their respective language runtimes.
