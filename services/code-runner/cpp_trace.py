@@ -1,9 +1,15 @@
 """Invoked by GDB's Python interpreter inside a disposable container."""
 import gdb
 import json
+import re
 
 job = json.load(open("/tmp/job.json"))
 steps = []
+
+
+def user_frame(frame):
+    name = frame.name() or ""
+    return not re.match(r"^(?:_GLOBAL__sub_I_|__static_initialization_and_destruction_|__cxx_global_var_init|std::|__gnu_cxx::)", name)
 gdb.execute("set pagination off")
 gdb.execute("set confirm off")
 gdb.execute("set print elements 200")
@@ -64,14 +70,19 @@ def snapshot(event="before", message=None):
     frame = gdb.newest_frame()
     while frame and len(frames) < 100:
         sal = frame.find_sal()
-        if sal.symtab and sal.symtab.fullname() == "/tmp/main.cpp":
+        if sal.symtab and sal.symtab.fullname() == "/tmp/main.cpp" and user_frame(frame):
             values = {}
             block = frame.block()
             while block:
                 for symbol in block:
                     if (symbol.is_argument or symbol.is_variable) and symbol.name not in values and len(values) < 100:
+                        # Static blocks also contain symbols from included C++ headers.
+                        if symbol.symtab and symbol.symtab.fullname() != "/tmp/main.cpp":
+                            continue
+                        if not symbol.is_argument and symbol.line >= sal.line:
+                            continue
                         try:
-                            values[symbol.name] = {"special": "Not yet initialized at this source position"} if not symbol.is_argument and symbol.line >= sal.line else encode(frame.read_var(symbol))
+                            values[symbol.name] = encode(frame.read_var(symbol))
                         except Exception:
                             values[symbol.name] = {"special": "Unavailable"}
                 if block.is_global or block.is_static:
@@ -96,10 +107,13 @@ for line in range(1, len(job["source"].splitlines())+1):
 try:
     gdb.execute("run < /tmp/stdin.txt > /tmp/stdout.txt 2>&1", to_string=True)
     while gdb.selected_inferior().pid and len(steps) < 2000:
-        snapshot()
+        if user_frame(gdb.newest_frame()):
+            snapshot()
         # Signal stops are distinct from source breakpoints.
         reason = gdb.execute("info program", to_string=True)
         if "signal" in reason.lower():
+            if not steps:
+                snapshot()
             steps[-1]["event"] = "error"
             steps[-1]["message"] = reason[:4000]
             break

@@ -71,7 +71,12 @@ wsl --distribution Ubuntu-22.04 --exec docker build -t localdox-code-runner:1 /m
 wsl --distribution Ubuntu-22.04 --exec python3 -B -u /mnt/d/Projects/localdox/docucraft-pro/services/code-runner/server.py
 ```
 
-All six integration tests passed in Ubuntu/WSL with Docker 29.1.3, the image's
+All seven integration tests passed in Ubuntu/WSL with Docker 29.1.3, the image's
 GCC 12, GDB 13 and Python 3.11, without relaxing the container restrictions.
 Set `CODE_STUDIO_RUNNER_TESTS=1` when running the Code Studio Playwright suite
 to also exercise real Python and C++ execution through the browser interface.
+
+The C++ tracer skips compiler startup functions and symbols originating in library
+headers. A local at its declaration is omitted until a later breakpoint observes
+its value. The UI uses stable short picture labels for object addresses; trace
+exports keep the original captured identities.

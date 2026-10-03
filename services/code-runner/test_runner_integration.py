@@ -54,6 +54,22 @@ int main() {
         self.assertEqual(result["steps"][-1]["event"], "error")
         self.assertIn("error", result["steps"][-1]["message"])
 
+    def test_cpp_hides_compiler_startup_and_header_variables(self):
+        result = self.run_code("cpp", """#include <iostream>
+int main() {
+  int number = 21;
+  int answer = number * 2;
+  std::cout << answer << '\\n';
+  return 0;
+}
+""")
+        self.assertEqual(result["steps"][-1]["stdout"], "42\n")
+        self.assertTrue(any(frame["locals"].get("answer") == 42 for step in result["steps"] for frame in step["frames"]))
+        for step in result["steps"]:
+            for frame in step["frames"]:
+                self.assertEqual(frame["name"], "main")
+                self.assertTrue(set(frame["locals"]).issubset({"number", "answer"}))
+
     def test_python_step_limit(self):
         result = self.run_code("python", "while True:\n    pass")
         self.assertEqual(result["steps"][-1]["event"], "limit")
