@@ -1,15 +1,14 @@
 {
   "schemaVersion": 1,
-  "id": "foundations-week",
+  "id": "foundations",
   "name": "Build your foundations",
-  "description": "A two-day example: learn, test your understanding, and move forward when you are ready.",
+  "description": "Two example topics. Each one: learn, practise, pass the exam, review.",
   "days": [
     {
-      "id": "day-1",
+      "id": "reasoning",
       "title": "Reasoning & arithmetic",
       "examId": "section-quiz",
-      "estimatedMinutes": 35,
-      "summaryMd": "Start with the fundamentals. Work through a few examples, then take a short exam to check your understanding.",
+      "summaryMd": "- Even and odd numbers, divisibility by 2, 3 and 5\n- Fractions as decimals, rounding to two places\n- Reading a simple bar chart",
       "tasks": [
         {
           "id": "read",
@@ -17,24 +16,24 @@
         },
         {
           "id": "practice",
-          "label": "Practice rounding fractions to two decimal places"
+          "label": "Practise rounding fractions to two decimal places"
         },
         {
           "id": "recall",
           "label": "Solve three examples without looking at notes"
         }
-      ]
+      ],
+      "practice": ["foundations-reasoning"]
     },
     {
-      "id": "day-2",
+      "id": "concepts",
       "title": "Connect the concepts",
       "examId": "gate-2027-da",
-      "estimatedMinutes": 210,
-      "summaryMd": "Bring probability, algebra and reasoning together. Use your weakness report to decide what to revisit.",
+      "summaryMd": "- Conditional and joint probability\n- Determinants and eigenvalues of 2×2 matrices\n- Reachability in a directed graph",
       "tasks": [
         {
           "id": "review",
-          "label": "Revisit yesterday\u2019s mistakes and notes"
+          "label": "Revisit your mistakes from the first topic"
         },
         {
           "id": "probability",
@@ -42,9 +41,10 @@
         },
         {
           "id": "algebra",
-          "label": "Practice determinants and eigenvalues"
+          "label": "Practise determinants and eigenvalues"
         }
-      ]
+      ],
+      "practice": ["foundations-concepts"]
     }
   ]
 }

@@ -9,3 +9,9 @@ routeTree.gen.ts
 
 # remark-directive exam containers must retain their closing delimiter indentation.
 exams/**/*.md
+plans/**/*.md
+# Docs that show :::question / :::solution examples (same reason as above).
+docs/exam-format.md
+docs/study-plan-format.md
+docs/gpt/exam-files-reference.md
+docs/gpt/example-course.md

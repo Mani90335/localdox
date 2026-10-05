@@ -288,6 +288,14 @@ export const rulesetSchema = z
       })
       .strict()
       .default({}),
+    // Presentation only: never read by scoring, timing, navigation or integrity.
+    ui: z
+      .object({
+        profile: z.enum(["gate", "jee", "upsc", "generic"]).default("gate"),
+        kind: z.enum(["full", "sectional", "quiz"]).optional(),
+      })
+      .strict()
+      .default({}),
   })
   .strict();
 export type Ruleset = z.infer<typeof rulesetSchema>;

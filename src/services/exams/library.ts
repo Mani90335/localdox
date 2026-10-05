@@ -18,7 +18,13 @@ const solutionUrls = import.meta.glob<string>("../../../exams/**/*.solutions.md"
   query: "?url&no-inline",
   import: "default",
 });
+// Images next to bundled exams, served as URLs and resolved by file name.
+const imageUrls = import.meta.glob<string>("../../../exams/**/*.{png,jpg,jpeg,gif,webp,svg}", {
+  query: "?url",
+  import: "default",
+});
 const basename = (path: string) => path.split("/").at(-1)!;
+const folder = (path: string) => path.slice(0, path.lastIndexOf("/"));
 export async function bundledExams(): Promise<{ exams: ExamRecord[]; errors: string[] }> {
   const exams: ExamRecord[] = [],
     errors: string[] = [];
@@ -36,13 +42,28 @@ export async function bundledExams(): Promise<{ exams: ExamRecord[]; errors: str
           )?.[1]
         : undefined;
       const exam = importExam(source, await papers[paperPath](), tax ? await tax() : undefined);
-      exams.push({ id: rules.meta.id, exam, solutionUrl: await solutionUrls[solutionPath]() });
+      const assetUrls: Record<string, string> = {};
+      for (const [image, url] of Object.entries(imageUrls))
+        if (folder(image) === folder(path)) assetUrls[basename(image)] = await url();
+      exams.push({
+        id: rules.meta.id,
+        exam,
+        solutionUrl: await solutionUrls[solutionPath](),
+        ...(Object.keys(assetUrls).length ? { assetUrls } : {}),
+      });
     } catch (error) {
       errors.push(String(error));
     }
   return { exams, errors };
 }
-export async function importFiles(files: File[]): Promise<ExamRecord[]> {
+/**
+ * `images` are matched to a paper when its text names them. `shared` images
+ * (used by sealed solutions, which are never read here) go with every exam.
+ */
+export async function importFiles(
+  files: File[],
+  { images = [], shared = [] }: { images?: File[]; shared?: File[] } = {},
+): Promise<ExamRecord[]> {
   const ruleFiles = files.filter((f) => f.name.endsWith(".exam.json"));
   if (!ruleFiles.length)
     throw new ExamImportError([
@@ -76,15 +97,18 @@ export async function importFiles(files: File[]): Promise<ExamRecord[]> {
     const taxonomy = rules.diagnostics.taxonomyRef
       ? find(basename(rules.diagnostics.taxonomyRef))
       : undefined;
-    const exam = importExam(
-      source,
-      await paper.text(),
-      taxonomy ? await taxonomy.text() : undefined,
-    );
+    const paperText = await paper.text();
+    const exam = importExam(source, paperText, taxonomy ? await taxonomy.text() : undefined);
+    const used = [...new Set([...images.filter((i) => paperText.includes(i.name)), ...shared])];
     if (result.some((e) => e.id === rules.meta.id))
       throw new Error(`Duplicate exam id ${rules.meta.id}`);
     // Store the opaque File in IndexedDB. Do not call text() before submission.
-    result.push({ id: rules.meta.id, exam, solutionFile });
+    result.push({
+      id: rules.meta.id,
+      exam,
+      solutionFile,
+      ...(used.length ? { assets: Object.fromEntries(used.map((f) => [f.name, f])) } : {}),
+    });
   }
   return result;
 }

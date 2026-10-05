@@ -55,6 +55,16 @@ export interface Session {
   pausedAt?: number;
   violations: number;
   demo?: boolean;
+  /**
+   * Share of the official time this attempt gets (0 < scale ≤ 1). A sample
+   * paper with 12 of 65 questions can run on 12/65 of the clock. Absent = 1.
+   */
+  timeScale?: number;
+}
+export function sessionScale(s: Pick<Session, "timeScale">): number {
+  const scale = s.timeScale ?? 1;
+  if (!(scale > 0 && scale <= 1)) throw new Error("Time scale must be between 0 and 1");
+  return scale;
 }
 function shuffle<T>(values: T[], random: () => number): T[] {
   const copy = [...values];
@@ -126,7 +136,8 @@ export function startSession(
   if (r.integrity.requireFullscreen && !fullscreen)
     throw new Error("Fullscreen is required to start");
   const duration =
-    r.timing.mode === "global" ? r.timing.durationMinutes : r.sections[0].durationMinutes!;
+    (r.timing.mode === "global" ? r.timing.durationMinutes : r.sections[0].durationMinutes!) *
+    sessionScale(s);
   return append(
     { ...s, phase: "in_progress", startedAt: now, deadlineAt: now + duration * 60000 },
     { type: "question_viewed", at: now, questionId: s.currentId },
@@ -266,7 +277,7 @@ export function finishSection(
       ...next,
       sectionIndex: index,
       currentId,
-      deadlineAt: now + section.durationMinutes! * 60000,
+      deadlineAt: now + section.durationMinutes! * sessionScale(s) * 60000,
       lockedSections: [...s.lockedSections, r.sections[s.sectionIndex].id],
     },
     { type: "section_changed", at: now, section: section.id },

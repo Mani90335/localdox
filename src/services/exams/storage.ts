@@ -8,6 +8,10 @@ export interface ExamRecord {
   exam: Exam;
   solutionFile?: Blob;
   solutionUrl?: string;
+  /** Images imported with the exam, by file name. */
+  assets?: Record<string, Blob>;
+  /** Images shipped with a bundled exam, by file name. */
+  assetUrls?: Record<string, string>;
 }
 export interface AttemptRecord {
   id: string;

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 80" width="360" height="80" font-family="system-ui, sans-serif" font-size="14">
+  <title>Number line from 0 to 3 with points P at 1.2, Q at 1.7 and R at 2.3</title>
+  <line x1="20" y1="40" x2="340" y2="40" stroke="#5b6270" stroke-width="2"/>
+  <g stroke="#5b6270" stroke-width="2">
+    <line x1="20" y1="32" x2="20" y2="48"/><line x1="126.7" y1="32" x2="126.7" y2="48"/>
+    <line x1="233.3" y1="32" x2="233.3" y2="48"/><line x1="340" y1="32" x2="340" y2="48"/>
+  </g>
+  <g fill="#5b6270" text-anchor="middle">
+    <text x="20" y="68">0</text><text x="126.7" y="68">1</text><text x="233.3" y="68">2</text><text x="340" y="68">3</text>
+  </g>
+  <g fill="#4f5bd5" text-anchor="middle" font-weight="600">
+    <circle cx="148" cy="40" r="5"/><text x="148" y="24">P</text>
+    <circle cx="201.3" cy="40" r="5"/><text x="201.3" y="24">Q</text>
+    <circle cx="265.3" cy="40" r="5"/><text x="265.3" y="24">R</text>
+  </g>
+</svg>

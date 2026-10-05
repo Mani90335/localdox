@@ -78,16 +78,16 @@ const processor = unified().use(remarkParse).use(remarkMath).use(remarkDirective
 function sourceOf(source: string, node: Node) {
   return source.slice(node.position?.start.offset, node.position?.end.offset);
 }
-function containers(source: string, kind: string): Node[] {
+function containers(source: string, kind: string, also: string[] = []): Node[] {
   const root = processor.parse(source) as Node;
   const errors: Issue[] = [];
   const nodes: Node[] = [];
   for (const n of root.children ?? []) {
-    if (n.type !== "containerDirective" || n.name !== kind) {
+    if (n.type !== "containerDirective" || (n.name !== kind && !also.includes(n.name ?? ""))) {
       errors.push({
         severity: "error",
         location: `${kind}.md:${n.position?.start.line}`,
-        message: `Expected a :::${kind} container (put headings inside it)`,
+        message: `Expected a :::${[kind, ...also].join(" or :::")} container (put headings inside it)`,
       });
       continue;
     }
@@ -108,66 +108,83 @@ function containers(source: string, kind: string): Node[] {
   if (errors.length) throw new ExamImportError(errors);
   return nodes;
 }
+function toQuestion(source: string, n: Node, file: string, defaults = {}): Question {
+  const location = `${file}:${n.position?.start.line}`;
+  const a = attrs.safeParse({ ...defaults, ...n.attributes });
+  if (!a.success)
+    throw new ExamImportError(
+      a.error.issues.map((i) => ({
+        severity: "error",
+        location: `${location}.${i.path.join(".")}`,
+        message: i.message,
+      })),
+    );
+  const children = n.children ?? [];
+  const list = a.data.type === "nat" ? undefined : children.filter((c) => c.type === "list").at(-1);
+  return {
+    ...a.data,
+    tags: a.data.tags?.split(",").filter(Boolean) ?? [],
+    location,
+    body: children
+      .filter((c) => c !== list)
+      .map((c) => sourceOf(source, c))
+      .join("\n\n"),
+    options: (list?.children ?? []).map((item) =>
+      (item.children ?? []).map((c) => sourceOf(source, c)).join("\n\n"),
+    ),
+  };
+}
 export function parsePaper(source: string): Question[] {
-  return containers(source, "question").map((n) => {
-    const location = `paper.md:${n.position?.start.line}`;
-    const a = attrs.safeParse(n.attributes);
-    if (!a.success)
-      throw new ExamImportError(
-        a.error.issues.map((i) => ({
-          severity: "error",
-          location: `${location}.${i.path.join(".")}`,
-          message: i.message,
-        })),
-      );
-    const children = n.children ?? [];
-    const list =
-      a.data.type === "nat" ? undefined : children.filter((c) => c.type === "list").at(-1);
-    return {
-      ...a.data,
-      tags: a.data.tags?.split(",").filter(Boolean) ?? [],
-      location,
-      body: children
-        .filter((c) => c !== list)
-        .map((c) => sourceOf(source, c))
-        .join("\n\n"),
-      options: (list?.children ?? []).map((item) =>
-        (item.children ?? []).map((c) => sourceOf(source, c)).join("\n\n"),
-      ),
-    };
-  });
+  return containers(source, "question").map((n) => toQuestion(source, n, "paper.md"));
+}
+function toSolution(source: string, n: Node, file: string): Solution {
+  const location = `${file}:${n.position?.start.line}`;
+  const a = solutionAttrs.safeParse(n.attributes);
+  if (!a.success)
+    throw new ExamImportError(
+      a.error.issues.map((i) => ({ severity: "error", location, message: i.message })),
+    );
+  const distractors: Distractor[] = [];
+  const body: Node[] = [];
+  for (const c of n.children ?? []) {
+    if (c.type === "leafDirective" && c.name === "distractor") {
+      const d = distractorAttrs.safeParse(c.attributes);
+      if (!d.success)
+        throw new ExamImportError(
+          d.error.issues.map((i) => ({
+            severity: "error",
+            location: `${file}:${c.position?.start.line}`,
+            message: i.message,
+          })),
+        );
+      distractors.push(d.data);
+    } else body.push(c);
+  }
+  return {
+    ...a.data,
+    location,
+    body: body.map((c) => sourceOf(source, c)).join("\n\n"),
+    distractors,
+  };
 }
 export function parseSolutions(source: string): Solution[] {
-  return containers(source, "solution").map((n) => {
-    const location = `solutions.md:${n.position?.start.line}`;
-    const a = solutionAttrs.safeParse(n.attributes);
-    if (!a.success)
-      throw new ExamImportError(
-        a.error.issues.map((i) => ({ severity: "error", location, message: i.message })),
-      );
-    const distractors: Distractor[] = [];
-    const body: Node[] = [];
-    for (const c of n.children ?? []) {
-      if (c.type === "leafDirective" && c.name === "distractor") {
-        const d = distractorAttrs.safeParse(c.attributes);
-        if (!d.success)
-          throw new ExamImportError(
-            d.error.issues.map((i) => ({
-              severity: "error",
-              location: `solutions.md:${c.position?.start.line}`,
-              message: i.message,
-            })),
-          );
-        distractors.push(d.data);
-      } else body.push(c);
-    }
-    return {
-      ...a.data,
-      location,
-      body: body.map((c) => sourceOf(source, c)).join("\n\n"),
-      distractors,
-    };
-  });
+  return containers(source, "solution").map((n) => toSolution(source, n, "solutions.md"));
+}
+/**
+ * A practice file holds questions and their solutions together, in any order.
+ * `section` is optional there: practice has no sections.
+ */
+export function parsePracticeFile(
+  source: string,
+  file = "practice.md",
+): { questions: Question[]; solutions: Solution[] } {
+  const nodes = containers(source, "question", ["solution"]);
+  return {
+    questions: nodes
+      .filter((n) => n.name === "question")
+      .map((n) => toQuestion(source, n, file, { section: "practice" })),
+    solutions: nodes.filter((n) => n.name === "solution").map((n) => toSolution(source, n, file)),
+  };
 }
 export const optionLabel = (index: number) => String.fromCharCode(65 + index);
 export const numeric = (s: string) =>

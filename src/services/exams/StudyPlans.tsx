@@ -1,20 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  ArrowRight,
-  ArrowUpRight,
-  BookOpen,
-  CalendarDays,
-  Check,
-  CheckCircle2,
-  ChevronRight,
-  Clock3,
-  Download,
-  FilePlus2,
-  Flag,
-  LockKeyhole,
-  RotateCcw,
-  Upload,
-} from "lucide-react";
+import { BookOpen, Check, Download, LockKeyhole, MoreHorizontal, Upload } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import type { AttemptRecord, ExamRecord } from "./storage";
 import {
   studyProgress,
@@ -22,603 +8,494 @@ import {
   scorePercentage,
   meetsPassingScore,
   type StudyPlanRecord,
-  type DayStatus,
+  type DayProgress,
+  type DayStep,
 } from "./study-plan";
 import { ExamMarkdown } from "./ExamMarkdown";
-import samplePlan from "../../../plans/foundations.plan.json?raw";
+import { Button, EmptyState, LinkButton, OverflowMenu, ProgressBar } from "./ui/kit";
+import { formatDuration, formatPercent } from "./ui/display";
+
 interface Props {
   plans: StudyPlanRecord[];
   attempts: AttemptRecord[];
   library: ExamRecord[];
-  onImport: (source: string) => void;
-  onTask: (planId: string, dayId: string, taskId: string, checked: boolean) => void;
-  onNote: (planId: string, dayId: string, note: string) => void;
-  onStart: (planId: string, dayId: string) => void;
-  onRevision: (planId: string, dayId: string) => void;
-  onRewrite: (planId: string, dayId: string, exam: ExamRecord) => void;
-  onRewriteFiles: (planId: string, dayId: string, files: File[]) => void;
+  onImportFiles: (files: File[]) => void;
+  onImportExample: () => void;
+  onDownloadExample: () => void;
+  onTask: (planId: string, topicId: string, taskId: string, checked: boolean) => void;
+  onNote: (planId: string, topicId: string, note: string) => void;
+  onLearned: (planId: string, topicId: string) => void;
+  onPractice: (planId: string, topicId: string) => void;
+  onAddPractice: (planId: string, topicId: string, files: File[]) => void;
+  onStart: (planId: string, topicId: string) => void;
+  onRevision: (planId: string, topicId: string) => void;
+  onRewrite: (planId: string, topicId: string, exam: ExamRecord) => void;
+  onRewriteFiles: (planId: string, topicId: string, files: File[]) => void;
   onOpenAttempt: (attempt: AttemptRecord) => void;
+  onReview: (attempt: AttemptRecord) => void;
 }
-const statusLabel: Record<DayStatus, string> = {
-  locked: "Locked",
-  ready: "Ready to begin",
-  in_progress: "Exam in progress",
-  failed: "Failed · try again",
-  revision_required: "Revision required",
-  passed: "Passed",
-};
-const formatPercent = (value: number) => `${Number(value.toFixed(1))}%`;
-function StatusIcon({ status }: { status: DayStatus }) {
-  return status === "passed" ? (
-    <Check size={16} />
-  ) : status === "locked" ? (
-    <LockKeyhole size={14} />
-  ) : status === "revision_required" ? (
-    <BookOpen size={16} />
-  ) : status === "failed" ? (
-    <RotateCcw size={15} />
-  ) : (
-    <span className="study-step-dot" />
-  );
+type StepId = Exclude<DayStep, "done">;
+const STEPS: { id: StepId; name: string }[] = [
+  { id: "learn", name: "Learn" },
+  { id: "practice", name: "Practice" },
+  { id: "exam", name: "Exam" },
+  { id: "review", name: "Review" },
+];
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const graded = (a: AttemptRecord) =>
+  !!a.analysis && ["submitted", "review"].includes(a.session.phase);
+/** "planId/topicId": topics from every uploaded plan share one picker. */
+const topicKey = (planId: string, topicId: string) => `${planId}/${topicId}`;
+
+/** One line under each step in the stepper. */
+function stepNote(p: DayProgress, step: StepId, state: "done" | "current" | "locked"): string {
+  if (state === "locked") return "Locked";
+  if (step === "practice")
+    return p.practiceTotal === 0
+      ? "No questions"
+      : `${Math.min(p.practiceAttempted, p.practiceTotal)} of ${p.practiceTotal}`;
+  if (step === "exam" && p.status === "passed")
+    return `Passed · ${formatPercent(p.bestPercentage ?? 0)}`;
+  if (step === "exam" && p.status === "failed") return "Not passed";
+  if (step === "exam" && p.status === "revision_required") return "No attempts left";
+  return state === "done" ? "Done" : "Now";
 }
-function downloadTemplate() {
-  const url = URL.createObjectURL(new Blob([samplePlan], { type: "application/json" })),
-    link = document.createElement("a");
-  link.href = url;
-  link.download = "foundations.plan.json";
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+
 export function StudyPlans(props: Props) {
   const { plans, attempts, library } = props,
-    [selectedPlan, setSelectedPlan] = useState(""),
-    [selectedDay, setSelectedDay] = useState(""),
-    [replacement, setReplacement] = useState("");
-  const dayList = useRef<HTMLOListElement>(null);
+    [selected, setSelected] = useState(""),
+    [chosenStep, setChosenStep] = useState<StepId | null>(null),
+    [replacement, setReplacement] = useState(""),
+    [noteSaved, setNoteSaved] = useState(false);
   const input = useRef<HTMLInputElement>(null),
+    practiceInput = useRef<HTMLInputElement>(null),
     rewriteInput = useRef<HTMLInputElement>(null);
-  const record = plans.find((p) => p.id === selectedPlan) ?? plans[0],
-    progress = record ? studyProgress(record, attempts) : [],
-    completed = progress.filter((p) => p.status === "passed").length;
+
+  // Every topic of every plan, in upload order.
+  const topics = plans.flatMap((record) =>
+    studyProgress(record, attempts).map((progress, i) => ({
+      record,
+      progress,
+      topic: record.plan.days[i],
+      key: topicKey(record.id, progress.id),
+    })),
+  );
   const current =
-      progress.find((p) => p.id === selectedDay) ??
-      progress.find((p) => p.status !== "passed") ??
-      progress.at(-1),
-    day = record?.plan.days.find((d) => d.id === current?.id),
-    saved = day && record.days[day.id],
-    index = record?.plan.days.findIndex((d) => d.id === day?.id) ?? 0;
+    topics.find((t) => t.key === selected) ??
+    topics.find((t) => t.progress.step !== "done") ??
+    topics.at(-1);
+  const p = current?.progress,
+    record = current?.record,
+    topic = current?.topic,
+    saved = record && topic ? record.days[topic.id] : undefined;
   const policy = saved ? progressionPolicy(saved.cycles[0].exam.exam.rules) : null;
-  const candidates = library.filter(
-      (e) => e.exam.taxonomy.id === current?.cycle.exam.exam.taxonomy.id,
-    ),
-    chosen = candidates.find((e) => e.id === replacement);
-  const isLocked = current?.status === "locked",
-    isPassed = current?.status === "passed",
-    revision = current?.status === "revision_required";
+
+  // A finished step moves the view to the next one; a chosen step stays.
+  useEffect(() => setChosenStep(null), [current?.key, p?.step]);
   useEffect(() => {
-    const list = dayList.current,
-      selected = list?.querySelector<HTMLElement>('[aria-current="step"]');
-    if (list && selected && list.scrollWidth > list.clientWidth) {
-      list.scrollTo({
-        left:
-          list.scrollLeft +
-          selected.getBoundingClientRect().left -
-          list.getBoundingClientRect().left -
-          12,
-      });
-    }
-  }, [current?.id, record?.id]);
+    setNoteSaved(false);
+    setReplacement("");
+  }, [current?.key]);
+
+  const fileInput = (
+    <input
+      ref={input}
+      className="sr-only"
+      type="file"
+      multiple
+      accept=".zip,.json,.md,.png,.jpg,.jpeg,.gif,.webp,.svg"
+      aria-label="Import study plan"
+      onChange={(event) => {
+        props.onImportFiles(Array.from(event.target.files ?? []));
+        event.target.value = "";
+      }}
+    />
+  );
+
+  if (!current || !p || !record || !topic || !saved || !policy)
+    return (
+      <div className="ex-page">
+        {fileInput}
+        <EmptyState
+          icon={<Upload size={20} />}
+          title="Upload a topic to start"
+          actions={
+            <>
+              <Button variant="primary" onClick={() => input.current?.click()}>
+                <Upload size={16} aria-hidden="true" /> Upload files
+              </Button>
+              <Button onClick={props.onImportExample}>Try the example</Button>
+            </>
+          }
+        >
+          Each topic has four steps, one after another: learn, practise, take the exam, review your
+          answers. Upload a .zip, or the plan with its exam and practice files.
+        </EmptyState>
+        <p className="ex-small" style={{ textAlign: "center", marginTop: 12 }}>
+          <LinkButton onClick={props.onDownloadExample}>Download example files</LinkButton>
+        </p>
+      </div>
+    );
+
+  const exam = p.cycle.exam.exam;
+  const passedAttempt = [...p.attempts]
+    .filter(
+      (a) =>
+        graded(a) &&
+        meetsPassingScore(a.analysis!.score, a.analysis!.totalMarks, policy.passPercentage),
+    )
+    .at(-1);
+  const lastGraded = [...p.attempts].filter(graded).at(-1);
+  const revisionDone = p.cycle.revisionCompletedAt !== undefined;
+  const stateOf = (step: StepId): "done" | "current" | "locked" =>
+    p.steps[step] ? "done" : p.step === step ? "current" : "locked";
+  const shown: StepId = chosenStep ?? (p.step === "done" ? "review" : p.step);
+  const candidates = library.filter((e) => e.exam.taxonomy.id === exam.taxonomy.id),
+    chosen = candidates.find((e) => e.id === replacement);
+  const nextOpen = topics.find((t) => t.key !== current.key && t.progress.step !== "done");
+  const planId = record.id,
+    topicId = topic.id;
+
   return (
-    <div className="study-workspace">
+    <div className="ex-page">
+      {fileInput}
       <input
-        ref={input}
+        ref={practiceInput}
         className="sr-only"
         type="file"
-        accept=".json"
-        aria-label="Import study plan"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) void file.text().then(props.onImport);
-          event.target.value = "";
+        multiple
+        accept=".zip,.md,.png,.jpg,.jpeg,.gif,.webp,.svg"
+        aria-label="Add practice questions"
+        onChange={(e) => {
+          props.onAddPractice(planId, topicId, Array.from(e.target.files ?? []));
+          e.target.value = "";
         }}
       />
-      <header className="study-page-header">
+
+      <header className="ex-page-header" style={{ alignItems: "center" }}>
         <div>
-          <p className="exam-eyebrow">ONE DAY AT A TIME</p>
-          <h1>Study plans</h1>
-          <p className="exam-muted">A clear next step. Progress earned through understanding.</p>
+          {topics.length > 1 ? (
+            <label className="xp-topic-picker">
+              <span className="sr-only">Topic</span>
+              <select
+                className="ex-select xp-plan-select"
+                value={current.key}
+                onChange={(e) => setSelected(e.target.value)}
+              >
+                {plans.map((plan) => (
+                  <optgroup key={plan.id} label={plan.plan.name}>
+                    {topics
+                      .filter((t) => t.record.id === plan.id)
+                      .map((t) => (
+                        <option key={t.key} value={t.key}>
+                          {t.progress.step === "done" ? "✓ " : ""}
+                          {t.topic.title}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <h1 className={topics.length > 1 ? "sr-only" : undefined}>{topic.title}</h1>
         </div>
-        <div className="exam-actions">
-          <button className="study-icon-button" onClick={downloadTemplate}>
-            <Download size={16} /> Plan template
-          </button>
-          <button className="exam-primary study-icon-button" onClick={() => input.current?.click()}>
-            <Upload size={16} /> Import plan
-          </button>
+        <div className="ex-row">
+          <Button onClick={() => input.current?.click()}>
+            <Upload size={16} aria-hidden="true" /> Upload
+          </Button>
+          <OverflowMenu
+            trigger={
+              <Button aria-label="More" className="ex-btn--icon">
+                <MoreHorizontal size={16} aria-hidden="true" />
+              </Button>
+            }
+            items={[
+              {
+                label: "Download example files",
+                icon: <Download size={16} />,
+                onSelect: props.onDownloadExample,
+              },
+            ]}
+          />
         </div>
       </header>
-      {!record ? (
-        <section className="study-empty">
-          <div className="study-empty-symbol">
-            <CalendarDays size={30} />
-          </div>
-          <p className="exam-eyebrow">YOUR ROUTINE, WITH A LITTLE STRUCTURE</p>
-          <h2>
-            Turn a study plan into
-            <br />
-            daily progress.
-          </h2>
-          <p>
-            Bring your lessons and exams together. Check off your work, test what you know, and
-            unlock the next day when you pass.
-          </p>
-          <div className="exam-actions">
-            <button
-              className="exam-primary study-icon-button"
-              onClick={() => props.onImport(samplePlan)}
-            >
-              Try the example plan <ArrowRight size={16} />
-            </button>
-            <button onClick={() => input.current?.click()}>Import your plan</button>
-          </div>
-          <div className="study-how">
-            <span>
-              <b>01</b> Follow your plan
-            </span>
-            <ChevronRight size={15} />
-            <span>
-              <b>02</b> Pass your exam
-            </span>
-            <ChevronRight size={15} />
-            <span>
-              <b>03</b> Move forward
-            </span>
-          </div>
-          <p className="study-small">
-            Use the downloadable JSON template. Import any referenced exams before your plan.
-          </p>
-        </section>
-      ) : (
-        <>
-          <section className="study-plan-overview">
-            <div>
-              {plans.length > 1 ? (
-                <label className="study-plan-picker">
-                  Current plan
-                  <select
-                    value={record.id}
-                    onChange={(e) => {
-                      setSelectedPlan(e.target.value);
-                      setSelectedDay("");
-                      setReplacement("");
-                    }}
-                  >
-                    {plans.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.plan.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <h2>{record.plan.name}</h2>
-              )}
-              <p className="exam-muted">{record.plan.description}</p>
-              {record.plan.startDate && (
-                <p className="study-small">
-                  Started{" "}
-                  {new Date(record.plan.startDate + "T00:00:00").toLocaleDateString(undefined, {
-                    day: "numeric",
-                    month: "long",
-                    year: "numeric",
-                  })}
-                </p>
-              )}
-            </div>
-            <div className="study-completion">
-              <strong>
-                {completed}
-                <span> / {progress.length} days</span>
-              </strong>
-              <div
-                className="study-progress-track"
-                role="progressbar"
-                aria-label="Days passed"
-                aria-valuemin={0}
-                aria-valuemax={progress.length}
-                aria-valuenow={completed}
-              >
-                <span style={{ width: `${(completed / progress.length) * 100}%` }} />
-              </div>
-              <small>
-                {completed === progress.length
-                  ? "Plan complete. Well done."
-                  : "Each passed exam unlocks the next day."}
-              </small>
-            </div>
-          </section>
-          <div className="study-layout">
-            <aside className="study-days">
-              <p className="exam-eyebrow">YOUR PATH</p>
-              <ol ref={dayList}>
-                {progress.map((p, i) => {
-                  const d = record.plan.days[i];
-                  return (
-                    <li key={p.id}>
-                      <button
-                        className={`study-day-link study-status-${p.status}`}
-                        aria-current={p.id === current?.id ? "step" : undefined}
-                        onClick={() => {
-                          setSelectedDay(p.id);
-                          setReplacement("");
-                        }}
-                      >
-                        <span className="study-step-icon">
-                          <StatusIcon status={p.status} />
-                        </span>
-                        <span className="study-day-copy">
-                          <small>DAY {String(i + 1).padStart(2, "0")}</small>
-                          <strong>{d.title}</strong>
-                          <span>{statusLabel[p.status]}</span>
-                        </span>
-                        {p.status === "passed" ? (
-                          <span className="study-day-score">
-                            {formatPercent(p.bestPercentage!)}
-                          </span>
-                        ) : p.id === current?.id ? (
-                          <ChevronRight size={16} />
-                        ) : null}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ol>
-              <p className="study-path-note">
-                <LockKeyhole size={14} /> Days unlock in order. Your checklist and notes are always
-                saved.
-              </p>
-            </aside>
-            {day && current && saved && policy && (
-              <main className="study-day-detail">
-                <header className="study-day-heading">
-                  <div className="exam-actions">
-                    <span className="study-day-number">
-                      DAY {String(index + 1).padStart(2, "0")}
-                    </span>
-                    <span className={`study-status-pill study-status-${current.status}`}>
-                      {statusLabel[current.status]}
-                    </span>
-                    {day.estimatedMinutes && (
-                      <span className="study-time">
-                        <Clock3 size={14} /> {day.estimatedMinutes} min planned
-                      </span>
+
+      <nav aria-label="Steps">
+        <ol className="xp-hsteps">
+          {STEPS.map((s, i) => {
+            const state = stateOf(s.id);
+            return (
+              <li key={s.id} className={`xp-hstep is-${state}`}>
+                <button
+                  type="button"
+                  disabled={state === "locked"}
+                  aria-current={shown === s.id ? "step" : undefined}
+                  onClick={() => setChosenStep(s.id)}
+                >
+                  <span className="xp-dot" aria-hidden="true">
+                    {state === "done" ? (
+                      <Check size={14} strokeWidth={3} />
+                    ) : state === "locked" ? (
+                      <LockKeyhole size={12} />
+                    ) : (
+                      i + 1
                     )}
-                  </div>
-                  <h2>{day.title}</h2>
-                  <ExamMarkdown source={day.summaryMd} />
-                </header>
-                {isLocked ? (
-                  <section className="study-gate">
-                    <div className="study-gate-symbol">
-                      <LockKeyhole size={24} />
-                    </div>
-                    <h3>One step at a time</h3>
-                    <p>
-                      Pass Day {index} before starting this day. Completing a checklist alone does
-                      not unlock an exam.
-                    </p>
-                    <button
-                      onClick={() =>
-                        setSelectedDay(progress.find((p) => p.status !== "passed")!.id)
-                      }
-                    >
-                      Go to your current day <ArrowRight size={16} />
-                    </button>
-                  </section>
-                ) : (
-                  <>
-                    {isPassed && (
-                      <div className="study-success">
-                        <CheckCircle2 size={22} />
-                        <div>
-                          <strong>Day {index + 1} passed. Keep your momentum.</strong>
-                          <p>
-                            Your best score is {formatPercent(current.bestPercentage!)}.{" "}
-                            {index + 1 < progress.length
-                              ? "The next day is now unlocked."
-                              : "You have completed this plan."}
-                          </p>
-                        </div>
-                        {index + 1 < progress.length && (
-                          <button onClick={() => setSelectedDay(progress[index + 1].id)}>
-                            Next day <ArrowRight size={15} />
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    <section className="study-section">
-                      <div className="study-section-title">
-                        <h3>Your learning checklist</h3>
-                        <span>
-                          {current.completedTasks} of {current.totalTasks} done
-                        </span>
-                      </div>
-                      <div className="study-task-list">
-                        {day.tasks.length ? (
-                          day.tasks.map((task) => (
-                            <label
-                              className={
-                                saved.tasks[task.id] ? "study-task is-complete" : "study-task"
-                              }
-                              key={task.id}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={!!saved.tasks[task.id]}
-                                onChange={(e) =>
-                                  props.onTask(record.id, day.id, task.id, e.target.checked)
-                                }
-                              />
-                              <span>{task.label}</span>
-                            </label>
-                          ))
-                        ) : (
-                          <p className="exam-muted">
-                            No checklist for this day. Use your notes to track your preparation.
-                          </p>
-                        )}
-                      </div>
-                      <p className="study-small">
-                        Mark your preparation here. Your exam result determines whether the day is
-                        passed.
-                      </p>
-                    </section>
-                    <section className={`study-assessment ${revision ? "needs-revision" : ""}`}>
-                      <div className="study-assessment-top">
-                        <span className="study-assessment-icon">
-                          {revision ? <BookOpen size={21} /> : <Flag size={21} />}
-                        </span>
-                        <div>
-                          <p className="exam-eyebrow">
-                            DAILY CHECKPOINT · PAPER {current.cycle.index + 1}
-                          </p>
-                          <h3>
-                            {revision
-                              ? "Revise, then come back with a fresh paper."
-                              : isPassed
-                                ? "Understanding confirmed."
-                                : "Test your understanding."}
-                          </h3>
-                        </div>
-                      </div>
-                      <p className="exam-muted">{current.cycle.exam.exam.rules.meta.name}</p>
-                      <div className="study-assessment-metrics">
-                        <span>
-                          <strong>{policy.passPercentage}%</strong> to pass
-                        </span>
-                        <span>
-                          <strong>
-                            {current.attemptsRemaining} / {current.maxAttempts}
-                          </strong>{" "}
-                          attempts left
-                        </span>
-                        <span>
-                          <strong>
-                            {current.cycle.exam.exam.rules.timing.durationMinutes} min
-                          </strong>{" "}
-                          exam
-                        </span>
-                      </div>
-                      {current.status === "failed" && (
-                        <p className="study-failed-message">
-                          This day is marked failed. Your latest score was{" "}
-                          {formatPercent(current.latestPercentage!)}; you need{" "}
-                          {policy.passPercentage}% to move on. Review your mistakes and try again.
-                        </p>
-                      )}
-                      {revision ? (
-                        <div className="study-revision-flow">
-                          <p>
-                            You used all {current.maxAttempts} attempts without passing. The next
-                            day stays locked. Your progress so far is saved.
-                          </p>
-                          <div className="study-revision-step">
-                            <span className="study-revision-number">
-                              {current.cycle.revisionCompletedAt !== undefined ? (
-                                <Check size={15} />
-                              ) : (
-                                1
-                              )}
-                            </span>
-                            <div>
-                              <h4>Revisit what needs work</h4>
-                              <p>
-                                Use your weakness report, review your notes, and practice the
-                                concepts you missed.
-                              </p>
-                              <button
-                                disabled={current.cycle.revisionCompletedAt !== undefined}
-                                onClick={() => props.onRevision(record.id, day.id)}
-                              >
-                                {current.cycle.revisionCompletedAt !== undefined
-                                  ? "Revision completed"
-                                  : "I've revised this topic"}
-                              </button>
-                            </div>
-                          </div>
-                          <div className="study-revision-step">
-                            <span className="study-revision-number">2</span>
-                            <div>
-                              <h4>Use a new paper</h4>
-                              <p>
-                                At least {policy.rewriteDifficultyPercentage}% of its questions must
-                                be tagged “{policy.difficultyLabel}”. The pass mark and attempt
-                                limit stay the same.
-                              </p>
-                              <fieldset disabled={current.cycle.revisionCompletedAt === undefined}>
-                                <label>
-                                  Replacement paper
-                                  <select
-                                    aria-label="Replacement paper"
-                                    value={replacement}
-                                    onChange={(e) => setReplacement(e.target.value)}
-                                  >
-                                    <option value="">Choose an imported exam</option>
-                                    {candidates.map((e) => (
-                                      <option key={e.id} value={e.id}>
-                                        {e.exam.rules.meta.name} ·{" "}
-                                        {Math.round(
-                                          (e.exam.paper.filter(
-                                            (q) => q.difficulty === policy.difficultyLabel,
-                                          ).length /
-                                            e.exam.paper.length) *
-                                            100,
-                                        )}
-                                        % {policy.difficultyLabel}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-                                <div className="exam-actions">
-                                  <button
-                                    className="exam-primary"
-                                    disabled={!chosen}
-                                    onClick={() =>
-                                      chosen && props.onRewrite(record.id, day.id, chosen)
-                                    }
-                                  >
-                                    Use new paper
-                                  </button>
-                                  <button
-                                    className="study-icon-button"
-                                    onClick={() => rewriteInput.current?.click()}
-                                  >
-                                    <FilePlus2 size={16} /> Import new paper
-                                  </button>
-                                </div>
-                                <input
-                                  ref={rewriteInput}
-                                  className="sr-only"
-                                  type="file"
-                                  multiple
-                                  accept=".json,.md"
-                                  aria-label="Import replacement exam files"
-                                  onChange={(e) => {
-                                    props.onRewriteFiles(
-                                      record.id,
-                                      day.id,
-                                      Array.from(e.target.files ?? []),
-                                    );
-                                    e.target.value = "";
-                                  }}
-                                />
-                              </fieldset>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        !isPassed && (
-                          <div className="study-assessment-action">
-                            <button
-                              className="exam-primary study-icon-button"
-                              onClick={() => props.onStart(record.id, day.id)}
-                            >
-                              {current.activeAttempt
-                                ? "Resume exam"
-                                : current.status === "failed"
-                                  ? "Try again"
-                                  : "Start today's exam"}
-                              <ArrowRight size={16} />
-                            </button>
-                            <span className="study-small">
-                              {current.status === "in_progress"
-                                ? "The exam clock continues while you are away."
-                                : "Your answers are saved as you go."}
-                            </span>
-                          </div>
-                        )
-                      )}
-                    </section>
-                    <section className="study-section">
-                      <div className="study-section-title">
-                        <h3>Your notes</h3>
-                        <span>Saved automatically</span>
-                      </div>
-                      <textarea
-                        className="study-notes"
-                        aria-label="Daily study notes"
-                        placeholder="What clicked today? What needs another look?"
-                        value={saved.note}
-                        maxLength={5000}
-                        onChange={(e) => props.onNote(record.id, day.id, e.target.value)}
-                      />
-                    </section>
-                    {current.attempts.length > 0 && (
-                      <section className="study-section">
-                        <div className="study-section-title">
-                          <h3>Attempt history</h3>
-                          <span>
-                            {
-                              current.attempts.filter((a) => a.session.startedAt !== undefined)
-                                .length
-                            }{" "}
-                            started
-                          </span>
-                        </div>
-                        <div className="study-attempt-list">
-                          {[...current.attempts].reverse().map((a) => {
-                            const graded =
-                                !!a.analysis && ["submitted", "review"].includes(a.session.phase),
-                              passed =
-                                graded &&
-                                meetsPassingScore(
-                                  a.analysis!.score,
-                                  a.analysis!.totalMarks,
-                                  policy.passPercentage,
-                                );
-                            return (
-                              <button
-                                key={a.id}
-                                className="study-attempt"
-                                onClick={() => props.onOpenAttempt(a)}
-                              >
-                                <span
-                                  className={`study-attempt-dot ${graded ? (passed ? "is-pass" : "is-fail") : ""}`}
-                                />
-                                <span>
-                                  <strong>
-                                    {graded
-                                      ? passed
-                                        ? "Passed"
-                                        : "Failed"
-                                      : a.session.phase.replaceAll("_", " ")}
-                                  </strong>
-                                  <small>
-                                    Paper {a.study!.cycle + 1} ·{" "}
-                                    {new Date(a.session.createdAt).toLocaleDateString()}
-                                  </small>
-                                </span>
-                                {graded && (
-                                  <strong>
-                                    {formatPercent(
-                                      scorePercentage(a.analysis!.score, a.analysis!.totalMarks),
-                                    )}
-                                  </strong>
-                                )}
-                                <ArrowUpRight size={16} />
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </section>
-                    )}
-                  </>
-                )}
-              </main>
+                  </span>
+                  <span className="xp-hstep-copy">
+                    <strong>
+                      <span className="sr-only">Step {i + 1}: </span>
+                      {s.name}
+                    </strong>
+                    <span>{stepNote(p, s.id, state)}</span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </nav>
+
+      <section
+        className="ex-surface xp-step-panel"
+        aria-label={STEPS.find((s) => s.id === shown)!.name}
+      >
+        {p.step === "done" && (
+          <div className="xp-complete">
+            <Check size={18} aria-hidden="true" />
+            <span>All four steps done.</span>
+            {nextOpen && (
+              <Button variant="primary" onClick={() => setSelected(nextOpen.key)}>
+                Next topic: {nextOpen.topic.title}
+              </Button>
             )}
           </div>
-        </>
-      )}
+        )}
+
+        {shown === "learn" && (
+          <>
+            {topic.summaryMd && <ExamMarkdown source={topic.summaryMd} />}
+            {topic.tasks.length > 0 && (
+              <ul className="ex-surface ex-surface--flush ex-hairline-list xp-tasks">
+                {topic.tasks.map((task) => (
+                  <li key={task.id}>
+                    <label className={saved.tasks[task.id] ? "xp-task is-done" : "xp-task"}>
+                      <input
+                        className="ex-check"
+                        type="checkbox"
+                        checked={!!saved.tasks[task.id]}
+                        onChange={(e) => props.onTask(planId, topicId, task.id, e.target.checked)}
+                      />
+                      <span>{task.label}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="ex-field">
+              <span className="ex-section-head">
+                <span>Progress notes (optional)</span>
+                <span className="xp-saved" aria-live="polite">
+                  {noteSaved && (
+                    <>
+                      <Check size={12} aria-hidden="true" /> Saved
+                    </>
+                  )}
+                </span>
+              </span>
+              <textarea
+                className="ex-textarea xp-notes"
+                aria-label="Study notes"
+                placeholder="What you covered, what needs another look"
+                value={saved.note}
+                maxLength={5000}
+                onChange={(e) => {
+                  props.onNote(planId, topicId, e.target.value);
+                  setNoteSaved(true);
+                }}
+              />
+            </div>
+            <div className="xp-cta">
+              {!p.steps.learn && (
+                <Button variant="primary" onClick={() => props.onLearned(planId, topicId)}>
+                  I've finished studying
+                </Button>
+              )}
+              <Link to="/" className="ex-link">
+                <BookOpen size={16} aria-hidden="true" /> Open Localdox
+              </Link>
+            </div>
+          </>
+        )}
+
+        {shown === "practice" && (
+          <>
+            {p.practiceTotal > 0 ? (
+              <>
+                <p className="ex-small">
+                  Answer each question, then check it against the key and solution. No timer.
+                </p>
+                <ProgressBar
+                  value={(p.practiceAttempted / p.practiceTotal) * 100}
+                  label="Practice answered"
+                />
+              </>
+            ) : (
+              <p className="ex-small">
+                No practice questions for this topic. Add your own if you like.
+              </p>
+            )}
+            <div className="xp-cta">
+              {p.practiceTotal > 0 && (
+                <Button
+                  variant={stateOf("practice") === "current" ? "primary" : "secondary"}
+                  onClick={() => props.onPractice(planId, topicId)}
+                >
+                  {p.practiceAttempted === 0
+                    ? "Start practice"
+                    : p.practiceAttempted < p.practiceTotal
+                      ? "Continue practice"
+                      : "Open practice"}
+                </Button>
+              )}
+              <LinkButton onClick={() => practiceInput.current?.click()}>
+                <Upload size={14} aria-hidden="true" /> Add questions
+              </LinkButton>
+            </div>
+          </>
+        )}
+
+        {shown === "exam" && (
+          <>
+            <p className="ex-meta tabular">
+              <span>{exam.rules.meta.name}</span>
+              <span>{plural(exam.paper.length, "question")}</span>
+              <span>{formatDuration(exam.rules.timing.durationMinutes * 60)}</span>
+              <span>{policy.passPercentage}% to pass</span>
+              {p.status !== "passed" && <span>{plural(p.attemptsRemaining, "attempt")} left</span>}
+              {p.cycle.index > 0 && <span>Paper {p.cycle.index + 1}</span>}
+            </p>
+            {p.status === "passed" ? (
+              passedAttempt && (
+                <div>
+                  <LinkButton onClick={() => props.onOpenAttempt(passedAttempt)}>
+                    See result
+                  </LinkButton>
+                </div>
+              )
+            ) : p.status === "revision_required" ? (
+              <div className="ex-surface xp-panel is-warning">
+                <p style={{ fontSize: 14 }}>
+                  No attempts left on this paper. Revise, then take a new paper with at least{" "}
+                  {policy.rewriteDifficultyPercentage}% {policy.difficultyLabel} questions.
+                </p>
+                <ol className="xp-steps">
+                  <li>
+                    <span className="xp-dot" aria-hidden="true">
+                      {revisionDone ? <Check size={12} strokeWidth={3} /> : 1}
+                    </span>
+                    <div>
+                      <Button
+                        disabled={revisionDone}
+                        onClick={() => props.onRevision(planId, topicId)}
+                      >
+                        {revisionDone ? "Revision done" : "I've revised this topic"}
+                      </Button>
+                    </div>
+                  </li>
+                  <li>
+                    <span className="xp-dot" aria-hidden="true">
+                      2
+                    </span>
+                    <div>
+                      <fieldset
+                        disabled={!revisionDone}
+                        className="xr-fieldset ex-stack"
+                        style={{ gap: 8 }}
+                      >
+                        <label className="ex-field" style={{ fontWeight: 500 }}>
+                          Replacement paper
+                          <select
+                            className="ex-select"
+                            aria-label="Replacement paper"
+                            value={replacement}
+                            onChange={(e) => setReplacement(e.target.value)}
+                          >
+                            <option value="">Choose an imported exam</option>
+                            {candidates.map((e) => (
+                              <option key={e.id} value={e.id}>
+                                {e.exam.rules.meta.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <div className="ex-row">
+                          <Button
+                            variant="primary"
+                            disabled={!chosen}
+                            onClick={() => chosen && props.onRewrite(planId, topicId, chosen)}
+                          >
+                            Use new paper
+                          </Button>
+                          <LinkButton onClick={() => rewriteInput.current?.click()}>
+                            Import new paper
+                          </LinkButton>
+                        </div>
+                        <input
+                          ref={rewriteInput}
+                          className="sr-only"
+                          type="file"
+                          multiple
+                          accept=".zip,.json,.md,.png,.jpg,.jpeg,.gif,.webp,.svg"
+                          aria-label="Import replacement exam files"
+                          onChange={(e) => {
+                            props.onRewriteFiles(planId, topicId, Array.from(e.target.files ?? []));
+                            e.target.value = "";
+                          }}
+                        />
+                      </fieldset>
+                    </div>
+                  </li>
+                </ol>
+              </div>
+            ) : (
+              <div className="xp-cta">
+                <Button variant="primary" onClick={() => props.onStart(planId, topicId)}>
+                  {p.activeAttempt
+                    ? "Resume exam"
+                    : p.status === "failed"
+                      ? "Retake exam"
+                      : "Start exam"}
+                </Button>
+                {p.status === "failed" && lastGraded && (
+                  <LinkButton onClick={() => props.onReview(lastGraded)}>
+                    Review last attempt (
+                    {formatPercent(
+                      scorePercentage(lastGraded.analysis!.score, lastGraded.analysis!.totalMarks),
+                    )}
+                    )
+                  </LinkButton>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {shown === "review" && passedAttempt && (
+          <>
+            <p className="ex-small">
+              Go through every answer with its key and solution. Mistakes are shown first.
+            </p>
+            <div className="xp-cta">
+              <Button
+                variant={p.steps.review ? "secondary" : "primary"}
+                onClick={() => props.onReview(passedAttempt)}
+              >
+                Review answers
+              </Button>
+            </div>
+          </>
+        )}
+      </section>
     </div>
   );
 }

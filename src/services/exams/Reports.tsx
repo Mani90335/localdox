@@ -1,517 +1,370 @@
 import { useState } from "react";
-import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-  CartesianGrid,
-  ResponsiveContainer,
-} from "recharts";
-import type { AttemptAnalysis } from "./diagnostics";
-import { weaknessProfile } from "./diagnostics";
+import { ArrowLeft, Check } from "lucide-react";
 import type { AttemptRecord } from "./storage";
 import type { Solution } from "./parser";
-import { questionState, type SelfTag, canReleaseScore, canReleaseSolutions } from "./session";
-import { flattenTopics, type Taxonomy } from "./schema";
-import { ExamMarkdown } from "./ExamMarkdown";
-import type { DayProgress } from "./study-plan";
-const fixed = (n: number) => Number(n.toFixed(2));
-function TopicTable({ analysis, taxonomy }: { analysis: AttemptAnalysis; taxonomy: Taxonomy }) {
-  const topics = flattenTopics(taxonomy.topics);
+import { questionState, canReleaseScore, canReleaseSolutions } from "./session";
+import { ExamAssets, ExamMarkdown } from "./ExamMarkdown";
+import { scorePercentage, type DayProgress } from "./study-plan";
+import { Button, Chip, EmptyState, PageHeader, Segmented, StatBlocks, type Tone } from "./ui/kit";
+import {
+  formatDateTime,
+  formatDuration,
+  formatPercent,
+  humanizeId,
+  submitReasonCopy,
+  trimNumber,
+} from "./ui/display";
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function BarRow({ label, share, value }: { label: string; share: number; value: React.ReactNode }) {
   return (
-    <div className="exam-table-scroll">
-      <table>
-        <thead>
-          <tr>
-            <th>Topic</th>
-            <th>Attempted</th>
-            <th>Accuracy</th>
-            <th>Time ratio</th>
-            <th>Marks lost</th>
-            <th>Dominant cause</th>
-          </tr>
-        </thead>
-        <tbody>
-          {analysis.topics.map((t) => (
-            <tr key={t.topic}>
-              <td>{topics.find((v) => v.id === t.topic)?.name ?? t.topic}</td>
-              <td>
-                {t.attempted}/{t.total}
-              </td>
-              <td>{fixed(t.accuracy)}%</td>
-              <td>{fixed(t.avgTimeRatio)}×</td>
-              <td>{fixed(t.marksLost)}</td>
-              <td>{t.dominantCause?.replaceAll("_", " ") ?? "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="xs-bar-row">
+      <span>{label}</span>
+      <div className="ex-bar" aria-hidden="true">
+        <span style={{ width: `${Math.max(0, Math.min(100, share * 100))}%` }} />
+      </div>
+      <span>{value}</span>
     </div>
   );
 }
-export function WeaknessReport({
-  analysis,
-  taxonomy,
-}: {
-  analysis: AttemptAnalysis;
-  taxonomy: Taxonomy;
-}) {
-  return (
-    <div className="exam-stack">
-      <h2>Weakness Report</h2>
-      <p className="exam-muted">
-        Evidence-based flags describe patterns, not a definitive diagnosis. Self-reports remain
-        separate from the engine’s attribution.
-      </p>
-      <section className="exam-card">
-        <h3>Marks lost by cause</h3>
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart
-            data={Object.entries(analysis.marksLostByCause).map(([cause, marks]) => ({
-              cause: cause.replaceAll("_", " "),
-              marks: fixed(marks),
-            }))}
-          >
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="cause" tick={{ fontSize: 11 }} />
-            <YAxis />
-            <Tooltip />
-            <Bar isAnimationActive={false} dataKey="marks" fill="#3b82f6" />
-          </BarChart>
-        </ResponsiveContainer>
-        <p>Total marks lost: {fixed(analysis.marksLost)}</p>
-      </section>
-      <section className="exam-card">
-        <h3>Topic performance</h3>
-        <TopicTable analysis={analysis} taxonomy={taxonomy} />
-      </section>
-      <section className="exam-card">
-        <h3>Pacing curve</h3>
-        <p className="exam-muted">Cumulative focused seconds in the session’s question order.</p>
-        <ResponsiveContainer width="100%" height={280}>
-          <LineChart data={analysis.pacing}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="question" />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            <Line isAnimationActive={false} dataKey="actual" stroke="#3b82f6" dot={false} />
-            <Line
-              isAnimationActive={false}
-              dataKey="expected"
-              stroke="#a855f7"
-              strokeDasharray="5 5"
-              dot={false}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </section>
-      <section className="exam-card">
-        <h3>Top weaknesses</h3>
-        {analysis.weaknesses.length ? (
-          analysis.weaknesses.map((w) => (
-            <div className="exam-row" key={w.key}>
-              <strong>
-                {w.topic} · {(w.trap ?? w.cause).replaceAll("_", " ")}{" "}
-                {w.selfReported ? "(self-reported)" : ""}
-              </strong>
-              <p>
-                {w.questionIds.length} questions · {fixed(w.marksLost)} marks lost · impact{" "}
-                {fixed(w.impact)}
-              </p>
-            </div>
-          ))
-        ) : (
-          <p>Not enough repeated evidence yet.</p>
-        )}
-        <h3>Action items</h3>
-        <ol>
-          {analysis.actionItems.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ol>
-      </section>
-      <section className="exam-card">
-        <h3>Flagged questions and exam patterns</h3>
-        {analysis.flags.map((f, i) => (
-          <div className="exam-row" key={`${f.ruleId}-${i}`}>
-            <strong>{f.label}</strong> <span className="exam-tag">{f.ruleId}</span>
-            <p>
-              {f.scope === "question" ? f.questionIds.join(", ") : f.scope + " pattern"} · severity{" "}
-              {f.severity}
-            </p>
-            <p>{f.advice}</p>
-          </div>
-        ))}
-      </section>
-      <section className="exam-card">
-        <h3>Trap evidence</h3>
-        {analysis.traps.map((t) => (
-          <p key={`${t.trap}-${t.selfReported}`}>
-            {t.trap}: {t.count} ({t.questionIds.join(", ")}){" "}
-            {t.selfReported ? "— self-reported" : ""}
-          </p>
-        ))}
-      </section>
-    </div>
-  );
-}
+
 export function ResultScreen({
   attempt,
   onReview,
   studyDay,
   onStudyPlan,
+  dev,
 }: {
   attempt: AttemptRecord;
   onReview: () => void;
   studyDay?: DayProgress;
   onStudyPlan?: () => void;
+  dev: boolean;
 }) {
-  const [tab, setTab] = useState("score"),
-    a = attempt.analysis!,
+  const a = attempt.analysis!,
+    s = attempt.session,
     r = attempt.exam.exam.rules;
   const scoreReleased = canReleaseScore(r),
     solutionsReleased = canReleaseSolutions(r);
+  const percent = scorePercentage(a.score, a.totalMarks),
+    attempted = a.questions.filter((q) => q.signals.outcome !== "unanswered").length,
+    used =
+      s.startedAt !== undefined && s.submittedAt !== undefined
+        ? (s.submittedAt - s.startedAt) / 1000
+        : null,
+    reason = submitReasonCopy(s.events.find((e) => e.type === "submitted")?.reason);
+  const scoreText = `${a.score.toFixed(r.results.rounding)} / ${trimNumber(a.totalMarks)}`;
+  const passed = studyDay?.status === "passed",
+    inPlan = !!studyDay && scoreReleased;
   return (
-    <div className="exam-stack">
-      <h1>Exam result</h1>
-      {studyDay && (
-        <section className={studyDay.status === "passed" ? "study-success" : "study-result-failed"}>
-          <div>
-            <strong>
-              {studyDay.status === "passed"
-                ? "Day passed. Your next step is unlocked."
-                : studyDay.status === "revision_required"
-                  ? "Day failed. Revision and a new paper are required."
-                  : "Day failed. Review your mistakes and try again."}
-            </strong>
-            <p>
-              Passing score: {studyDay.passPercentage}%.{" "}
-              {studyDay.status !== "passed" &&
-                `${studyDay.attemptsRemaining} attempts remain on this paper.`}
+    <div className="ex-page">
+      <section className="xs-hero" aria-label="Result">
+        <p className="ex-meta">
+          <span>{r.meta.name}</span>
+          <span>{formatDateTime(a.at)}</span>
+        </p>
+        {inPlan ? (
+          <div className="ex-stack" style={{ gap: 4 }}>
+            <h1
+              className={passed ? "xs-pass" : "xs-fail"}
+              style={{ fontSize: 36, letterSpacing: "-0.03em" }}
+            >
+              {passed ? "Passed" : "Not passed"} · {formatPercent(percent)}
+            </h1>
+            <p className="ex-muted tabular">
+              {studyDay!.passPercentage}% needed · {scoreText} marks
+              {!passed &&
+                (studyDay!.status === "revision_required"
+                  ? " · No attempts left. Revise, then use a new paper."
+                  : ` · ${plural(studyDay!.attemptsRemaining, "attempt")} left`)}
             </p>
           </div>
-          <button onClick={onStudyPlan}>Continue study plan</button>
-        </section>
-      )}
-      {attempt.session.demo && (
-        <p className="exam-notice">
-          Demonstration attempt · excluded from your dashboard and attempt limit.
-        </p>
-      )}
-      <p>
-        {r.meta.name} · {new Date(a.at).toLocaleString()}
-      </p>
-      <div className="exam-tabs" role="tablist" aria-label="Result views">
-        <button role="tab" aria-selected={tab === "score"} onClick={() => setTab("score")}>
-          Score
-        </button>
-        {r.diagnostics.enabled && scoreReleased && solutionsReleased && (
-          <button role="tab" aria-selected={tab === "weakness"} onClick={() => setTab("weakness")}>
-            Weakness Report
-          </button>
+        ) : (
+          <div className="ex-stack" style={{ gap: 4 }}>
+            <h1 className="sr-only">Exam result</h1>
+            <div className="xs-verdict">
+              {scoreReleased ? (
+                <>
+                  <span className="xs-score">{scoreText}</span>
+                  <Chip tone="accent" large>
+                    {formatPercent(percent)}
+                  </Chip>
+                </>
+              ) : (
+                <span className="xs-score">Score withheld</span>
+              )}
+            </div>
+            {!scoreReleased && r.results.releaseAt && (
+              <p className="ex-muted">
+                Scores release {formatDateTime(Date.parse(r.results.releaseAt))}.
+              </p>
+            )}
+          </div>
         )}
-      </div>
-      {tab === "weakness" && scoreReleased && solutionsReleased ? (
-        <WeaknessReport analysis={a} taxonomy={attempt.exam.exam.taxonomy} />
-      ) : (
-        <>
-          <section className="exam-card">
-            <p className="exam-score">
-              {scoreReleased
-                ? `${a.score.toFixed(r.results.rounding)} / ${a.totalMarks}`
-                : "Score withheld"}
-            </p>
-            {scoreReleased && <p>{fixed(a.accuracy)}% accuracy among attempted questions</p>}
-            <p>
-              {a.violations} integrity violations ·{" "}
-              {attempt.session.events
-                .find((e) => e.type === "submitted")
-                ?.reason?.replaceAll("_", " ")}
-            </p>
-          </section>
-          {scoreReleased && r.results.showSectionBreakdown && (
-            <section className="exam-card">
-              <h2>Section breakdown</h2>
-              {a.sections.map((s) => (
-                <p key={s.id}>
-                  {r.sections.find((v) => v.id === s.id)?.name}:{" "}
-                  {s.score.toFixed(r.results.rounding)} / {s.totalMarks}
-                </p>
-              ))}
-            </section>
+        <div className="ex-row">
+          {solutionsReleased && (
+            <Button variant="primary" onClick={onReview}>
+              Review answers &amp; solutions
+            </Button>
           )}
-          {r.results.showTimePerQuestion && (
-            <section className="exam-card">
-              <h2>Time per question</h2>
-              <div className="exam-table-scroll">
-                <table>
+          {studyDay && <Button onClick={onStudyPlan}>Back to study plan</Button>}
+        </div>
+        {passed && <p className="ex-small">Step 4: go through the answers to finish this topic.</p>}
+        {!solutionsReleased && (
+          <p className="ex-small">
+            {r.results.solutionsRelease === "never"
+              ? "This exam doesn't release solutions."
+              : `Solutions release ${formatDateTime(Date.parse(r.results.releaseAt!))}.`}
+          </p>
+        )}
+      </section>
+
+      <div className="ex-stack" style={{ gap: 32, marginTop: 32 }}>
+        <StatBlocks
+          label="Summary"
+          items={[
+            ...(scoreReleased
+              ? [{ label: "Accuracy", value: formatPercent(a.accuracy), detail: "of attempted" }]
+              : []),
+            ...(used !== null ? [{ label: "Time used", value: formatDuration(used) }] : []),
+            { label: "Attempted", value: attempted, detail: `of ${a.questions.length}` },
+          ]}
+        />
+        {(a.violations > 0 || reason) && (
+          <div className="ex-stack" style={{ gap: 8 }}>
+            {reason && <p className="ex-small">{reason}</p>}
+            {a.violations > 0 && (
+              <p className="xs-note">
+                {plural(a.violations, "integrity warning")} recorded during this attempt.
+              </p>
+            )}
+          </div>
+        )}
+        {scoreReleased && r.results.showSectionBreakdown && a.sections.length > 1 && (
+          <section className="ex-section" aria-labelledby="xs-sections">
+            <h2 id="xs-sections">Sections</h2>
+            <div className="ex-surface xs-bars">
+              {a.sections.map((sec) => (
+                <BarRow
+                  key={sec.id}
+                  label={r.sections.find((v) => v.id === sec.id)?.name ?? humanizeId(sec.id)}
+                  share={sec.totalMarks ? sec.score / sec.totalMarks : 0}
+                  value={
+                    <>
+                      <strong>
+                        {sec.score.toFixed(r.results.rounding)}/{trimNumber(sec.totalMarks)}
+                      </strong>{" "}
+                      · {formatPercent(scorePercentage(Math.max(0, sec.score), sec.totalMarks))}
+                    </>
+                  }
+                />
+              ))}
+            </div>
+          </section>
+        )}
+        {dev && (
+          <details className="xi-author">
+            <summary>Session event log (dev)</summary>
+            <div className="ex-surface ex-surface--flush">
+              <div className="ex-table-wrap" style={{ maxHeight: 360 }}>
+                <table className="ex-table">
                   <thead>
                     <tr>
-                      <th>Question</th>
-                      <th>Focused seconds</th>
-                      <th>Visits</th>
+                      <th>Time</th>
+                      <th>Event</th>
+                      <th>Question / section</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {a.questions.map((q) => (
-                      <tr key={q.id}>
-                        <td>{q.id}</td>
-                        <td>{fixed(Number(q.signals.spentSec))}</td>
-                        <td>{q.signals.visits}</td>
+                    {s.events.map((event, index) => (
+                      <tr key={index}>
+                        <td className="tabular">{new Date(event.at).toLocaleTimeString()}</td>
+                        <td>{event.type}</td>
+                        <td>{event.questionId ?? event.section ?? event.reason ?? "—"}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            </section>
-          )}
-        </>
-      )}
-      {r.diagnostics.capture.eventLog && (
-        <details className="exam-card">
-          <summary>Session event log</summary>
-          <div className="exam-table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Event</th>
-                  <th>Question / section</th>
-                </tr>
-              </thead>
-              <tbody>
-                {attempt.session.events.map((event, index) => (
-                  <tr key={index}>
-                    <td>{new Date(event.at).toLocaleTimeString()}</td>
-                    <td>{event.type}</td>
-                    <td>{event.questionId ?? event.section ?? event.reason ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </details>
-      )}
-      {solutionsReleased ? (
-        <button className="exam-primary" onClick={onReview}>
-          Review answers &amp; solutions
-        </button>
-      ) : (
-        <p>
-          Solutions{" "}
-          {r.results.solutionsRelease === "never"
-            ? "are withheld by this exam."
-            : `release at ${new Date(r.results.releaseAt!).toLocaleString()}.`}
-        </p>
-      )}
+            </div>
+          </details>
+        )}
+      </div>
     </div>
   );
 }
-export function ReviewScreen({
-  attempt,
-  solutions,
-  onJournal,
-  onBack,
+
+export const OUTCOME: Record<string, { label: string; tone: Tone }> = {
+  correct: { label: "Correct", tone: "success" },
+  wrong: { label: "Wrong", tone: "danger" },
+  partial: { label: "Partly correct", tone: "warning" },
+  unanswered: { label: "Not answered", tone: "neutral" },
+};
+
+/** Options with the key and the learner's choice marked. Shared with practice. */
+export function AnswerKey({
+  options,
+  correct,
+  picked,
 }: {
-  attempt: AttemptRecord;
-  solutions: Solution[];
-  onJournal: (id: string, tag: SelfTag) => void;
-  onBack: () => void;
+  options: string[];
+  correct: string[];
+  picked: string[];
 }) {
-  const { exam, session, analysis } = attempt,
-    tax = exam.exam.taxonomy;
-  if (!canReleaseSolutions(exam.exam.rules)) return <p>Solutions have not been released.</p>;
   return (
-    <div className="exam-stack">
-      <div className="exam-actions">
-        <h1>Answer review</h1>
-        <button onClick={onBack}>Back to result</button>
-      </div>
-      {exam.exam.paper.map((q) => {
-        const solution = solutions.find((s) => s.id === q.id)!,
-          state = questionState(session, q.id),
-          a = analysis!.questions.find((a) => a.id === q.id)!,
-          tag = session.journal[q.id] ?? { note: "" },
-          wrong = a.signals.outcome !== "correct";
-        const selected = solution.distractors.filter((d) =>
-          d.option
-            ? Array.isArray(state.response)
-              ? state.response.includes(d.option)
-              : state.response === d.option
-            : state.response !== null && Number(state.response) === d.value,
-        );
+    <div className="ex-stack" style={{ gap: 8 }}>
+      {options.map((o, idx) => {
+        const label = String.fromCharCode(65 + idx),
+          isCorrect = correct.includes(label),
+          isPicked = picked.includes(label);
         return (
-          <section className="exam-card" key={q.id}>
-            <h2>
-              {q.id} · {String(a.signals.outcome)}
-            </h2>
-            <ExamMarkdown source={q.body} />
-            {q.options.map((o, i) => (
-              <div className="exam-option-review" key={i}>
-                <strong>{String.fromCharCode(65 + i)}.</strong>
-                <ExamMarkdown source={o} />
-              </div>
-            ))}
-            <p>
-              Your answer:{" "}
-              <strong>
-                {Array.isArray(state.response)
-                  ? state.response.join(", ")
-                  : state.response || "Unanswered"}
-              </strong>{" "}
-              · Correct: <strong>{solution.answer}</strong>
-              {solution.tolerance !== undefined ? ` ± ${solution.tolerance}` : ""}
-            </p>
-            <ExamMarkdown source={solution.body} />
-            {selected.map((d, i) => (
-              <p className="exam-notice" key={i}>
-                Trap: {tax.traps.find((t) => t.id === d.trap)?.name} — {d.note}
-              </p>
-            ))}
-            {a.flags.map((f, i) => (
-              <p key={i}>
-                <span className="exam-tag">{f.label}</span> {f.advice}
-              </p>
-            ))}
-            {wrong && exam.exam.rules.diagnostics.capture.selfTagging && (
-              <fieldset className="exam-journal">
-                <legend>Mistake journal · self-reported</legend>
-                <label>
-                  Cause
-                  <select
-                    aria-label={`Cause for ${q.id}`}
-                    value={tag.cause ?? ""}
-                    onChange={(e) =>
-                      onJournal(q.id, { ...tag, cause: e.target.value || undefined })
-                    }
-                  >
-                    <option value="">Choose a cause</option>
-                    {tax.causes.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Trap
-                  <select
-                    aria-label={`Trap for ${q.id}`}
-                    value={tag.trap ?? ""}
-                    onChange={(e) => onJournal(q.id, { ...tag, trap: e.target.value || undefined })}
-                  >
-                    <option value="">Choose a trap</option>
-                    {tax.traps.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Note
-                  <textarea
-                    aria-label={`Note for ${q.id}`}
-                    value={tag.note}
-                    onChange={(e) => onJournal(q.id, { ...tag, note: e.target.value })}
-                    maxLength={5000}
-                  />
-                </label>
-              </fieldset>
+          <div
+            className={`xs-review-opt${isCorrect ? " is-correct" : isPicked ? " is-wrong" : ""}`}
+            key={idx}
+          >
+            <span className="xr-letter">{label}</span>
+            <ExamMarkdown source={o} />
+            {(isCorrect || isPicked) && (
+              <Chip tone={isCorrect ? "success" : "danger"}>
+                {isPicked && isCorrect
+                  ? "Your answer · correct"
+                  : isPicked
+                    ? "Your answer"
+                    : "Correct"}
+              </Chip>
             )}
-          </section>
+          </div>
         );
       })}
     </div>
   );
 }
-export function WeaknessDashboard({ attempts }: { attempts: AttemptRecord[] }) {
-  const available = attempts.filter(
-    (a) =>
-      a.analysis &&
-      canReleaseScore(a.exam.exam.rules) &&
-      canReleaseSolutions(a.exam.exam.rules) &&
-      a.exam.exam.rules.diagnostics.enabled,
-  );
-  const ids = [...new Set(available.map((a) => a.analysis!.taxonomyId))],
-    [selected, setSelected] = useState(""),
-    [lastN, setLastN] = useState(10),
-    id = selected || ids[0] || "";
-  const source = available.find((a) => a.analysis!.taxonomyId === id),
-    min = source?.exam.exam.rules.diagnostics.report.persistentWeaknessMinAttempts ?? 2,
-    profile = weaknessProfile(
-      available.map((a) => a.analysis!),
-      id,
-      min,
-      lastN,
-    );
-  return (
-    <div className="exam-stack">
-      <h1>Weakness Dashboard</h1>
-      <div className="exam-actions">
-        <label>
-          Taxonomy
-          <select value={id} onChange={(e) => setSelected(e.target.value)}>
-            {ids.map((id) => (
-              <option key={id}>{id}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Recent attempts
-          <select value={lastN} onChange={(e) => setLastN(Number(e.target.value))}>
-            {[5, 10, 20].map((n) => (
-              <option key={n}>{n}</option>
-            ))}
-          </select>
-        </label>
+
+export function ReviewScreen({
+  attempt,
+  solutions,
+  onBack,
+  onFinish,
+  dev,
+}: {
+  attempt: AttemptRecord;
+  solutions: Solution[];
+  onBack: () => void;
+  /** Step 4 of a study day: present when finishing the review completes the day. */
+  onFinish?: () => void;
+  dev: boolean;
+}) {
+  const { exam, session, analysis } = attempt,
+    rules = exam.exam.rules;
+  const ordered = session.order
+    .map((id) => exam.exam.paper.find((q) => q.id === id))
+    .filter((q): q is NonNullable<typeof q> => !!q);
+  const outcomeOf = (id: string) =>
+      String(analysis!.questions.find((a) => a.id === id)?.signals.outcome ?? "unanswered"),
+    mistakes = ordered.filter((q) => outcomeOf(q.id) !== "correct").length;
+  const [filter, setFilter] = useState<"mistakes" | "all">(mistakes ? "mistakes" : "all");
+  if (!canReleaseSolutions(rules))
+    return (
+      <div className="ex-page">
+        <EmptyState
+          title="Solutions aren't released yet"
+          actions={<Button onClick={onBack}>Back to result</Button>}
+        />
       </div>
-      <p>
-        {profile.attemptCount} completed attempts · persistent means evidence across at least {min}{" "}
-        attempts. Demo attempts are excluded.
-      </p>
-      {!profile.attemptCount && (
-        <div className="exam-card">Complete an exam to start building your weakness profile.</div>
-      )}
-      <section className="exam-card">
-        <h2>Persistent weaknesses</h2>
-        {profile.weaknesses.map((w) => (
-          <p key={`${w.topic}-${w.cause}-${w.selfReported}`}>
-            <strong>
-              {w.topic} · {w.cause.replaceAll("_", " ")}
-            </strong>{" "}
-            — {w.attempts} attempts {w.persistent && <span className="exam-tag">Persistent</span>}{" "}
-            {w.selfReported ? "(self-reported)" : ""}
-          </p>
-        ))}
-      </section>
-      {profile.trends.map((t) => (
-        <section key={t.topic} className="exam-card">
-          <h2>{t.topic}: accuracy trend</h2>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={t.points.map((p, i) => ({ ...p, label: `${i + 1} · ${p.examId}` }))}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="label" />
-              <YAxis domain={[0, 100]} />
-              <Tooltip />
-              <Line isAnimationActive={false} dataKey="accuracy" stroke="#3b82f6" />
-            </LineChart>
-          </ResponsiveContainer>
-        </section>
-      ))}
-      <section className="exam-card">
-        <h2>Traps by frequency</h2>
-        {profile.traps.map((t) => (
-          <p key={`${t.trap}-${t.selfReported}`}>
-            {t.trap}: {t.count} {t.selfReported ? "(self-reported)" : ""}
-          </p>
-        ))}
-      </section>
-    </div>
+    );
+  const shown = ordered
+    .map((q, i) => ({ q, n: i + 1 }))
+    .filter(({ q }) => filter === "all" || outcomeOf(q.id) !== "correct");
+  return (
+    <ExamAssets source={exam}>
+      <div className="ex-page">
+        <div style={{ marginBottom: 8 }}>
+          <Button variant="ghost" onClick={onBack}>
+            <ArrowLeft size={16} aria-hidden="true" /> Back to result
+          </Button>
+        </div>
+        <PageHeader
+          title="Answer review"
+          subtitle={rules.meta.name}
+          actions={
+            <Segmented
+              label="Show"
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: "mistakes", label: `Mistakes (${mistakes})` },
+                { value: "all", label: `All (${ordered.length})` },
+              ]}
+            />
+          }
+        />
+        <div className="ex-stack">
+          {!shown.length && (
+            <EmptyState quiet icon={<Check size={20} />} title="No mistakes">
+              Every question was answered correctly.
+            </EmptyState>
+          )}
+          {shown.map(({ q, n }) => {
+            const solution = solutions.find((s) => s.id === q.id)!,
+              state = questionState(session, q.id),
+              a = analysis!.questions.find((a) => a.id === q.id)!,
+              outcome = OUTCOME[outcomeOf(q.id)] ?? OUTCOME.unanswered;
+            const picked = Array.isArray(state.response)
+              ? state.response
+              : state.response
+                ? [state.response]
+                : [];
+            return (
+              <article className="ex-surface xs-review-q" key={q.id} aria-labelledby={`rq-${q.id}`}>
+                <header className="ex-row">
+                  <h2 id={`rq-${q.id}`} style={{ fontSize: 16 }}>
+                    Question {n}
+                  </h2>
+                  <Chip tone={outcome.tone}>{outcome.label}</Chip>
+                  <span className="ex-small tabular">
+                    {a.score > 0 ? "+" : a.score < 0 ? "−" : ""}
+                    {Math.abs(a.score).toFixed(2)} marks
+                  </span>
+                  {dev && <Chip>{q.id}</Chip>}
+                </header>
+                <ExamMarkdown source={q.body} />
+                {q.options.length > 0 && (
+                  <AnswerKey
+                    options={q.options}
+                    correct={solution.answer.split(",").map((v) => v.trim())}
+                    picked={picked}
+                  />
+                )}
+                {q.type === "nat" && (
+                  <p className="xs-answer-line tabular">
+                    <span>
+                      Your answer: <strong>{state.response || "Not answered"}</strong>
+                    </span>
+                    <span>
+                      Correct: <strong>{solution.answer.replace(":", " to ")}</strong>
+                      {solution.tolerance !== undefined ? ` ± ${solution.tolerance}` : ""}
+                    </span>
+                  </p>
+                )}
+                <div className="xs-solution">
+                  <h3 style={{ fontSize: 14, marginBottom: 4 }}>Solution</h3>
+                  <ExamMarkdown source={solution.body} />
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        <div className="ex-row" style={{ marginTop: 32 }}>
+          {onFinish ? (
+            <Button variant="primary" onClick={onFinish}>
+              Finish review
+            </Button>
+          ) : (
+            <Button onClick={onBack}>Back to result</Button>
+          )}
+        </div>
+      </div>
+    </ExamAssets>
   );
 }
