@@ -1,0 +1,2427 @@
+/*
+ * Exam Sessions design system.
+ *
+ * One token layer (below), one level of surface, hairlines for grouping, colour
+ * only where it carries meaning. Components are prefixed `ex-`; screens use
+ * `xr-` (runner), `xi-` (instructions), `xs-` (result), `xl-` (library),
+ * `xp-` (study plans and practice).
+ */
+
+/* ── Tokens ──────────────────────────────────────────────────────────────── */
+/* `.ex-portal` carries the same tokens into dialogs, sheets and menus, which
+   mount outside `.exam-app`. */
+.exam-app,
+.ex-portal {
+  --ex-page: #fafafb;
+  --ex-surface: #ffffff;
+  --ex-subtle: #f3f4f6;
+  --ex-hairline: #e6e8ec;
+  --ex-border-strong: #c9cdd4;
+  --ex-text: #111318;
+  --ex-text-2: #5b6270;
+  --ex-accent: #4f5bd5;
+  --ex-accent-hover: #4350c4;
+  --ex-accent-tint: #eef0fc;
+  --ex-on-accent: #ffffff;
+  --ex-success: #1a7f4b;
+  --ex-success-tint: #e8f5ee;
+  --ex-warning: #b45309;
+  --ex-warning-tint: #fdf3e7;
+  --ex-danger: #c62828;
+  --ex-danger-tint: #fcecec;
+  --ex-marked: #6b3fa0;
+  --ex-scrim: rgba(17, 19, 24, 0.5);
+  /* Validated categorical order for charts (dataviz reference palette). */
+  --ex-series-1: #2a78d6;
+  --ex-series-2: #eb6834;
+  --ex-series-3: #1baf7a;
+  --ex-series-4: #eda100;
+  --ex-series-5: #e87ba4;
+  --ex-series-6: #008300;
+  --ex-series-7: #4a3aa7;
+  --ex-series-8: #e34948;
+  --ex-shadow-pop: 0 16px 40px rgba(17, 19, 24, 0.16), 0 2px 8px rgba(17, 19, 24, 0.08);
+
+  --ex-fs-12: 12px;
+  --ex-fs-14: 14px;
+  --ex-fs-16: 16px;
+  --ex-fs-20: 20px;
+  --ex-fs-28: 28px;
+  --ex-fs-36: 36px;
+
+  --ex-r-control: 8px;
+  --ex-r-surface: 12px;
+  --ex-control: 44px;
+  --ex-header: 56px;
+  --ex-content: 1120px;
+  --ex-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ex-fast: 140ms;
+
+  color: var(--ex-text);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.exam-app {
+  min-height: 100dvh;
+  background: var(--ex-page);
+}
+.dark .exam-app,
+.dark .ex-portal {
+  --ex-page: #0f1115;
+  --ex-surface: #171a20;
+  --ex-subtle: #20242c;
+  --ex-hairline: #2a2f38;
+  --ex-border-strong: #454c58;
+  --ex-text: #eceef2;
+  --ex-text-2: #a2a9b6;
+  --ex-accent: #8a93f0;
+  --ex-accent-hover: #a1a8f4;
+  --ex-accent-tint: #23264a;
+  --ex-on-accent: #0f1115;
+  --ex-success: #4cc38a;
+  --ex-success-tint: #12291e;
+  --ex-warning: #e8a456;
+  --ex-warning-tint: #2e2213;
+  --ex-danger: #f07575;
+  --ex-danger-tint: #331919;
+  --ex-marked: #a98be0;
+  --ex-series-1: #3987e5;
+  --ex-series-2: #d95926;
+  --ex-series-3: #199e70;
+  --ex-series-4: #c98500;
+  --ex-series-5: #d55181;
+  --ex-series-6: #008300;
+  --ex-series-7: #9085e9;
+  --ex-series-8: #e66767;
+  --ex-shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+/* Optional low-glare theme for long sittings in the runner. */
+.exam-app [data-glare="low"],
+.exam-app[data-glare="low"] {
+  --ex-page: #f3efe6;
+  --ex-surface: #faf7f0;
+  --ex-subtle: #ece6da;
+  --ex-hairline: #e0d9cb;
+  --ex-text: #26231e;
+  --ex-text-2: #5e574b;
+  --ex-accent-tint: #e9e6f3;
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+.exam-app *,
+.exam-app *::before,
+.exam-app *::after,
+.ex-portal *,
+.ex-portal *::before,
+.ex-portal *::after {
+  box-sizing: border-box;
+}
+/* Element defaults use :where() (zero specificity) so any component class wins. */
+:where(.exam-app, .ex-portal) :where(h1, h2, h3, h4) {
+  margin: 0;
+  font-weight: 600;
+  color: var(--ex-text);
+}
+:where(.exam-app) :where(h1) {
+  font-size: var(--ex-fs-28);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+:where(.exam-app) :where(h2) {
+  font-size: var(--ex-fs-20);
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+:where(.exam-app) :where(h3) {
+  font-size: var(--ex-fs-16);
+  line-height: 1.4;
+}
+:where(.exam-app, .ex-portal) :where(p) {
+  margin: 0;
+}
+:where(.exam-app, .ex-portal) :where(button, input, select, textarea) {
+  font: inherit;
+  color: inherit;
+}
+:where(.exam-app, .ex-portal) :where(button) {
+  cursor: pointer;
+}
+:where(.exam-app, .ex-portal) :focus-visible {
+  outline: 2px solid var(--ex-accent);
+  outline-offset: 2px;
+}
+.exam-app .tabular {
+  font-variant-numeric: tabular-nums;
+}
+.ex-muted {
+  color: var(--ex-text-2);
+}
+.ex-small {
+  font-size: var(--ex-fs-14);
+  color: var(--ex-text-2);
+}
+.ex-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.ex-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ex-spacer {
+  flex: 1;
+}
+.exam-root-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+/* ── Button ──────────────────────────────────────────────────────────────── */
+.ex-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--ex-control);
+  padding: 0 16px;
+  border: 1px solid var(--ex-hairline);
+  border-radius: var(--ex-r-control);
+  background: var(--ex-surface);
+  color: var(--ex-text);
+  font-size: var(--ex-fs-14);
+  font-weight: 550;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background-color var(--ex-fast) var(--ex-ease),
+    border-color var(--ex-fast) var(--ex-ease),
+    color var(--ex-fast) var(--ex-ease);
+}
+.ex-btn:hover:not(:disabled) {
+  background: var(--ex-subtle);
+  border-color: var(--ex-border-strong);
+}
+.ex-btn:active:not(:disabled) {
+  background: var(--ex-hairline);
+}
+.ex-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ex-btn--primary {
+  background: var(--ex-accent);
+  border-color: var(--ex-accent);
+  color: var(--ex-on-accent);
+}
+.ex-btn--primary:hover:not(:disabled) {
+  background: var(--ex-accent-hover);
+  border-color: var(--ex-accent-hover);
+}
+.ex-btn--primary:active:not(:disabled) {
+  background: var(--ex-accent);
+}
+.ex-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ex-text-2);
+}
+.ex-btn--ghost:hover:not(:disabled) {
+  background: var(--ex-subtle);
+  border-color: transparent;
+  color: var(--ex-text);
+}
+.ex-btn--danger {
+  color: var(--ex-danger);
+  border-color: color-mix(in srgb, var(--ex-danger) 40%, var(--ex-hairline));
+}
+.ex-btn--danger:hover:not(:disabled) {
+  background: var(--ex-danger-tint);
+  border-color: var(--ex-danger);
+}
+.ex-btn--block {
+  width: 100%;
+}
+.ex-btn--icon {
+  width: var(--ex-control);
+  padding: 0;
+}
+/* Text link: still a 44px target. */
+.ex-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--ex-control);
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--ex-accent);
+  font-size: var(--ex-fs-14);
+  font-weight: 550;
+  border-radius: 6px;
+}
+.ex-link:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ex-link:disabled {
+  color: var(--ex-text-2);
+  cursor: not-allowed;
+}
+
+/* ── Form controls ───────────────────────────────────────────────────────── */
+.ex-input,
+.ex-select,
+.ex-textarea {
+  width: 100%;
+  min-height: var(--ex-control);
+  padding: 0 12px;
+  border: 1px solid var(--ex-hairline);
+  border-radius: var(--ex-r-control);
+  background: var(--ex-surface);
+  color: var(--ex-text);
+  font-size: var(--ex-fs-14);
+  transition: border-color var(--ex-fast) var(--ex-ease);
+}
+.ex-input:hover,
+.ex-select:hover,
+.ex-textarea:hover {
+  border-color: var(--ex-border-strong);
+}
+.ex-textarea {
+  padding: 12px;
+  line-height: 1.6;
+  resize: vertical;
+}
+.ex-select {
+  appearance: none;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%235b6270' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+.ex-select:disabled,
+.ex-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.ex-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--ex-fs-14);
+  font-weight: 550;
+}
+.ex-field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+/* Native checkbox and radio, restyled (they stay real inputs for a11y). */
+.ex-check,
+.ex-radio {
+  appearance: none;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  border: 1.5px solid var(--ex-border-strong);
+  background: var(--ex-surface);
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+  transition:
+    background-color var(--ex-fast) var(--ex-ease),
+    border-color var(--ex-fast) var(--ex-ease);
+}
+.ex-check {
+  border-radius: 5px;
+}
+.ex-radio {
+  border-radius: 50%;
+}
+.ex-check:checked {
+  background: var(--ex-accent)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.5 8.5 3 3 6-7'/%3E%3C/svg%3E")
+    center / 14px no-repeat;
+  border-color: var(--ex-accent);
+}
+.ex-radio:checked {
+  border-color: var(--ex-accent);
+  border-width: 6px;
+}
+.ex-check:disabled,
+.ex-radio:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ── Chip ────────────────────────────────────────────────────────────────── */
+.ex-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--ex-subtle);
+  color: var(--ex-text-2);
+  font-size: var(--ex-fs-12);
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ex-chip--lg {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.ex-chip--accent {
+  background: var(--ex-accent-tint);
+  color: var(--ex-accent);
+}
+.dark .ex-chip--accent {
+  color: var(--ex-text);
+}
+.ex-chip--success {
+  background: var(--ex-success-tint);
+  color: var(--ex-success);
+}
+.ex-chip--warning {
+  background: var(--ex-warning-tint);
+  color: var(--ex-warning);
+}
+.ex-chip--danger {
+  background: var(--ex-danger-tint);
+  color: var(--ex-danger);
+}
+/* Filter chips: 36px visible, 44px hit area. */
+.ex-filter {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--ex-hairline);
+  border-radius: 999px;
+  background: var(--ex-surface);
+  color: var(--ex-text-2);
+  font-size: var(--ex-fs-14);
+  font-weight: 550;
+  transition:
+    background-color var(--ex-fast) var(--ex-ease),
+    color var(--ex-fast) var(--ex-ease);
+}
+.ex-filter::after {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+}
+.ex-filter:hover {
+  color: var(--ex-text);
+  border-color: var(--ex-border-strong);
+}
+.ex-filter[aria-pressed="true"] {
+  background: var(--ex-text);
+  border-color: var(--ex-text);
+  color: var(--ex-surface);
+}
+
+/* ── Surface, section, stat ──────────────────────────────────────────────── */
+.ex-surface {
+  background: var(--ex-surface);
+  border: 1px solid var(--ex-hairline);
+  border-radius: var(--ex-r-surface);
+  padding: 24px;
+  min-width: 0;
+}
+.ex-surface--flush {
+  padding: 0;
+  overflow: hidden;
+}
+.ex-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.ex-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ex-section-head > span {
+  font-size: var(--ex-fs-14);
+  color: var(--ex-text-2);
+}
+.ex-hairline-list > * + * {
+  border-top: 1px solid var(--ex-hairline);
+}
+.ex-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  background: var(--ex-surface);
+  border: 1px solid var(--ex-hairline);
+  border-radius: var(--ex-r-surface);
+}
+.ex-stat {
+  padding: 16px 20px;
+  min-width: 0;
+}
+.ex-stat + .ex-stat {
+  border-left: 1px solid var(--ex-hairline);
+}
+.ex-stat dt {
+  font-size: 13px;
+  color: var(--ex-text-2);
+}
+.ex-stat dd {
+  margin: 4px 0 0;
+  font-size: var(--ex-fs-20);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.ex-stat dd small {
+  margin-left: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ex-text-2);
+}
+.ex-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 0;
+  font-size: var(--ex-fs-14);
+  color: var(--ex-text-2);
+}
+.ex-meta > * + *::before {
+  content: "·";
+  margin: 0 8px;
+  color: var(--ex-border-strong);
+}
+
+/* ── Progress ────────────────────────────────────────────────────────────── */
+.ex-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ex-subtle);
+  overflow: hidden;
+}
+.ex-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ex-accent);
+  transition: width 240ms var(--ex-ease);
+}
+.ex-ring {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--ex-fs-14);
+  color: var(--ex-text-2);
+  white-space: nowrap;
+}
+.ex-ring svg {
+  flex: none;
+  transform: rotate(-90deg);
+}
+.ex-ring .track {
+  stroke: var(--ex-hairline);
+}
+.ex-ring .value {
+  stroke: var(--ex-accent);
+  transition: stroke-dashoffset 240ms var(--ex-ease);
+}
+.ex-ring strong {
+  color: var(--ex-text);
+  font-weight: 600;
+}
+
+/* ── Tabs and segmented control ──────────────────────────────────────────── */
+.ex-tabs {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid var(--ex-hairline);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ex-tab {
+  position: relative;
+  flex: none;
+  min-height: var(--ex-control);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ex-text-2);
+  font-size: var(--ex-fs-14);
+  font-weight: 550;
+}
+.ex-tab:hover {
+  color: var(--ex-text);
+}
+.ex-tab[aria-selected="true"],
+.ex-tab[aria-current="page"] {
+  color: var(--ex-text);
+}
+.ex-tab[aria-selected="true"]::after,
+.ex-tab[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ex-accent);
+}
+.ex-tab:focus-visible {
+  outline-offset: -2px;
+}
+.ex-seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--ex-hairline);
+  border-radius: var(--ex-r-control);
+  background: var(--ex-surface);
+}
+.ex-seg button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ex-text-2);
+  font-size: var(--ex-fs-14);
+  font-weight: 550;
+  white-space: nowrap;
+}
+.ex-seg button:hover {
+  color: var(--ex-text);
+}
+.ex-seg button[aria-checked="true"],
+.ex-seg button[aria-pressed="true"] {
+  background: var(--ex-accent-tint);
+  color: var(--ex-accent);
+}
+.dark .ex-seg button[aria-checked="true"],
+.dark .ex-seg button[aria-pressed="true"] {
+  color: var(--ex-text);
+}
+
+/* ── Table ───────────────────────────────────────────────────────────────── */
+.ex-table-wrap {
+  overflow-x: auto;
+}
+.ex-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ex-fs-14);
+}
+.ex-table th {
+  padding: 10px 16px;
+  text-align: left;
+  font-size: var(--ex-fs-12);
+  font-weight: 600;
+  color: var(--ex-text-2);
+  border-bottom: 1px solid var(--ex-hairline);
+  white-space: nowrap;
+}
+.ex-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ex-hairline);
+  vertical-align: middle;
+}
+.ex-table tbody th {
+  font-size: var(--ex-fs-14);
+  font-weight: 550;
+  color: var(--ex-text);
+  white-space: normal;
+}
+.ex-dialog .ex-table th,
+.ex-dialog .ex-table td {
+  padding: 10px 8px;
+}
+.ex-dialog .ex-table thead th {
+  white-space: normal;
+  vertical-align: bottom;
+}
+.ex-dialog .ex-table :is(th, td):first-child {
+  padding-left: 0;
+}
+.ex-dialog .ex-table :is(th, td):last-child {
+  padding-right: 0;
+}
+.ex-table tr:last-child :is(td, th) {
+  border-bottom: 0;
+}
+.ex-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ex-table tbody tr[data-href] {
+  cursor: pointer;
+  transition: background-color var(--ex-fast) var(--ex-ease);
+}
+.ex-table tbody tr[data-href]:hover {
+  background: var(--ex-subtle);
+}
+
+/* ── Empty, skeleton ─────────────────────────────────────────────────────── */
+.ex-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 24px;
+  text-align: center;
+  background: var(--ex-surface);
+  border: 1px solid var(--ex-hairline);
+  border-radius: var(--ex-r-surface);
+}
+.ex-empty--quiet {
+  padding: 32px 16px;
+}
+.ex-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 8px;
+  border-radius: 50%;
+  background: var(--ex-subtle);
+  color: var(--ex-text-2);
+}
+.ex-empty h2,
+.ex-empty h3 {
+  font-size: var(--ex-fs-16);
+}
+.ex-empty p {
+  max-width: 440px;
+  font-size: var(--ex-fs-14);
+  color: var(--ex-text-2);
+}
+.ex-empty .ex-row {
+  justify-content: center;
+  margin-top: 12px;
+}
+.ex-skel {
+  border-radius: var(--ex-r-control);
+  background: linear-gradient(
+    90deg,
+    var(--ex-subtle) 0%,
+    var(--ex-hairline) 50%,
+    var(--ex-subtle) 100%
+  );
+  background-size: 200% 100%;
+  animation: ex-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes ex-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* ── Dialog, sheet, menu ─────────────────────────────────────────────────── */
+.ex-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 200);
+  background: var(--ex-scrim);
+  animation: ex-fade var(--ex-fast) var(--ex-ease);
+}
+.ex-dialog {
+  position: fixed;
+  z-index: var(--z-modal, 200);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: 24px;
+  border-radius: var(--ex-r-surface);
+  background: var(--ex-surface);
+  color: var(--ex-text);
+  box-shadow: var(--ex-shadow-pop);
+  font-family: var(--font-ui);
+  animation: ex-pop 160ms var(--ex-ease);
+}
+.ex-dialog--wide {
+  width: min(760px, calc(100vw - 32px));
+}
+.ex-dialog:focus {
+  outline: none;
+}
+.ex-dialog-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.ex-dialog-desc {
+  margin: 8px 0 0;
+  font-size: var(--ex-fs-14);
+  color: var(--ex-text-2);
+}
+.ex-dialog-body {
+  margin-top: 20px;
+}
+.ex-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 24px;
+}
+.ex-sheet {
+  position: fixed;
+  z-index: var(--z-modal, 200);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 85dvh;
+  overflow-y: auto;
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
+  border-radius: var(--ex-r-surface) var(--ex-r-surface) 0 0;
+  background: var(--ex-surface);
+  color: var(--ex-text);
+  box-shadow: var(--ex-shadow-pop);
+  font-family: var(--font-ui);
+  animation: ex-rise 180ms var(--ex-ease);
+}
+.ex-sheet-grip {
+  width: 36px;
+  height: 4px;
+  margin: 4px auto 12px;
+  border-radius: 2px;
+  background: var(--ex-hairline);
+}
+.ex-menu {
+  z-index: var(--z-menu, 300);
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--ex-hairline);
+  border-radius: var(--ex-r-control);
+  background: var(--ex-surface);
+  color: var(--ex-text);
+  box-shadow: var(--ex-shadow-pop);
+  font-family: var(--font-ui);
+  font-size: var(--ex-fs-14);
+}
+.ex-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+}
+.ex-menu-item[data-highlighted] {
+  background: var(--ex-subtle);
+}
+@keyframes ex-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes ex-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%);
+  }
+}
+@keyframes ex-rise {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+}
+
+/* ── Toasts: a fixed slot; pages reserve bottom space so it never hides content. */
+.ex-toasts {
+  position: fixed;
+  z-index: var(--z-overlay, 100);
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.ex-toasts--raised {
+  bottom: 88px;
+}
+.ex-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 12px 12px 16px;
+  border: 1px solid var(--ex-hairline);
+  border-left: 3px solid var(--ex-danger);
+  border-radius: var(--ex-r-control);
+  background: var(--ex-surface);
+  box-shadow: var(--ex-shadow-pop);
+  font-size: var(--ex-fs-14);
+  pointer-events: auto;
+  animation: ex-rise 180ms var(--ex-ease);
+}
+.ex-toast pre {
+  flex: 1;
+  min-width: 0;
+  max-height: 160px;
+  overflow: auto;
+  margin: 10px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+.ex-toast .ex-row {
+  flex-wrap: nowrap;
+}
+
+/* ── App shell ───────────────────────────────────────────────────────────── */
+.ex-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky, 40);
+  height: var(--ex-header);
+  background: color-mix(in srgb, var(--ex-page) 92%, transparent);
+  backdrop-filter: saturate(1.4) blur(8px);
+  border-bottom: 1px solid var(--ex-hairline);
+}
+.ex-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  height: 100%;
+  max-width: calc(var(--ex-content) + 64px);
+  margin: 0 auto;
+  padding: 0 32px;
+}
+.ex-wordmark {
+  flex: none;
+  font-size: var(--ex-fs-16);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--ex-text);
+  text-decoration: none;
+}
+.ex-nav {
+  display: flex;
+  align-self: stretch;
+  gap: 24px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ex-nav .ex-tab {
+  min-height: 100%;
+}
+.ex-page {
+  max-width: calc(var(--ex-content) + 64px);
+  margin: 0 auto;
+  padding: 32px 32px 112px;
+}
+.ex-page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.ex-page-header > div:first-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ex-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Exam runner ─────────────────────────────────────────────────────────── */
+.xr {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--ex-page);
+}
+.xr-top {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: var(--ex-header);
+  padding: 0 0 0 24px;
+  background: var(--ex-surface);
+  border-bottom: 1px solid var(--ex-hairline);
+}
+.xr-name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ex-fs-14);
+  font-weight: 600;
+}
+.xr-sections {
+  display: flex;
+  align-self: stretch;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.xr-section {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 0 12px;
+  border: 0;
+  background: none;
+  color: var(--ex-text-2);
+  font-size: var(--ex-fs-14);
+  font-weight: 550;
+}
+.xr-section:hover:not(:disabled) {
+  color: var(--ex-text);
+}
+.xr-section[aria-current="page"] {
+  color: var(--ex-text);
+}
+.xr-section[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ex-accent);
+}
+.xr-section:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.xr-section:focus-visible {
+  outline-offset: -4px;
+}
+.xr-top-right {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  /* Lines up with the 320px panel below. */
+  min-width: 0;
+  padding-right: 24px;
+}
+.xr-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 64px;
+  justify-content: flex-end;
+  font-size: var(--ex-fs-12);
+  color: var(--ex-text-2);
+}
+.xr-timer {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--ex-r-control);
+  background: var(--ex-subtle);
+  line-height: 36px;
+  white-space: nowrap;
+  transition:
+    background-color 300ms var(--ex-ease),
+    color 300ms var(--ex-ease);
+}
+.xr-timer-label {
+  font-size: var(--ex-fs-12);
+  color: inherit;
+  opacity: 0.8;
+}
+.xr-timer-value {
+  font-size: var(--ex-fs-20);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+.xr-timer[data-tone="warning"] {
+  background: var(--ex-warning-tint);
+  color: var(--ex-warning);
+}
+.xr-timer[data-tone="danger"] {
+  background: var(--ex-danger-tint);
+  color: var(--ex-danger);
+}
+.xr-palette-toggle {
+  display: none;
+}
+.xr-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+.xr-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: calc(100dvh - var(--ex-header));
+}
+.xr-question {
+  flex: 1;
+  width: 100%;
+  max-width: 808px;
+  margin: 0 auto;
+  padding: 16px 24px 40px;
+  border: 0;
+  min-width: 0;
+}
+.xr-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.xr-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--ex-hairline);
+}
+.xr-meta-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.xr-meta-left h2 {
+  font-size: var(--ex-fs-16);
+  margin-right: 4px;
+}
+/* The notice slot: always present, fixed height, never pushes the question. */
+.xr-notice-slot {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.xr-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  height: 36px;
+  padding: 0 4px 0 12px;
+  border-radius: var(--ex-r-control);
+  background: var(--ex-warning-tint);
+  color: var(--ex-warning);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: ex-fade 180ms var(--ex-ease);
+}
+.xr-notice > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 8px;
+}
+.xr-notice[data-tone="danger"] {
+  background: var(--ex-danger-tint);
+  color: var(--ex-danger);
+}
+.xr-notice[data-tone="info"] {
+  background: var(--ex-accent-tint);
+  color: var(--ex-accent);
+}
+.xr-notice .ex-btn {
+  min-height: 28px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: inherit;
+  background: var(--ex-surface);
+  border-color: transparent;
+}
+.xr-body-md {
+  font-size: var(--ex-fs-16);
+  line-height: 1.6;
+}
+.xr-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 24px;
+}
+.xr-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 16px;
+  border: 1px solid var(--ex-hairline);
+  border-radius: var(--ex-r-control);
+  background: var(--ex-surface);
+  cursor: pointer;
+  transition:
+    border-color var(--ex-fast) var(--ex-ease),
+    background-color var(--ex-fast) var(--ex-ease);
+}
+.xr-option:hover {
+  border-color: var(--ex-border-strong);
+}
+.xr-option.is-selected {
+  border-color: var(--ex-accent);
+  background: var(--ex-accent-tint);
+}
+.xr-option:has(input:focus-visible) {
+  outline: 2px solid var(--ex-accent);
+  outline-offset: 2px;
+}
+.xr-option input:focus-visible {
+  outline: none;
+}
+.xr-letter {
+  flex: none;
+  width: 20px;
+  font-weight: 600;
+  color: var(--ex-text-2);
+  font-variant-numeric: tabular-nums;
+}
+.xr-option .exam-markdown p {
+  margin: 0;
+}
+.xr-option .exam-markdown {
+  font-size: var(--ex-fs-16);
+}
+fieldset:disabled .xr-option {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.xr-hint {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--ex-text-2);
+}
+.xr-nat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(100%, 320px);
+  margin-top: 24px;
+}
+.xr-nat .ex-input {
+  height: 52px;
+  font-size: var(--ex-fs-20);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.xr-nat-error {
+  margin: -6px 0 -4px;
+  min-height: 18px;
+  font-size: 13px;
+  color: var(--ex-warning);
+}
+.xr-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.xr-keypad .ex-btn {
+  min-height: 48px;
+  font-size: var(--ex-fs-16);
+  font-variant-numeric: tabular-nums;
+}
+.xr-keypad .wide {
+  grid-column: span 3;
+}
+.xr-keypad .half {
+  grid-column: span 1;
+}
+.xr-confidence {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: var(--ex-fs-14);
+  color: var(--ex-text-2);
+}
+.xr-paused {
+  margin-top: 48px;
+}
+.xr-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Edges line up with the 760px question column, however wide the screen. */
+  padding: 12px max(24px, calc((100% - 760px) / 2)) calc(12px + env(safe-area-inset-bottom));
+  background: var(--ex-surface);
+  border-top: 1px solid var(--ex-hairline);
+}
+.xr-notice-mobile {
+  display: none;
+}
+.xr-actions .ex-btn--primary {
+  min-width: 132px;
+}
+.xr-panel {
+  position: sticky;
+  top: var(--ex-header);
+  height: calc(100dvh - var(--ex-header));
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px 24px;
+  overflow-y: auto;
+  background: var(--ex-surface);
+  border-left: 1px solid var(--ex-hairline);
+}
+.xr-panel-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--ex-hairline);
+}
+.xr-panel-foot .ex-btn--ghost {
+  justify-content: flex-start;
+  padding: 0 12px;
+}
+.xr-panel-foot .ex-btn--ghost[aria-pressed="true"] {
+  background: var(--ex-subtle);
+  color: var(--ex-text);
+}
+.xr-panel h2 {
+  font-size: var(--ex-fs-14);
+  color: var(--ex-text-2);
+}
+.xr-palette {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 56px));
+  justify-content: space-between;
+  gap: 8px;
+}
+.xr-cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ex-r-control);
+  background: none;
+  font-size: var(--ex-fs-14);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.xr-cell svg {
+  position: absolute;
+  inset: 3px;
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
+}
+.xr-cell span {
+  position: relative;
+}
+.xr-cell[aria-current="true"] {
+  box-shadow: 0 0 0 2px var(--ex-text);
+}
+.xr-cell:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.xr-cell:hover:not(:disabled) svg {
+  filter: brightness(0.94);
+}
+/* Glyph colours by state: shape + colour + glyph, never colour alone. */
+.g-not_visited {
+  color: var(--ex-text);
+}
+.g-not_visited .shape {
+  fill: var(--ex-subtle);
+  stroke: var(--ex-border-strong);
+}
+.g-not_answered,
+.g-answered,
+.g-marked,
+.g-answered_marked {
+  color: #fff;
+}
+.g-not_answered .shape {
+  fill: var(--ex-danger);
+}
+.g-answered .shape {
+  fill: var(--ex-success);
+}
+.g-marked .shape,
+.g-answered_marked .shape {
+  fill: var(--ex-marked);
+}
+.g-answered_marked .tick-bg {
+  fill: var(--ex-success);
+  stroke: var(--ex-surface);
+}
+.xr-legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--ex-text-2);
+}
+.xr-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.xr-legend li.wide {
+  grid-column: span 2;
+}
+.xr-legend strong {
+  color: var(--ex-text);
+  font-variant-numeric: tabular-nums;
+}
+.xr-legend .xr-glyph {
+  position: relative;
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+.xr-legend .xr-glyph svg {
+  width: 100%;
+  height: 100%;
+}
+.xr-calc {
+  position: fixed;
+  z-index: 60;
+  width: 300px;
+  border: 1px solid var(--ex-hairline);
+  border-radius: var(--ex-r-surface);
+  background: var(--ex-surface);
+  box-shadow: var(--ex-shadow-pop);
+  touch-action: none;
+}
+.xr-calc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  padding: 0 4px 0 16px;
+  border-bottom: 1px solid var(--ex-hairline);
+  cursor: grab;
+  user-select: none;
+  font-size: var(--ex-fs-14);
+  font-weight: 600;
+}
+.xr-calc-head:active {
+  cursor: grabbing;
+}
+.xr-calc form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+.xr-calc output {
+  min-height: 24px;
+  text-align: right;
+  font-size: var(--ex-fs-20);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.xr-calc .xr-keypad {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.xr-calc .xr-keypad .ex-btn {
+  min-height: 40px;
+  padding: 0;
+  font-size: var(--ex-fs-14);
+}
+
+/* ── Instructions ────────────────────────────────────────────────────────── */
+.xi {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+.xi-top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  height: var(--ex-header);
+  padding: 0 16px;
+  background: var(--ex-surface);
+  border-bottom: 1px solid var(--ex-hairline);
+}
+.xi-content {
+  flex: 1;
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 32px 32px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+.xi-marking {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.xi-marking .ex-surface {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.xi-marking h3 {
+  font-size: var(--ex-fs-14);
+}
+.xi-marking p {
+  font-size: var(--ex-fs-14);
+  color: var(--ex-text-2);
+}
+.xi-example {
+  margin-top: 4px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ex-text);
+}
+.xi-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--ex-fs-14);
+}
+.xi-list li::marker {
+  color: var(--ex-text-2);
+}
+.xi-rules p + p {
+  margin-top: 6px;
+}
+.xi-author summary {
+  min-height: var(--ex-control);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: var(--ex-fs-14);
+  font-weight: 550;
+  color: var(--ex-text-2);
+}
+.xi-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  background: var(--ex-surface);
+  border-top: 1px solid var(--ex-hairline);
+}
+.xi-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 12px 32px calc(12px + env(safe-area-inset-bottom));
+}
+.xi-ack {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--ex-control);
+  flex: 1;
+  font-size: var(--ex-fs-14);
+  cursor: pointer;
+}
+.xi-bar-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.xi-reason {
+  font-size: var(--ex-fs-12);
+  color: var(--ex-text-2);
+  min-height: 18px;
+}
+.xi-md .exam-markdown {
+  font-size: var(--ex-fs-14);
+  color: var(--ex-text-2);
+}
+.xi-md .exam-markdown :is(h1, h2, h3) {
+  font-size: var(--ex-fs-14);
+  margin: 12px 0 4px;
+  color: var(--ex-text);
+}
+.xi-md .exam-markdown :is(p, ul) {
+  margin: 4px 0;
+}
+
+/* ── Result and review ───────────────────────────────────────────────────── */
+.xs-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 8px;
+}
+.xs-verdict {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.xs-score {
+  font-size: var(--ex-fs-36);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.xs-verdict-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.xs-pass {
+  color: var(--ex-success);
+}
+.xs-fail {
+  color: var(--ex-warning);
+}
+.xs-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.xs-bar-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  font-size: var(--ex-fs-14);
+}
+.xs-bar-row .ex-bar {
+  height: 8px;
+}
+.xs-bar-row > span:last-child {
+  font-variant-numeric: tabular-nums;
+  color: var(--ex-text-2);
+  text-align: right;
+  min-width: 112px;
+}
+.xs-bar-row strong {
+  color: var(--ex-text);
+  font-weight: 600;
+}
+.xs-review-q {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.xs-review-opt {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid var(--ex-hairline);
+  border-radius: var(--ex-r-control);
+}
+.xs-review-opt.is-correct {
+  border-color: var(--ex-success);
+  background: var(--ex-success-tint);
+}
+.xs-review-opt.is-wrong {
+  border-color: var(--ex-danger);
+  background: var(--ex-danger-tint);
+}
+.xs-review-opt .exam-markdown p {
+  margin: 0;
+}
+.xs-review-opt .ex-chip {
+  margin-left: auto;
+}
+.xs-answer-line {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  font-size: var(--ex-fs-14);
+  color: var(--ex-text-2);
+}
+.xs-answer-line strong {
+  color: var(--ex-text);
+}
+.xs-solution {
+  padding-top: 16px;
+  border-top: 1px solid var(--ex-hairline);
+}
+.xs-note {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--ex-r-control);
+  background: var(--ex-warning-tint);
+  color: var(--ex-text);
+  font-size: var(--ex-fs-14);
+}
+.xs-chart {
+  width: 100%;
+  min-width: 0;
+}
+
+/* ── Library ─────────────────────────────────────────────────────────────── */
+.xl-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.xl-search {
+  position: relative;
+  flex: 1 1 260px;
+  max-width: 360px;
+}
+.xl-search svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ex-text-2);
+  pointer-events: none;
+}
+.xl-search .ex-input {
+  padding-left: 36px;
+}
+.xl-continue {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 32px;
+  border-color: color-mix(in srgb, var(--ex-accent) 35%, var(--ex-hairline));
+}
+.xl-continue > div {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.xl-continue small {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ex-accent);
+}
+.xl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin-bottom: 48px;
+}
+.xl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+}
+.xl-card h2 {
+  font-size: 17px;
+  line-height: 1.35;
+}
+.xl-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 12px;
+}
+.xl-card .ex-select {
+  min-height: 36px;
+  font-size: 13px;
+}
+.xl-score {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.xl-score strong {
+  font-size: var(--ex-fs-16);
+  font-weight: 600;
+}
+.xl-score small {
+  font-size: var(--ex-fs-12);
+  color: var(--ex-text-2);
+}
+.xl-show-sm {
+  display: none;
+}
+.xl-row-title {
+  border: 0;
+  padding: 0;
+  background: none;
+  font-weight: 500;
+  text-align: left;
+  color: var(--ex-text);
+}
+.xp-dot {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--ex-hairline);
+  background: var(--ex-page);
+  color: var(--ex-text-2);
+  font-size: var(--ex-fs-12);
+  font-weight: 650;
+}
+.is-done .xp-dot {
+  border-color: var(--ex-success);
+  background: var(--ex-success);
+  color: #fff;
+}
+.is-current .xp-dot {
+  border-color: var(--ex-accent);
+  color: var(--ex-accent);
+  background: var(--ex-surface);
+}
+.is-attention .xp-dot {
+  border-color: var(--ex-warning);
+  color: var(--ex-warning);
+  background: var(--ex-surface);
+}
+.xp-cta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.xp-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.xp-panel.is-warning {
+  border-color: color-mix(in srgb, var(--ex-warning) 45%, var(--ex-hairline));
+}
+.xp-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.xp-steps > li {
+  display: flex;
+  gap: 12px;
+}
+.xp-steps > li > div {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.xp-steps .xp-dot {
+  width: 24px;
+  height: 24px;
+}
+.xp-tasks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.xp-task {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: var(--ex-fs-14);
+}
+.xp-task:hover {
+  background: var(--ex-subtle);
+}
+.xp-task.is-done span {
+  color: var(--ex-text-2);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--ex-text-2) 50%, transparent);
+}
+.xp-notes {
+  min-height: 112px;
+}
+.xp-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--ex-fs-12);
+  color: var(--ex-text-2);
+}
+
+/* ── Day steps (study plan) ──────────────────────────────────────────────── */
+.xp-plan-select {
+  min-height: 44px;
+  padding-left: 0;
+  border: 0;
+  background-color: transparent;
+  font-size: 24px;
+  font-weight: 600;
+}
+.xp-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: var(--ex-r-control);
+  font-size: var(--ex-fs-14);
+  font-weight: 600;
+}
+.xp-verdict.is-correct {
+  background: var(--ex-success-tint);
+  color: var(--ex-success);
+}
+.xp-verdict.is-wrong,
+.xp-verdict.is-unanswered {
+  background: var(--ex-danger-tint);
+  color: var(--ex-danger);
+}
+.xp-verdict.is-partial {
+  background: var(--ex-warning-tint);
+  color: var(--ex-warning);
+}
+
+/* ── Topic: horizontal steps ──────────────────────────────────────────────── */
+.xp-hsteps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+.xp-hstep {
+  position: relative;
+  min-width: 0;
+}
+/* The connector runs from this step's dot to the next one. */
+.xp-hstep:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 27px;
+  left: 52px;
+  right: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ex-hairline);
+}
+.xp-hstep.is-done:not(:last-child)::after {
+  background: var(--ex-success);
+}
+.xp-hstep button {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 12px 8px 12px 12px;
+  border: 0;
+  border-radius: var(--ex-r-control);
+  background: none;
+  text-align: left;
+  transition: background-color var(--ex-fast) var(--ex-ease);
+}
+.xp-hstep button:hover:not(:disabled) {
+  background: var(--ex-subtle);
+}
+.xp-hstep button:disabled {
+  cursor: default;
+}
+/* The step on screen is underlined, like a tab, so connectors stay visible. */
+.xp-hstep button[aria-current="step"] {
+  box-shadow: inset 0 -2px 0 var(--ex-accent);
+  border-radius: var(--ex-r-control) var(--ex-r-control) 0 0;
+}
+.xp-hstep .xp-dot {
+  width: 32px;
+  height: 32px;
+}
+.xp-hstep.is-done .xp-dot {
+  border-color: var(--ex-success);
+  background: var(--ex-success);
+  color: #fff;
+}
+.xp-hstep.is-current .xp-dot {
+  border-color: var(--ex-accent);
+  background: var(--ex-surface);
+  color: var(--ex-accent);
+}
+.xp-hstep-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.xp-hstep-copy strong {
+  font-size: var(--ex-fs-16);
+  font-weight: 600;
+}
+.xp-hstep-copy > span {
+  font-size: 13px;
+  color: var(--ex-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.xp-hstep.is-locked .xp-hstep-copy strong {
+  color: var(--ex-text-2);
+}
+.xp-step-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.xp-step-panel .exam-markdown {
+  font-size: var(--ex-fs-16);
+}
+.xp-step-panel .exam-markdown :is(p, ul, ol) {
+  margin: 0 0 8px;
+}
+.xp-complete {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--ex-hairline);
+  color: var(--ex-success);
+  font-weight: 600;
+}
+.xp-complete .ex-btn {
+  margin-left: auto;
+}
+.xp-topic-picker .xp-plan-select {
+  width: auto;
+  max-width: min(100%, 720px);
+  padding-right: 32px;
+  background-position: right 4px center;
+}
+
+/* ── Markdown inside exams (kept from the reader) ────────────────────────── */
+.exam-app .exam-markdown {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  margin-inline: 0;
+  font-family: var(--font-ui);
+  overflow-wrap: anywhere;
+}
+.exam-markdown .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 8px 0;
+}
+.exam-markdown svg {
+  max-width: 100%;
+  height: auto;
+}
+.exam-code {
+  white-space: pre-wrap;
+  overflow: auto;
+}
+.exam-chart {
+  min-width: 0;
+  width: 100%;
+  margin: 16px 0;
+}
+.exam-chart figcaption {
+  margin-bottom: 8px;
+  font-size: var(--ex-fs-14);
+  font-weight: 600;
+  color: var(--ex-text);
+}
+.exam-markdown pre.exam-code {
+  padding: 12px 16px;
+  border-radius: var(--ex-r-control);
+  background: var(--ex-subtle);
+  font-size: 13px;
+}
+/* Diagrams and images: full column width, never overflow, click to enlarge. */
+.ex-zoom {
+  display: block;
+  width: 100%;
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--ex-hairline);
+  border-radius: var(--ex-r-control);
+  background: var(--ex-surface);
+  cursor: zoom-in;
+  text-align: center;
+}
+.ex-zoom:hover {
+  border-color: var(--ex-border-strong);
+}
+.ex-zoom img {
+  display: inline-block;
+  max-width: 100%;
+  max-height: 420px;
+  height: auto;
+}
+label .ex-zoom,
+.xr-option .ex-zoom,
+.xs-review-opt .ex-zoom {
+  margin: 4px 0;
+  padding: 4px;
+}
+.ex-diagram {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+/* Mermaid sets width:100% plus its natural max-width, so small diagrams keep
+   their size and large ones shrink to the column. */
+.ex-diagram svg {
+  height: auto;
+  max-height: 420px;
+}
+.ex-diagram.is-loading {
+  min-height: 160px;
+  margin: 16px 0;
+  border-radius: var(--ex-r-control);
+  background: var(--ex-subtle);
+}
+.ex-media-missing {
+  display: block;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--ex-border-strong);
+  border-radius: var(--ex-r-control);
+  font-size: var(--ex-fs-14);
+  color: var(--ex-text-2);
+}
+.ex-lightbox {
+  position: fixed;
+  z-index: var(--z-modal, 200);
+  inset: 24px;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--ex-r-surface);
+  background: var(--ex-surface);
+  box-shadow: var(--ex-shadow-pop);
+  animation: ex-fade var(--ex-fast) var(--ex-ease);
+}
+.ex-lightbox-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 4px 16px;
+  border-bottom: 1px solid var(--ex-hairline);
+}
+.ex-lightbox-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+/* Zoomed: fill the stage (vectors stay sharp), keeping the aspect ratio. */
+.ex-lightbox-stage img {
+  width: min(100%, 1100px);
+  max-height: calc(100dvh - 140px);
+  object-fit: contain;
+}
+.ex-lightbox-stage .ex-diagram,
+.ex-lightbox-stage .ex-diagram svg {
+  width: min(100%, 1100px) !important;
+  max-width: none !important;
+  max-height: calc(100dvh - 140px);
+}
+.exam-error {
+  color: var(--ex-danger, var(--destructive));
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .xr-body {
+    grid-template-columns: minmax(0, 1fr) 280px;
+  }
+}
+@media (max-width: 900px) {
+  .xr-top {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 0 0 0 16px;
+  }
+  .xr-name {
+    height: var(--ex-header);
+    line-height: var(--ex-header);
+  }
+  .xr-top-right {
+    flex: none;
+    padding-right: 12px;
+    gap: 8px;
+  }
+  .xr-sections {
+    order: 3;
+    flex: 1 0 100%;
+    height: 44px;
+    margin-left: -16px;
+    padding: 0 4px;
+    border-top: 1px solid var(--ex-hairline);
+  }
+  .xr-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .xr-panel {
+    display: none;
+  }
+  .xr-palette-toggle {
+    display: inline-flex;
+  }
+  .xr-saved,
+  .xr-timer-label {
+    display: none;
+  }
+  .xr-main {
+    min-height: calc(100dvh - var(--ex-header) - 44px);
+  }
+  .xr-question {
+    padding: 8px 16px 32px;
+  }
+  .xr-actions {
+    padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+  }
+  .xr-calc {
+    left: 8px !important;
+    right: 8px;
+    top: auto !important;
+    bottom: 96px;
+    width: auto;
+  }
+}
+@media (max-width: 640px) {
+  .xp-hstep:not(:last-child)::after {
+    left: 44px;
+  }
+  .xp-hstep button {
+    padding: 10px 4px;
+    align-items: center;
+    text-align: center;
+  }
+  .xp-hstep-copy {
+    align-items: center;
+  }
+  .xp-hstep-copy strong {
+    font-size: 13px;
+  }
+  .xp-hstep-copy > span {
+    display: none;
+  }
+  .xp-hstep:not(:last-child)::after {
+    top: 25px;
+    left: calc(50% + 20px);
+    right: calc(-50% + 20px);
+  }
+  .xp-plan-select {
+    font-size: 20px;
+  }
+  /* A wrapped "·" would start the next line; use spacing instead. */
+  .ex-meta {
+    column-gap: 14px;
+  }
+  .ex-meta > * + *::before {
+    display: none;
+  }
+  :where(.exam-app) :where(h1) {
+    font-size: 24px;
+  }
+  .ex-header-inner {
+    gap: 16px;
+    padding: 0 16px;
+  }
+  .ex-wordmark {
+    display: none;
+  }
+  .ex-nav {
+    gap: 20px;
+  }
+  .ex-page {
+    padding: 24px 16px 112px;
+  }
+  .ex-surface:not(.ex-surface--flush) {
+    padding: 16px;
+  }
+  .ex-stat {
+    padding: 12px 16px;
+  }
+  .ex-stat + .ex-stat {
+    border-left: 0;
+  }
+  .ex-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ex-stats > .ex-stat:nth-child(even) {
+    border-left: 1px solid var(--ex-hairline);
+  }
+  .ex-stats > .ex-stat:nth-child(n + 3) {
+    border-top: 1px solid var(--ex-hairline);
+  }
+  .ex-dialog-footer {
+    flex-direction: column-reverse;
+  }
+  .ex-dialog-footer .ex-btn {
+    width: 100%;
+  }
+  .xr-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .xr-actions .ex-spacer {
+    display: none;
+  }
+  .xr-actions .ex-btn {
+    padding: 0 8px;
+  }
+  .xr-meta-left {
+    flex-wrap: nowrap;
+  }
+  .xr-meta-left h2 {
+    font-size: var(--ex-fs-14);
+    white-space: nowrap;
+  }
+  /* Small screens: the notice joins the sticky action bar. The bar is opaque
+     and in flow, so the notice never covers the question or shifts it. */
+  .xr-notice-slot {
+    display: none;
+  }
+  .xr-notice-mobile {
+    display: flex;
+    grid-column: 1 / -1;
+  }
+  .xr-notice-mobile:empty {
+    display: none;
+  }
+  .xr-notice-mobile .xr-notice {
+    width: 100%;
+    height: auto;
+    min-height: 44px;
+    padding: 6px 6px 6px 14px;
+    white-space: normal;
+  }
+  .xr-notice-mobile .xr-notice > span {
+    flex: 1;
+  }
+  .xi-content {
+    padding: 24px 16px 32px;
+  }
+  .xi-bar-inner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+  }
+  .xi-bar-action {
+    align-items: stretch;
+  }
+  .xi-bar-action .ex-btn {
+    width: 100%;
+  }
+  .xi-reason {
+    text-align: center;
+  }
+  .xs-bar-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .xs-bar-row .ex-bar {
+    grid-column: span 2;
+    order: 3;
+  }
+  .xl-search {
+    max-width: none;
+  }
+  .xl-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .xl-hide-sm {
+    display: none;
+  }
+  .xl-show-sm {
+    display: block;
+    margin-top: 2px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .exam-app *,
+  .exam-app *::before,
+  .exam-app *::after,
+  .ex-dialog,
+  .ex-sheet,
+  .ex-scrim,
+  .ex-toast {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

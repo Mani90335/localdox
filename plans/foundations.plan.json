@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "foundations",
+  "name": "Build your foundations",
+  "description": "Two example topics. Each one: learn, practise, pass the exam, review.",
+  "days": [
+    {
+      "id": "reasoning",
+      "title": "Reasoning & arithmetic",
+      "examId": "section-quiz",
+      "summaryMd": "- Even and odd numbers, divisibility by 2, 3 and 5\n- Fractions as decimals, rounding to two places\n- Reading a simple bar chart",
+      "tasks": [
+        {
+          "id": "read",
+          "label": "Review even numbers and divisibility"
+        },
+        {
+          "id": "practice",
+          "label": "Practise rounding fractions to two decimal places"
+        },
+        {
+          "id": "recall",
+          "label": "Solve three examples without looking at notes"
+        }
+      ],
+      "practice": ["foundations-reasoning"]
+    },
+    {
+      "id": "concepts",
+      "title": "Connect the concepts",
+      "examId": "gate-2027-da",
+      "summaryMd": "- Conditional and joint probability\n- Determinants and eigenvalues of 2×2 matrices\n- Reachability in a directed graph",
+      "tasks": [
+        {
+          "id": "review",
+          "label": "Revisit your mistakes from the first topic"
+        },
+        {
+          "id": "probability",
+          "label": "Review conditional and joint probability"
+        },
+        {
+          "id": "algebra",
+          "label": "Practise determinants and eigenvalues"
+        }
+      ],
+      "practice": ["foundations-concepts"]
+    }
+  ]
+}
