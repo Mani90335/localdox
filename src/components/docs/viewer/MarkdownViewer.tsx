@@ -24,6 +24,7 @@ import { MathProvider } from "@/services/math/MathContext";
 import { DEFAULT_MATH_PREFERENCES } from "@/services/math/types";
 import { slugLabel } from "@/services/math/equation-registry";
 import { useMarkdownPlugins } from "@/lib/markdown/markdown-plugins";
+import { setMarkdownTask } from "@/lib/markdown/markdown-tasks";
 import {
   Copy,
   Link2,
@@ -99,6 +100,7 @@ import { artifactReference, prepareWorkspaceEmbeds } from "@/lib/workspace/works
 import {
   CollapseContext,
   MarkdownRenderContext,
+  TaskContext,
   type CollapseContextValue,
   type MarkdownRenderContextValue,
 } from "./markdown-viewer/contexts";
@@ -416,6 +418,8 @@ function MarkdownViewerImpl({
     // within the page's source, for source addressing.
     const lead = activeChunk.content.length - content.length;
 
+    const lineOffset = activeChunk.content.slice(0, lead).split("\n").length - 1;
+
     // Strip trailing horizontal rules
     while (true) {
       const next = content.replace(/(?:\r?\n|^)\s*(?:[-*_][ \t]*){3,}\s*$/, "");
@@ -423,7 +427,7 @@ function MarkdownViewerImpl({
       content = next;
     }
 
-    return { markdown: prepareWorkspaceEmbeds(content), lead };
+    return { markdown: prepareWorkspaceEmbeds(content), lead, lineOffset };
   }, [activeChunk.content]);
   const renderContent = renderPage.markdown;
 
@@ -442,6 +446,30 @@ function MarkdownViewerImpl({
   const markdownSource = singleMode
     ? fullRender
     : renderContent + (footnoteDefinitions ? "\n\n" + footnoteDefinitions : "");
+
+  // Embeds preserve line breaks. Paging removes only a prefix/suffix, so line
+  // addresses survive embeds, repeated task labels and progressive rendering.
+  const taskLineOffset = useMemo(() => {
+    if (singleMode) return 0;
+    const chunkStart = allChunks
+      .slice(0, Math.max(0, chunkIndex))
+      .reduce((from, chunk) => file.content.indexOf(chunk.content, from) + chunk.content.length, 0);
+    const start = file.content.indexOf(activeChunk.content, chunkStart);
+    return file.content.slice(0, Math.max(0, start)).split("\n").length - 1 + renderPage.lineOffset;
+  }, [singleMode, allChunks, chunkIndex, file.content, activeChunk.content, renderPage.lineOffset]);
+  const toggleTask = useCallback(
+    (line: number, checked: boolean) => {
+      const content = setMarkdownTask(liveContentRef.current, line, checked);
+      if (content === liveContentRef.current) return;
+      liveContentRef.current = content;
+      onContentChange(file.id, content);
+    },
+    [file.id, onContentChange],
+  );
+  const taskContext = useMemo(
+    () => ({ lineOffset: taskLineOffset, toggle: toggleTask }),
+    [taskLineOffset, toggleTask],
+  );
 
   // Where what is rendered sits in the file, so every rendered block carries
   // its file span (lib/markdown/source-address.ts). A page's offset is found
@@ -1756,15 +1784,17 @@ function MarkdownViewerImpl({
                       preferences={mathPreferences}
                       navigateToEquation={navigateToEquation}
                     >
-                      <ProgressiveMarkdown
-                        addressing={addressing}
-                        source={markdownSource}
-                        urlTransform={mediaUrlTransform}
-                        remarkPlugins={remarkPlugins}
-                        rehypePlugins={rehypePlugins}
-                        components={markdownComponents}
-                        onRendered={setRenderedSource}
-                      />
+                      <TaskContext.Provider value={taskContext}>
+                        <ProgressiveMarkdown
+                          addressing={addressing}
+                          source={markdownSource}
+                          urlTransform={mediaUrlTransform}
+                          remarkPlugins={remarkPlugins}
+                          rehypePlugins={rehypePlugins}
+                          components={markdownComponents}
+                          onRendered={setRenderedSource}
+                        />
+                      </TaskContext.Provider>
                     </MathProvider>
                   </CollapseContext.Provider>
                 </MarkdownRenderContext.Provider>

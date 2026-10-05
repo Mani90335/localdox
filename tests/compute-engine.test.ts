@@ -132,9 +132,9 @@ test("invalid syntax and unsupported operations are labelled, not computed", () 
     assert.equal(result.kind, "unsupported", input);
     assert.match(result.message, label, input);
   };
-  unsupported("\\int_0^1 x\\,dx", /Integrals/);
+  unsupported("\\int_0^1 \\ln(x)\\,dx", /calculus/);
   unsupported("\\sum_{n=1}^{10} n", /Sums/);
-  unsupported("\\frac{d}{dx} x^2", /Derivatives/);
+  unsupported("\\frac{d}{dx} \\ln(x)", /calculus/);
   unsupported("5 \\mod 3", /Remainders/);
 });
 

@@ -77,16 +77,10 @@ compute-input.ts             mode/keypad preferences, text → math (asMath)
 - **Enter carries the field's value.** MathLive reports `input` a moment
   after a keystroke, so a fast Enter used to run on the previous value. Enter
   hands the field's current LaTeX straight to the job (`onRun(latest)`).
-- **`:=` writes `\coloneqq`.** MathLive's shortcut wrote `\coloneq`, which the
-  advanced engine reads as an assignment it rejects. The keypad's Define key
-  writes `\coloneqq` too.
-- **What the field writes, the engine reads.** A math field writes every `[`
-  as `\left[` and every `(` after `d/dx` as `\left(`. Two parser readings
-  broke on that and are fixed in `preprocessLatex` (math-compute-advanced.md):
-  `E\left[X\right]` was read as E alone (then a bridge crash), and
-  `d/dx\left(x^2\right)+4` as d/dx of the whole sum (2x). Routing also sends
-  `E\left[` and `P\left(` to the advanced engine. The keypad's E[□] key
-  relies on both.
+- **Writing and computing have different limits.** The keyboard retains its
+  full notation for documents. Compute handles basic calculus in the existing
+  JavaScript worker; advanced forms receive a clear unsupported message.
+  There is no routing to a Python engine or download prompt.
 
 ## Cost
 
@@ -100,8 +94,6 @@ next switch to Math (`loadMathlive` forgets a failed load).
 
 Per device, in `localStorage`: `localdox:compute-input` (`math` | `text`,
 default math) and `localdox:compute-keypad` (`open` | `closed`, default open).
-A template from Advanced switches to Text for that session without changing
-the preference.
 
 ## Debugging
 

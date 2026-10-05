@@ -94,7 +94,10 @@ const savedSchema = z.object({
   title: z.string(),
   ...anchor,
   headingId: optionalText,
-  blockType: z.enum(["table", "code", "quote", "image", "list", "text"]).optional().catch(undefined),
+  blockType: z
+    .enum(["table", "code", "quote", "image", "list", "text"])
+    .optional()
+    .catch(undefined),
   blockSrc: optionalText,
   note: optionalText,
   createdAt: count.catch(0),
@@ -170,9 +173,9 @@ const scratchpadSchema = z
     updatedAt: updatedAt ?? pad.createdAt,
   }));
 
-const ids = z.array(z.unknown()).transform((list) =>
-  list.filter((value): value is string => typeof value === "string"),
-);
+const ids = z
+  .array(z.unknown())
+  .transform((list) => list.filter((value): value is string => typeof value === "string"));
 
 const paneSchema = z.object({ id, tabs: ids, activeTabId: id.nullable().catch(null) });
 
@@ -196,6 +199,7 @@ const uiSchema = z
   });
 
 const workspaceSchema = z.object({
+  kind: z.enum(["exam", "documentation", "reader"]).default("reader"),
   id: id.optional().catch(undefined),
   name: z
     .string()
@@ -230,7 +234,10 @@ export class ImportValidationError extends Error {
 export function parseImportJson(json: string): unknown {
   // UTF-16 length is a cheap lower bound; only encode when it could be close.
   if (json.length > MAX_IMPORT_BYTES) throw tooLarge();
-  if (json.length > MAX_IMPORT_BYTES / 3 && new TextEncoder().encode(json).byteLength > MAX_IMPORT_BYTES)
+  if (
+    json.length > MAX_IMPORT_BYTES / 3 &&
+    new TextEncoder().encode(json).byteLength > MAX_IMPORT_BYTES
+  )
     throw tooLarge();
   try {
     return JSON.parse(json);

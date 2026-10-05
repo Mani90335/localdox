@@ -2,6 +2,7 @@ import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { remarkTasks } from "@/lib/markdown/markdown-tasks";
 import remarkMath from "remark-math";
 import rehypeSlug from "rehype-slug";
 import rehypeKatex from "rehype-katex";
@@ -112,7 +113,7 @@ export async function buildMarkdownHTML(
     const render = () =>
       renderToStaticMarkup(
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath, remarkMedia]}
+          remarkPlugins={[remarkGfm, remarkTasks, remarkMath, remarkMedia]}
           rehypePlugins={[
             rehypeSlug,
             [rehypeKatex, { output: "mathml" }],

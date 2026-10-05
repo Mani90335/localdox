@@ -116,7 +116,7 @@ function mapLines(fn: (line: string, index: number, lines: string[]) => string):
 }
 
 /** Everything a line prefix action has to strip before applying its own. */
-const ANY_LINE_PREFIX = /^(\s*)(?:#{1,6}\s+|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+\.\s+|>\s?)?/;
+const ANY_LINE_PREFIX = /^(\s*)(?:#{1,6}\s+|[-*+]\s+\[[ yYxX]?\]\s+|[-*+]\s+|\d+\.\s+|>\s?)?/;
 
 /** Replace whatever block prefix a line carries with `make`, or remove it when
  *  the line already has exactly that one — every prefix control is a toggle. */
@@ -150,7 +150,7 @@ export function heading(level: 1 | 2 | 3): FormatAction {
 
 export const bulletList = togglePrefix(
   () => "- ",
-  (line) => /^\s*[-*+]\s+(?!\[[ xX]\])/.test(line),
+  (line) => /^\s*[-*+]\s+(?!\[[ yYxX]?\])/.test(line),
 );
 
 /** Numbered list. Numbering restarts at 1 for the selection and counts up, so
@@ -161,8 +161,8 @@ export const numberedList = togglePrefix(
 );
 
 export const checklist = togglePrefix(
-  () => "- [ ] ",
-  (line) => /^\s*[-*+]\s+\[[ xX]\]\s+/.test(line),
+  () => "- [] ",
+  (line) => /^\s*[-*+]\s+\[[ yYxX]?\]\s+/.test(line),
 );
 
 export const blockquote = togglePrefix(

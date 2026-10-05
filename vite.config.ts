@@ -10,7 +10,6 @@ import { pdfjsAssets } from "./build/vite-pdfjs-assets";
 import { offlineShell } from "./build/vite-offline-shell";
 import { interactiveRuntime } from "./build/vite-interactive-runtime";
 import { bundleReport } from "./build/vite-bundle-report";
-import { pyodide } from "./build/vite-pyodide";
 
 export default defineConfig({
   plugins: [
@@ -35,8 +34,6 @@ export default defineConfig({
     // The ```interactive-react preview runtime, inlined into its sandboxed
     // frame. See the plugin's header.
     interactiveRuntime(),
-    // The advanced math engine (Pyodide + SymPy), published under /pyodide/.
-    pyodide(),
     // Emits /sw.js so the app reopens offline. See the plugin's header.
     offlineShell({
       // Lazy, but needed offline without a download: reading and editing
@@ -47,6 +44,9 @@ export default defineConfig({
         "src/components/docs/editor/MarkdownEditor.tsx",
         "src/components/docs/viewer/DocumentViewer.tsx",
         "src/components/docs/pages/SettingsPage.tsx",
+        // Exam Workspaces are a core offline feature.
+        "src/services/exams/ExamApp.tsx",
+        "plans/example-exam.md",
         // Split view's panes.
         "src/components/ui/resizable.tsx",
         // Search's main-thread fallback, for when the worker can't start.
@@ -73,12 +73,15 @@ export default defineConfig({
     // code splitting. Excluding these libraries causes large module waterfalls
     // and leaves CommonJS imports unconverted when a viewer is first opened.
     include: [
+      "react/jsx-runtime",
       "mermaid",
       "@babel/standalone",
       "xlsx",
       "mammoth/mammoth.browser",
       "dayjs",
-      "@braintree/sanitize-url",
+      // Mermaid's own dependency; resolved through it because the package
+      // manager may nest it under mermaid rather than hoist it.
+      "mermaid > @braintree/sanitize-url",
       "cytoscape",
       "cytoscape-cose-bilkent",
       "cytoscape-fcose",

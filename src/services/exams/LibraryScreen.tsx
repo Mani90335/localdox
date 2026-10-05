@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { BookOpen, Search, Upload, X } from "lucide-react";
+import { BookOpen, Search, Upload } from "lucide-react";
 import type { AttemptRecord, ExamRecord } from "./storage";
 import { canReleaseScore } from "./session";
 import { meetsPassingScore, progressionPolicy, scorePercentage } from "./study-plan";
@@ -57,22 +57,17 @@ function attemptStatus(a: AttemptRecord): { label: string; tone: Tone } {
   return { label: "Completed", tone: "neutral" };
 }
 
-export function Library({
+/** Browse every ruleset and start a single paper outside a study plan. */
+export function LibraryPanel({
   library,
-  attempts,
-  continueItem,
   dev,
   onStart,
-  onOpenAttempt,
   onImportFiles,
   onLoadDemo,
 }: {
   library: ExamRecord[];
-  attempts: AttemptRecord[];
-  continueItem?: ContinueItem;
   dev: boolean;
   onStart: (exam: ExamRecord) => void;
-  onOpenAttempt: (attempt: AttemptRecord) => void;
   onImportFiles: (files: File[]) => void;
   onLoadDemo: () => void;
 }) {
@@ -80,8 +75,7 @@ export function Library({
     [query, setQuery] = useState(""),
     [filter, setFilter] = useState<"all" | ExamKind>("all"),
     [versions, setVersions] = useState<Record<string, string>>({}),
-    [preview, setPreview] = useState<ExamRecord | null>(null),
-    [showDemo, setShowDemo] = useState(false);
+    [preview, setPreview] = useState<ExamRecord | null>(null);
   const groups = useMemo(
     () =>
       groupByFormat(
@@ -98,14 +92,11 @@ export function Library({
         (!needle || e.exam.rules.meta.name.toLowerCase().includes(needle)),
     ),
   );
-  const history = [...attempts]
-    .filter((a) => a.session.startedAt !== undefined && (showDemo || !a.session.demo))
-    .sort((a, b) => b.session.createdAt - a.session.createdAt);
-  const hasDemo = attempts.some((a) => a.session.demo);
   return (
-    <div className="ex-page">
+    <>
       <PageHeader
-        title="Exam library"
+        title="Library"
+        subtitle="Take any paper on its own, without a study plan."
         actions={
           <>
             <Button onClick={() => input.current?.click()}>
@@ -126,19 +117,6 @@ export function Library({
           </>
         }
       />
-
-      {continueItem && (
-        <section className="ex-surface xl-continue" aria-label="Continue">
-          <div>
-            <small>{continueItem.label}</small>
-            <h2 style={{ fontSize: 18 }}>{continueItem.title}</h2>
-            <p className="ex-small">{continueItem.meta}</p>
-          </div>
-          <Button variant="primary" onClick={continueItem.run}>
-            {continueItem.cta}
-          </Button>
-        </section>
-      )}
 
       {/* Search and filters earn their place only once the list is long. */}
       {groups.length > 6 && (
@@ -222,128 +200,30 @@ export function Library({
           })}
         </div>
       ) : (
-        <div style={{ marginBottom: 48 }}>
-          <EmptyState
-            quiet
-            icon={<BookOpen size={20} />}
-            title={library.length ? "No exams match" : "No exams yet"}
-            actions={
-              library.length ? (
-                <Button
-                  onClick={() => {
-                    setQuery("");
-                    setFilter("all");
-                  }}
-                >
-                  Clear filters
-                </Button>
-              ) : (
-                <Button onClick={() => input.current?.click()}>Import exam files</Button>
-              )
-            }
-          >
-            {library.length
-              ? "Try another search or filter."
-              : "Import a ruleset, paper and solutions to add your first exam."}
-          </EmptyState>
-        </div>
+        <EmptyState
+          quiet
+          icon={<BookOpen size={20} />}
+          title={library.length ? "No exams match" : "No exams yet"}
+          actions={
+            library.length ? (
+              <Button
+                onClick={() => {
+                  setQuery("");
+                  setFilter("all");
+                }}
+              >
+                Clear filters
+              </Button>
+            ) : (
+              <Button onClick={() => input.current?.click()}>Import exam files</Button>
+            )
+          }
+        >
+          {library.length
+            ? "Try another search or filter."
+            : "Import a ruleset, paper and solutions to add your first exam."}
+        </EmptyState>
       )}
-
-      <section className="ex-section" aria-labelledby="xl-history">
-        <div className="ex-section-head">
-          <h2 id="xl-history">Past attempts</h2>
-          {hasDemo && (
-            <label className="ex-field ex-field--inline ex-small" style={{ fontWeight: 500 }}>
-              <input
-                className="ex-check"
-                type="checkbox"
-                checked={showDemo}
-                onChange={(e) => setShowDemo(e.target.checked)}
-              />
-              Show demo
-            </label>
-          )}
-        </div>
-        {history.length ? (
-          <div className="ex-surface ex-surface--flush">
-            <div className="ex-table-wrap">
-              <table className="ex-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Exam</th>
-                    <th scope="col" className="xl-hide-sm">
-                      Date
-                    </th>
-                    <th scope="col" className="num">
-                      Score
-                    </th>
-                    <th scope="col">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((a) => {
-                    const r = a.exam.exam.rules,
-                      status = attemptStatus(a),
-                      scored = a.analysis && canReleaseScore(r);
-                    return (
-                      <tr key={a.id} data-href onClick={() => onOpenAttempt(a)}>
-                        <td>
-                          <button
-                            type="button"
-                            className="xl-row-title"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onOpenAttempt(a);
-                            }}
-                          >
-                            {r.meta.name}
-                          </button>
-                          {a.session.demo && (
-                            <>
-                              {" "}
-                              <Chip>Demo</Chip>
-                            </>
-                          )}
-                          <span className="ex-small xl-show-sm">
-                            {formatDateTime(a.session.createdAt)}
-                          </span>
-                        </td>
-                        <td className="xl-hide-sm ex-muted" style={{ whiteSpace: "nowrap" }}>
-                          {formatDateTime(a.session.createdAt)}
-                        </td>
-                        <td className="num">
-                          {scored ? (
-                            <span className="xl-score">
-                              <strong>
-                                {formatPercent(
-                                  scorePercentage(a.analysis!.score, a.analysis!.totalMarks),
-                                )}
-                              </strong>
-                              <small>
-                                {a.analysis!.score.toFixed(r.results.rounding)}/
-                                {trimNumber(a.analysis!.totalMarks)}
-                              </small>
-                            </span>
-                          ) : (
-                            <span className="ex-muted">—</span>
-                          )}
-                        </td>
-                        <td>
-                          <Chip tone={status.tone}>{status.label}</Chip>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : (
-          <EmptyState quiet headingLevel={3} title="No attempts yet">
-            Finished exams appear here with their scores.
-          </EmptyState>
-        )}
-      </section>
 
       {dev && (
         <details className="xi-author" style={{ marginTop: 32 }}>
@@ -384,6 +264,120 @@ export function Library({
       >
         {preview && <InstructionsSummary record={preview} dev={dev} />}
       </Dialog>
-    </div>
+    </>
+  );
+}
+
+/** Every finished or in-progress attempt, newest first. */
+export function HistoryPanel({
+  attempts,
+  onOpenAttempt,
+}: {
+  attempts: AttemptRecord[];
+  onOpenAttempt: (attempt: AttemptRecord) => void;
+}) {
+  const [showDemo, setShowDemo] = useState(false);
+  const history = [...attempts]
+    .filter((a) => a.session.startedAt !== undefined && (showDemo || !a.session.demo))
+    .sort((a, b) => b.session.createdAt - a.session.createdAt);
+  const hasDemo = attempts.some((a) => a.session.demo);
+  return (
+    <>
+      <PageHeader
+        title="History"
+        actions={
+          hasDemo ? (
+            <label className="ex-field ex-field--inline ex-small" style={{ fontWeight: 500 }}>
+              <input
+                className="ex-check"
+                type="checkbox"
+                checked={showDemo}
+                onChange={(e) => setShowDemo(e.target.checked)}
+              />
+              Show demo
+            </label>
+          ) : undefined
+        }
+      />
+      {history.length ? (
+        <div className="ex-surface ex-surface--flush">
+          <div className="ex-table-wrap">
+            <table className="ex-table">
+              <thead>
+                <tr>
+                  <th scope="col">Exam</th>
+                  <th scope="col" className="xl-hide-sm">
+                    Date
+                  </th>
+                  <th scope="col" className="num">
+                    Score
+                  </th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((a) => {
+                  const r = a.exam.exam.rules,
+                    status = attemptStatus(a),
+                    scored = a.analysis && canReleaseScore(r);
+                  return (
+                    <tr key={a.id} data-href onClick={() => onOpenAttempt(a)}>
+                      <td>
+                        <button
+                          type="button"
+                          className="xl-row-title"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenAttempt(a);
+                          }}
+                        >
+                          {r.meta.name}
+                        </button>
+                        {a.session.demo && (
+                          <>
+                            {" "}
+                            <Chip>Demo</Chip>
+                          </>
+                        )}
+                        <span className="ex-small xl-show-sm">
+                          {formatDateTime(a.session.createdAt)}
+                        </span>
+                      </td>
+                      <td className="xl-hide-sm ex-muted" style={{ whiteSpace: "nowrap" }}>
+                        {formatDateTime(a.session.createdAt)}
+                      </td>
+                      <td className="num">
+                        {scored ? (
+                          <span className="xl-score">
+                            <strong>
+                              {formatPercent(
+                                scorePercentage(a.analysis!.score, a.analysis!.totalMarks),
+                              )}
+                            </strong>
+                            <small>
+                              {a.analysis!.score.toFixed(r.results.rounding)}/
+                              {trimNumber(a.analysis!.totalMarks)}
+                            </small>
+                          </span>
+                        ) : (
+                          <span className="ex-muted">—</span>
+                        )}
+                      </td>
+                      <td>
+                        <Chip tone={status.tone}>{status.label}</Chip>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <EmptyState quiet title="No attempts yet">
+          Finished exams appear here with their scores.
+        </EmptyState>
+      )}
+    </>
   );
 }

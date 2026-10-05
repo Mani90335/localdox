@@ -3,7 +3,6 @@
 // Relative imports, so tests run it in Node (tests/compute-keys.test.ts).
 
 import { prepareInput } from "../../../services/compute/input.ts";
-import { needsAdvanced } from "../../../services/compute/advanced/routing.ts";
 
 /** Math: written as it looks, in a math field. Text: plain text or LaTeX, over several lines. */
 export type InputMode = "math" | "text";
@@ -52,9 +51,7 @@ export function asMath(text: string): string | null {
     .filter(Boolean);
   const latex: string[] = [];
   for (const statement of statements) {
-    const prepared = prepareInput(statement, {
-      advanced: statements.length > 1 || needsAdvanced(statement),
-    });
+    const prepared = prepareInput(statement);
     if (!prepared.ok) return null;
     latex.push(prepared.latex);
   }

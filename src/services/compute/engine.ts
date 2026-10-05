@@ -8,7 +8,7 @@
 // - Input is prepared first (input.ts): plain text is converted, anything
 //   ambiguous or out of scope is refused with a reason.
 // - Only a known set of operations is accepted (arithmetic, powers, roots,
-//   logarithms, trigonometry…); integrals, matrices, inequalities and the like
+//   logarithms, trigonometry and small calculus problems); advanced forms
 //   are labelled unsupported rather than half-handled.
 // - Each operation states what it applies to: Evaluate wants numbers, Solve
 //   wants an equation in one unknown. A mismatch suggests the right one.
@@ -20,6 +20,7 @@
 
 import type { ComputeEngine } from "@cortex-js/compute-engine";
 import { prepareInput } from "./input.ts";
+import { calculus } from "./calculus.ts";
 import {
   clusterRoots,
   degree,
@@ -75,6 +76,8 @@ export function compute(ce: Engine, request: ComputeRequest): ComputeResult {
   const prepared = prepareInput(request.input);
   if (!prepared.ok) return fail(op, prepared.kind, prepared.message, { hint: prepared.hint });
   try {
+    const calculusResult = calculus(ce, request, prepared.latex);
+    if (calculusResult) return calculusResult;
     const expr = ce.parse(prepared.latex);
     if (!expr.isValid) return syntaxFailure(op, expr.json);
     const json = expr.json;

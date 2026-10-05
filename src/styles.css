@@ -875,6 +875,11 @@
   border-color: color-mix(in oklab, var(--primary) 50%, transparent);
 }
 
+.docs-prose input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
 .docs-prose input[type="checkbox"]:checked {
   background-color: var(--primary);
   border-color: var(--primary);

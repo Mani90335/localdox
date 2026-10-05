@@ -15,7 +15,7 @@
 //    product, y(0) is a call when y is a function (a prime, a dy/dx, a
 //    `let y(x) = …`). The result uses only heads bridge.py has handlers for.
 
-import type { ComputeFailureKind } from "../protocol.ts";
+import type { ComputeFailureKind } from "../../src/services/compute/protocol.ts";
 
 export type Json = unknown;
 

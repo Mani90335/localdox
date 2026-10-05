@@ -1,6 +1,6 @@
 # Localdox Exam & Study-Plan File Reference
 
-The exact files Localdox Exam Sessions imports. Anything not described here is rejected: every JSON object is strict, so an unknown or misspelt field fails the import.
+The exact files Localdox Exam Workspaces imports. Anything not described here is rejected: every JSON object is strict, so an unknown or misspelt field fails the import.
 
 ## 1. What gets uploaded
 

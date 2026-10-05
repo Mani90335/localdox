@@ -45,7 +45,19 @@ export function importPracticeSet(
   assets?: Record<string, Blob>,
 ): PracticeSet {
   const file = `${id}.practice.md`,
-    { questions, solutions: raw } = parsePracticeFile(source, file);
+    { questions, solutions } = parsePracticeFile(source, file);
+  return practiceSet(id, name, questions, solutions, file, now, assets);
+}
+/** Validates parsed practice questions and their solutions into a set. */
+export function practiceSet(
+  id: string,
+  name: string,
+  questions: Question[],
+  raw: Solution[],
+  file: string,
+  now = Date.now(),
+  assets?: Record<string, Blob>,
+): PracticeSet {
   const issues: Issue[] = [],
     seen = new Set<string>();
   if (!questions.length)

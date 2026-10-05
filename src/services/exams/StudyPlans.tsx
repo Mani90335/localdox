@@ -1,39 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { BookOpen, Check, Download, LockKeyhole, MoreHorizontal, Upload } from "lucide-react";
+import { BookOpen, Check, FileUp, LockKeyhole, Upload } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import type { AttemptRecord, ExamRecord } from "./storage";
 import {
-  studyProgress,
   progressionPolicy,
   scorePercentage,
   meetsPassingScore,
-  type StudyPlanRecord,
   type DayProgress,
   type DayStep,
 } from "./study-plan";
+import type { TopicItem } from "./topics";
 import { ExamMarkdown } from "./ExamMarkdown";
-import { Button, EmptyState, LinkButton, OverflowMenu, ProgressBar } from "./ui/kit";
+import { Button, LinkButton, ProgressBar } from "./ui/kit";
 import { formatDuration, formatPercent } from "./ui/display";
 
-interface Props {
-  plans: StudyPlanRecord[];
-  attempts: AttemptRecord[];
-  library: ExamRecord[];
-  onImportFiles: (files: File[]) => void;
-  onImportExample: () => void;
-  onDownloadExample: () => void;
-  onTask: (planId: string, topicId: string, taskId: string, checked: boolean) => void;
-  onNote: (planId: string, topicId: string, note: string) => void;
-  onLearned: (planId: string, topicId: string) => void;
-  onPractice: (planId: string, topicId: string) => void;
-  onAddPractice: (planId: string, topicId: string, files: File[]) => void;
-  onStart: (planId: string, topicId: string) => void;
-  onRevision: (planId: string, topicId: string) => void;
-  onRewrite: (planId: string, topicId: string, exam: ExamRecord) => void;
-  onRewriteFiles: (planId: string, topicId: string, files: File[]) => void;
-  onOpenAttempt: (attempt: AttemptRecord) => void;
-  onReview: (attempt: AttemptRecord) => void;
-}
 type StepId = Exclude<DayStep, "done">;
 const STEPS: { id: StepId; name: string }[] = [
   { id: "learn", name: "Learn" },
@@ -44,8 +24,6 @@ const STEPS: { id: StepId; name: string }[] = [
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const graded = (a: AttemptRecord) =>
   !!a.analysis && ["submitted", "review"].includes(a.session.phase);
-/** "planId/topicId": topics from every uploaded plan share one picker. */
-const topicKey = (planId: string, topicId: string) => `${planId}/${topicId}`;
 
 /** One line under each step in the stepper. */
 function stepNote(p: DayProgress, step: StepId, state: "done" | "current" | "locked"): string {
@@ -61,81 +39,104 @@ function stepNote(p: DayProgress, step: StepId, state: "done" | "current" | "loc
   return state === "done" ? "Done" : "Now";
 }
 
-export function StudyPlans(props: Props) {
-  const { plans, attempts, library } = props,
-    [selected, setSelected] = useState(""),
-    [chosenStep, setChosenStep] = useState<StepId | null>(null),
+interface Props {
+  item: TopicItem;
+  topics: TopicItem[];
+  library: ExamRecord[];
+  onSelect: (key: string) => void;
+  onUploadExamFile: (planId: string, files: File[]) => void;
+  onDownloadExample: () => void;
+  onTask: (planId: string, topicId: string, taskId: string, checked: boolean) => void;
+  onNote: (planId: string, topicId: string, note: string) => void;
+  onLearned: (planId: string, topicId: string) => void;
+  onPractice: (planId: string, topicId: string) => void;
+  onAddPractice: (planId: string, topicId: string, files: File[]) => void;
+  onStart: (planId: string, topicId: string) => void;
+  onRevision: (planId: string, topicId: string) => void;
+  onRewrite: (planId: string, topicId: string, exam: ExamRecord) => void;
+  onRewriteFiles: (planId: string, topicId: string, files: File[]) => void;
+  onOpenAttempt: (attempt: AttemptRecord) => void;
+  onReview: (attempt: AttemptRecord) => void;
+}
+
+/** The detail pane for one selected topic: its four steps, or its file upload. */
+export function TopicPanel(props: Props) {
+  const { item, topics, library } = props;
+  const { record, topic } = item;
+  const p = item.progress;
+  const saved = record.days[topic.id];
+  const policy = saved?.cycles.length ? progressionPolicy(saved.cycles[0].exam.exam.rules) : null;
+
+  const [chosenStep, setChosenStep] = useState<StepId | null>(null),
     [replacement, setReplacement] = useState(""),
     [noteSaved, setNoteSaved] = useState(false);
-  const input = useRef<HTMLInputElement>(null),
+  const fileInput = useRef<HTMLInputElement>(null),
     practiceInput = useRef<HTMLInputElement>(null),
     rewriteInput = useRef<HTMLInputElement>(null);
 
-  // Every topic of every plan, in upload order.
-  const topics = plans.flatMap((record) =>
-    studyProgress(record, attempts).map((progress, i) => ({
-      record,
-      progress,
-      topic: record.plan.days[i],
-      key: topicKey(record.id, progress.id),
-    })),
-  );
-  const current =
-    topics.find((t) => t.key === selected) ??
-    topics.find((t) => t.progress.step !== "done") ??
-    topics.at(-1);
-  const p = current?.progress,
-    record = current?.record,
-    topic = current?.topic,
-    saved = record && topic ? record.days[topic.id] : undefined;
-  const policy = saved ? progressionPolicy(saved.cycles[0].exam.exam.rules) : null;
-
   // A finished step moves the view to the next one; a chosen step stays.
-  useEffect(() => setChosenStep(null), [current?.key, p?.step]);
+  useEffect(() => setChosenStep(null), [item.key, p?.step]);
   useEffect(() => {
     setNoteSaved(false);
     setReplacement("");
-  }, [current?.key]);
+  }, [item.key]);
 
-  const fileInput = (
-    <input
-      ref={input}
-      className="sr-only"
-      type="file"
-      multiple
-      accept=".zip,.json,.md,.png,.jpg,.jpeg,.gif,.webp,.svg"
-      aria-label="Import study plan"
-      onChange={(event) => {
-        props.onImportFiles(Array.from(event.target.files ?? []));
-        event.target.value = "";
-      }}
-    />
-  );
+  const heading = <h1>{topic.title}</h1>;
 
-  if (!current || !p || !record || !topic || !saved || !policy)
+  // The rules are set; the exam waits for its one file.
+  if (!p || !saved || !policy) {
+    const setup = record.setup;
     return (
-      <div className="ex-page">
-        {fileInput}
-        <EmptyState
-          icon={<Upload size={20} />}
-          title="Upload a topic to start"
-          actions={
-            <>
-              <Button variant="primary" onClick={() => input.current?.click()}>
-                <Upload size={16} aria-hidden="true" /> Upload files
+      <>
+        <header className="ex-page-header">
+          <div>{heading}</div>
+        </header>
+        <input
+          ref={fileInput}
+          className="sr-only"
+          type="file"
+          multiple
+          accept=".md,.markdown,.png,.jpg,.jpeg,.gif,.webp,.svg"
+          aria-label="Upload exam file"
+          onChange={(e) => {
+            props.onUploadExamFile(record.id, Array.from(e.target.files ?? []));
+            e.target.value = "";
+          }}
+        />
+        <section className="ex-surface xp-step-panel" aria-label="Exam file">
+          {setup && (
+            <p className="ex-meta tabular">
+              <span>{formatDuration(setup.durationMinutes * 60)}</span>
+              {setup.questionCount && <span>{setup.questionCount} questions</span>}
+              <span>{setup.passPercentage}% to pass</span>
+              <span>{plural(setup.maxAttempts, "attempt")}</span>
+              <span>
+                {setup.rootRules
+                  ? "Marking from exam structure"
+                  : setup.mcqPenalty === "none"
+                    ? "No negative marking"
+                    : `−${setup.mcqPenalty === "third" ? "1/3" : "1/4"} for a wrong MCQ`}
+              </span>
+            </p>
+          )}
+          <div className="xp-upload">
+            <h2>Upload the exam file</h2>
+            <p className="ex-small">
+              One <code>.md</code> file: questions under <code># Practice</code> and{" "}
+              <code># Exam</code>, and a <code>:::solution</code> with the key and explanation for
+              each. Exam keys stay hidden until you submit. Add any images it uses.
+            </p>
+            <div className="xp-cta">
+              <Button variant="primary" onClick={() => fileInput.current?.click()}>
+                <FileUp size={16} aria-hidden="true" /> Choose file
               </Button>
-              <Button onClick={props.onImportExample}>Try the example</Button>
-            </>
-          }
-        >
-          Each topic has four steps, one after another: learn, practise, take the exam, review your
-          answers. Upload a .zip, or the plan with its exam and practice files.
-        </EmptyState>
-        <p className="ex-small" style={{ textAlign: "center", marginTop: 12 }}>
-          <LinkButton onClick={props.onDownloadExample}>Download example files</LinkButton>
-        </p>
-      </div>
+              <LinkButton onClick={props.onDownloadExample}>Download example file</LinkButton>
+            </div>
+          </div>
+        </section>
+      </>
     );
+  }
 
   const exam = p.cycle.exam.exam;
   const passedAttempt = [...p.attempts]
@@ -152,13 +153,16 @@ export function StudyPlans(props: Props) {
   const shown: StepId = chosenStep ?? (p.step === "done" ? "review" : p.step);
   const candidates = library.filter((e) => e.exam.taxonomy.id === exam.taxonomy.id),
     chosen = candidates.find((e) => e.id === replacement);
-  const nextOpen = topics.find((t) => t.key !== current.key && t.progress.step !== "done");
+  const nextOpen = topics.find((t) => t.key !== item.key && t.progress?.step !== "done");
   const planId = record.id,
     topicId = topic.id;
 
   return (
-    <div className="ex-page">
-      {fileInput}
+    <>
+      <header className="ex-page-header">
+        <div>{heading}</div>
+      </header>
+
       <input
         ref={practiceInput}
         className="sr-only"
@@ -171,54 +175,6 @@ export function StudyPlans(props: Props) {
           e.target.value = "";
         }}
       />
-
-      <header className="ex-page-header" style={{ alignItems: "center" }}>
-        <div>
-          {topics.length > 1 ? (
-            <label className="xp-topic-picker">
-              <span className="sr-only">Topic</span>
-              <select
-                className="ex-select xp-plan-select"
-                value={current.key}
-                onChange={(e) => setSelected(e.target.value)}
-              >
-                {plans.map((plan) => (
-                  <optgroup key={plan.id} label={plan.plan.name}>
-                    {topics
-                      .filter((t) => t.record.id === plan.id)
-                      .map((t) => (
-                        <option key={t.key} value={t.key}>
-                          {t.progress.step === "done" ? "✓ " : ""}
-                          {t.topic.title}
-                        </option>
-                      ))}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          <h1 className={topics.length > 1 ? "sr-only" : undefined}>{topic.title}</h1>
-        </div>
-        <div className="ex-row">
-          <Button onClick={() => input.current?.click()}>
-            <Upload size={16} aria-hidden="true" /> Upload
-          </Button>
-          <OverflowMenu
-            trigger={
-              <Button aria-label="More" className="ex-btn--icon">
-                <MoreHorizontal size={16} aria-hidden="true" />
-              </Button>
-            }
-            items={[
-              {
-                label: "Download example files",
-                icon: <Download size={16} />,
-                onSelect: props.onDownloadExample,
-              },
-            ]}
-          />
-        </div>
-      </header>
 
       <nav aria-label="Steps">
         <ol className="xp-hsteps">
@@ -264,7 +220,7 @@ export function StudyPlans(props: Props) {
             <Check size={18} aria-hidden="true" />
             <span>All four steps done.</span>
             {nextOpen && (
-              <Button variant="primary" onClick={() => setSelected(nextOpen.key)}>
+              <Button variant="primary" onClick={() => props.onSelect(nextOpen.key)}>
                 Next topic: {nextOpen.topic.title}
               </Button>
             )}
@@ -386,7 +342,14 @@ export function StudyPlans(props: Props) {
               <div className="ex-surface xp-panel is-warning">
                 <p style={{ fontSize: 14 }}>
                   No attempts left on this paper. Revise, then take a new paper with at least{" "}
-                  {policy.rewriteDifficultyPercentage}% {policy.difficultyLabel} questions.
+                  {policy.rewriteDifficultyPercentage}% {policy.difficultyLabel} questions
+                  {record.setup && (
+                    <>
+                      {" "}
+                      (tag them <code>difficulty={policy.difficultyLabel}</code>)
+                    </>
+                  )}
+                  .
                 </p>
                 <ol className="xp-steps">
                   <li>
@@ -412,40 +375,55 @@ export function StudyPlans(props: Props) {
                         className="xr-fieldset ex-stack"
                         style={{ gap: 8 }}
                       >
-                        <label className="ex-field" style={{ fontWeight: 500 }}>
-                          Replacement paper
-                          <select
-                            className="ex-select"
-                            aria-label="Replacement paper"
-                            value={replacement}
-                            onChange={(e) => setReplacement(e.target.value)}
-                          >
-                            <option value="">Choose an imported exam</option>
-                            {candidates.map((e) => (
-                              <option key={e.id} value={e.id}>
-                                {e.exam.rules.meta.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <div className="ex-row">
-                          <Button
-                            variant="primary"
-                            disabled={!chosen}
-                            onClick={() => chosen && props.onRewrite(planId, topicId, chosen)}
-                          >
-                            Use new paper
-                          </Button>
-                          <LinkButton onClick={() => rewriteInput.current?.click()}>
-                            Import new paper
-                          </LinkButton>
-                        </div>
+                        {record.setup ? (
+                          // A configured exam keeps its rules; the new paper is one file.
+                          <div className="ex-row">
+                            <Button variant="primary" onClick={() => rewriteInput.current?.click()}>
+                              <FileUp size={16} aria-hidden="true" /> Upload new paper
+                            </Button>
+                          </div>
+                        ) : (
+                          <>
+                            <label className="ex-field" style={{ fontWeight: 500 }}>
+                              Replacement paper
+                              <select
+                                className="ex-select"
+                                aria-label="Replacement paper"
+                                value={replacement}
+                                onChange={(e) => setReplacement(e.target.value)}
+                              >
+                                <option value="">Choose an imported exam</option>
+                                {candidates.map((e) => (
+                                  <option key={e.id} value={e.id}>
+                                    {e.exam.rules.meta.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <div className="ex-row">
+                              <Button
+                                variant="primary"
+                                disabled={!chosen}
+                                onClick={() => chosen && props.onRewrite(planId, topicId, chosen)}
+                              >
+                                Use new paper
+                              </Button>
+                              <LinkButton onClick={() => rewriteInput.current?.click()}>
+                                Import new paper
+                              </LinkButton>
+                            </div>
+                          </>
+                        )}
                         <input
                           ref={rewriteInput}
                           className="sr-only"
                           type="file"
                           multiple
-                          accept=".zip,.json,.md,.png,.jpg,.jpeg,.gif,.webp,.svg"
+                          accept={
+                            record.setup
+                              ? ".md,.markdown,.png,.jpg,.jpeg,.gif,.webp,.svg"
+                              : ".zip,.json,.md,.png,.jpg,.jpeg,.gif,.webp,.svg"
+                          }
                           aria-label="Import replacement exam files"
                           onChange={(e) => {
                             props.onRewriteFiles(planId, topicId, Array.from(e.target.files ?? []));
@@ -496,6 +474,6 @@ export function StudyPlans(props: Props) {
           </>
         )}
       </section>
-    </div>
+    </>
   );
 }

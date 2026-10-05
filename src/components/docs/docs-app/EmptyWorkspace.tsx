@@ -11,6 +11,8 @@ import { SUPPORTED_ACCEPT } from "@/lib/markdown/document-utils";
  * them resolves before the reader has ever opened a document.
  */
 export function EmptyWorkspace({
+  workspaceNavigation,
+  learningMaterials = false,
   onHome,
   workspaces,
   currentWorkspaceId,
@@ -26,6 +28,8 @@ export function EmptyWorkspace({
   moveDialog,
   statusBanner,
 }: {
+  workspaceNavigation?: ReactNode;
+  learningMaterials?: boolean;
   onHome: () => void;
   workspaces: { id: string; name: string }[];
   currentWorkspaceId: string | null;
@@ -55,8 +59,17 @@ export function EmptyWorkspace({
         onSwitchWorkspace={onSwitchWorkspace}
         onOpenSettings={onOpenSettings}
       />
-      <div className="flex min-h-[calc(100dvh-4rem)] flex-col items-center justify-center px-6 py-12">
+      {workspaceNavigation}
+      <div className="flex min-h-[calc(100dvh-9rem)] flex-col items-center justify-center px-6 py-12">
         <div className="w-full max-w-sm text-center">
+          <h1 className="mb-3 text-2xl font-semibold">
+            {learningMaterials ? "Learning materials" : "Your workspaces"}
+          </h1>
+          <p className="mb-6 text-sm text-muted-foreground">
+            {learningMaterials
+              ? "Upload any file to study here. Your materials stay on this device."
+              : "Read, learn and prepare for exams in Localdox."}
+          </p>
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
@@ -104,6 +117,14 @@ export function EmptyWorkspace({
               New board
             </button>
           </div>
+          {!learningMaterials && (
+            <button
+              className="mt-6 text-sm font-medium text-primary"
+              onClick={() => onOpenSettings("workspace")}
+            >
+              Create or manage workspaces
+            </button>
+          )}
         </div>
       </div>
       <input

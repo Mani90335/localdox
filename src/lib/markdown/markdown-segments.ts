@@ -49,6 +49,8 @@ export interface MarkdownSegments {
   sources: string[];
   /** Characters of the original document in each segment (excludes shared definitions). */
   sizes: number[];
+  /** Zero-based source line adjustment, excluding prepended definitions. */
+  lineOffsets?: number[];
   /** Where each segment's own text starts in the original document. */
   starts: number[];
   /**
@@ -225,7 +227,15 @@ export function splitMarkdownSegments(source: string): MarkdownSegments {
     starts.push(lineStart);
   }
 
-  return { sources, sizes, starts, prefix: shared.length, slugs: [] };
+  const sharedLines = shared ? shared.split("\n").length - 1 : 0;
+  return {
+    sources,
+    sizes,
+    starts,
+    prefix: shared.length,
+    slugs: [],
+    lineOffsets: cuts.map((line) => line - sharedLines),
+  };
 }
 
 interface HastNode {

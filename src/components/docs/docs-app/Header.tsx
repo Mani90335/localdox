@@ -5,6 +5,7 @@ import { WorkspaceSheet } from "../workspace/WorkspaceSheet";
 
 /** The app's top chrome bar: home, search, workspace switcher, settings. */
 export function Header({
+  onBackToExams,
   onMenu,
   hideMenu,
   hideOnDesktop,
@@ -19,6 +20,7 @@ export function Header({
   onOpenSettings,
   saveIndicator,
 }: {
+  onBackToExams?: () => void;
   onMenu: (() => void) | null;
   hideMenu?: boolean;
   hideOnDesktop?: boolean;
@@ -41,6 +43,11 @@ export function Header({
       }`}
     >
       <div className="flex items-center gap-3">
+        {onBackToExams && (
+          <button className="text-sm font-medium text-primary" onClick={onBackToExams}>
+            Back to exams
+          </button>
+        )}
         {!hideMenu && (
           <button
             onClick={() => onMenu?.()}

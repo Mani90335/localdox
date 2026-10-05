@@ -2,6 +2,7 @@ import type { Components } from "react-markdown";
 import { MATH_COMPONENTS } from "@/services/math/components";
 import {
   MarkdownBlockquote,
+  MarkdownCheckbox,
   MarkdownDiv,
   MarkdownH1,
   MarkdownH2,
@@ -34,6 +35,7 @@ import {
  */
 export const markdownComponents = {
   ...MATH_COMPONENTS,
+  input: MarkdownCheckbox,
   h1: MarkdownH1,
   h2: MarkdownH2,
   h3: MarkdownH3,

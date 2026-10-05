@@ -650,7 +650,7 @@ function polynomialSteps(x: string, l: QPoly, r: QPoly): Worked | null {
         ? factor.n === 1n && factor.d !== 1n
           ? `Divide both sides by $${factor.d}$.`
           : `Multiply both sides by $${qLatex(factor)}$.`
-        : `Multiply both sides by $${qLatex(factor)}$ to make the coefficients whole numbers.`,
+        : `Multiply both sides by $${qLatex(factor)}$ to remove the fractions.`,
       latex: `${pLatex(cleaned, x)} = 0`,
     });
     p = cleaned;
@@ -822,13 +822,13 @@ function quadraticSteps(x: string, p: QPoly): Worked {
     latex: `${x} = \\frac{-b \\pm \\sqrt{b^{2} - 4ac}}{2a}`,
   });
   steps.push({
-    text: "Substitute the coefficients.",
+    text: "Put those numbers into the formula.",
     latex: `${x} = \\frac{-${wrap(b)} \\pm \\sqrt{${wrap(b)}^{2} - 4 \\cdot ${wrap(a)} \\cdot ${wrap(c)}}}{2 \\cdot ${wrap(a)}}`,
   });
   const top = qNeg(b);
   const bottom = qMul(q(2), a);
   steps.push({
-    text: `Work out the discriminant: $b^{2} - 4ac = ${qLatex(discriminant)}$.`,
+    text: `Work out the number inside the square root: $b^{2} - 4ac = ${qLatex(discriminant)}$.`,
     latex: `${x} = \\frac{${qLatex(top)} \\pm \\sqrt{${qLatex(discriminant)}}}{${qLatex(bottom)}}`,
   });
   const negative = discriminant.n < 0n;
@@ -838,7 +838,7 @@ function quadraticSteps(x: string, p: QPoly): Worked {
   if (negative || outside > 1n) {
     steps.push({
       text: negative
-        ? `The discriminant is negative, so the solutions are complex: $\\sqrt{${qLatex(discriminant)}} = ${radical}$.`
+        ? `The number inside the square root is negative. Use $i$, where $i^2=-1$: $\\sqrt{${qLatex(discriminant)}} = ${radical}$.`
         : `Simplify the square root: $\\sqrt{${size}} = ${radical}$.`,
       latex: `${x} = \\frac{${qLatex(top)} \\pm ${radical}}{${qLatex(bottom)}}`,
     });

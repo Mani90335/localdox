@@ -1,4 +1,11 @@
-import { isValidElement, useContext, type ComponentProps, type ReactNode } from "react";
+import {
+  isValidElement,
+  useContext,
+  useEffect,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import type { ExtraProps } from "react-markdown";
 import { mediaKind, parseMediaSpec } from "@/lib/markdown/markdown-media";
 import { isLocalReference } from "@/lib/markdown/media-references";
@@ -7,6 +14,7 @@ import { isArtifactUrl } from "@/lib/workspace/workspace-artifacts";
 import { ConvertedRemoteImage } from "@/services/doc-conversion";
 import { MarkdownMedia } from "../MarkdownMedia";
 import { MarkdownRenderContext, type MarkdownRenderContextValue } from "./contexts";
+import { TaskContext, SegmentLineContext } from "./contexts";
 import { HeadingLink } from "./HeadingLink";
 import { CodeBlock } from "./CodeBlock";
 import { Callout } from "./Callout";
@@ -16,6 +24,31 @@ import { Callout } from "./Callout";
 // unchanged, as they were when these lived inline in MarkdownViewer.
 
 type Props<Tag extends keyof React.JSX.IntrinsicElements> = ComponentProps<Tag> & ExtraProps;
+
+export function MarkdownCheckbox({ node, ...props }: Props<"input">) {
+  const tasks = useContext(TaskContext);
+  const segmentLine = useContext(SegmentLineContext);
+  // The source render is deferred for large documents. Reflect the click now,
+  // then reconcile with source edits when the parsed state arrives.
+  const [checked, setChecked] = useState(Boolean(props.checked));
+  useEffect(() => setChecked(Boolean(props.checked)), [props.checked]);
+  const line = Number(node?.properties?.["data-task-line"] ?? node?.properties?.dataTaskLine);
+  const enabled = props.type === "checkbox" && tasks && Number.isInteger(line);
+  return (
+    <input
+      {...props}
+      checked={checked}
+      disabled={!enabled}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => {
+        if (enabled) {
+          setChecked(event.target.checked);
+          tasks.toggle(tasks.lineOffset + segmentLine + line, event.target.checked);
+        }
+      }}
+    />
+  );
+}
 
 function useRenderContext(): MarkdownRenderContextValue {
   const value = useContext(MarkdownRenderContext);

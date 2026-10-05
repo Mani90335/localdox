@@ -13,8 +13,7 @@
 // - Cancelling the request being computed also terminates the worker: the
 //   engine is synchronous, so there is no other way to stop it.
 //
-// The same client serves the advanced engine (advanced/advanced.ts), whose
-// worker also reports loading stages ("progress") and a failed start
+// Workers can report loading stages ("progress") and a failed start
 // ("failed") as messages, since a rejected promise in a worker never reaches
 // the page as an error event.
 //

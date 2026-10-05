@@ -7,16 +7,12 @@ import { before, test } from "node:test";
 import katex from "katex";
 import { parse as parseLatex } from "@cortex-js/compute-engine/latex-syntax";
 import { loadPyodide } from "pyodide";
-import { mirrorPyodide, pyodideAssets } from "../build/pyodide-packages.ts";
-import { prepareInput } from "../src/services/compute/input.ts";
-import { needsAdvanced } from "../src/services/compute/advanced/routing.ts";
-import {
-  newContext,
-  normalize,
-  preprocessLatex,
-} from "../src/services/compute/advanced/normalize.ts";
-import { runAdvanced, type Bridge } from "../src/services/compute/advanced/run.ts";
-import { parseStatements, splitStatements } from "../src/services/compute/advanced/statements.ts";
+import { mirrorPyodide, pyodideAssets } from "./pyodide-packages.ts";
+import { prepareInput } from "../../src/services/compute/input.ts";
+import { needsAdvanced } from "./routing.ts";
+import { newContext, normalize, preprocessLatex } from "./normalize.ts";
+import { runAdvanced, type Bridge } from "./run.ts";
+import { parseStatements, splitStatements } from "./statements.ts";
 import type {
   AdvancedParams,
   AnyOperation,
@@ -24,9 +20,9 @@ import type {
   ComputeFailure,
   ComputeResult,
   Step,
-} from "../src/services/compute/protocol.ts";
-import { resultLatex, resultMarkdown } from "../src/services/compute/result-markdown.ts";
-import { macrosFor } from "../src/services/math/latex.ts";
+} from "../../src/services/compute/protocol.ts";
+import { resultLatex, resultMarkdown } from "../../src/services/compute/result-markdown.ts";
+import { macrosFor } from "../../src/services/math/latex.ts";
 
 // The advanced engine (SymPy on Pyodide) end to end, in Node: the same
 // statements parser, normalizer, runner and Python bridge the worker uses.
@@ -40,8 +36,8 @@ before(async () => {
   await mirrorPyodide(dir);
   const pyodide = await loadPyodide({ indexURL: `${dir}/` });
   await pyodide.loadPackage("sympy", { messageCallback: () => {} });
-  pyodide.runPython(await readFile("src/services/compute/advanced/steps.py", "utf8"));
-  pyodide.runPython(await readFile("src/services/compute/advanced/bridge.py", "utf8"));
+  pyodide.runPython(await readFile("scripts/compute-reference/steps.py", "utf8"));
+  pyodide.runPython(await readFile("scripts/compute-reference/bridge.py", "utf8"));
   const run = pyodide.globals.get("run");
   bridge = { run: (request) => run(request) as string };
   runPython = (code) => pyodide.runPython(code);

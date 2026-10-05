@@ -2,8 +2,12 @@
 // Runs in the advanced worker, and unchanged in the unit tests (with Pyodide
 // in Node), so the tests exercise exactly what the reader gets.
 
-import { prepareInput } from "../input.ts";
-import type { AdvancedRequest, ComputeFailure, ComputeResult } from "../protocol.ts";
+import { prepareInput } from "../../src/services/compute/input.ts";
+import type {
+  AdvancedRequest,
+  ComputeFailure,
+  ComputeResult,
+} from "../../src/services/compute/protocol.ts";
 import {
   assertParsed,
   collectFunctions,

@@ -131,7 +131,7 @@ test("computes in the worker; answers are cached by operation, variable and inpu
   );
 
   // An engine failure ("unsupported") is an answer, and cached like one.
-  const integral = evaluate("\\int_0^1 x\\,dx");
+  const integral = evaluate("\\int_0^1 \\ln(x)\\,dx");
   assert.equal((await client.run(integral)).ok, false);
   assert.equal((await client.run(integral)).ok, false);
   assert.equal(workers[0].posted.length, 5);

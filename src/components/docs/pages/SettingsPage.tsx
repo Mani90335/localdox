@@ -1,3 +1,4 @@
+import { type WorkspaceKind } from "@/lib/workspace/kinds";
 import { useState, useEffect, useRef } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Tabs from "@radix-ui/react-tabs";
@@ -19,11 +20,11 @@ import type { MathRendererType } from "@/services/math";
 export interface SettingsPageProps {
   showEmbedMedia: boolean;
   onSetShowEmbedMedia: (show: boolean) => void;
-  workspaces: { id: string; name: string }[];
+  workspaces: { id: string; name: string; kind?: WorkspaceKind }[];
   currentWorkspaceId: string | null;
   onRenameWorkspace: (id: string, name: string) => void;
   onDeleteWorkspace: (id: string) => void;
-  onNewWorkspace: (name: string) => void;
+  onNewWorkspace: (name: string, kind?: WorkspaceKind) => void;
   onClearStorage: () => void;
   files: MdFile[];
   /** The open workspace's notes and rough work, for the storage total. */

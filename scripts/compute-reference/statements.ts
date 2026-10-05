@@ -10,7 +10,7 @@
 // Pure text handling. The math in each statement is parsed later
 // (normalize.ts); here only the statement's shape is recognized.
 
-import type { ComputeFailureKind } from "../protocol.ts";
+import type { ComputeFailureKind } from "../../src/services/compute/protocol.ts";
 
 export type Property =
   | "positive"
