@@ -1,6 +1,6 @@
 # Exam Session format (schema version 2)
 
-Open **Exam Sessions** from the reader home page, or visit `/exams`. Import the ruleset, paper, solutions and referenced taxonomy together. Multiple exams can be selected at once. They persist in the browser's `localdox-exams-v2` IndexedDB database, separate from document workspaces. No account, backend, LLM or executable Markdown is involved.
+Open an **Exam Workspace** in Localdox, or use the compatibility link `/exams`. Create a GATE variation and upload one Markdown file, or import existing ruleset, paper, solutions and taxonomy files together through the Library. Data stays offline in the browser and is scoped to its owning workspace. See [Exam Workspaces](../documentation/exam-sessions.md) for workspace setup.
 
 For bundled content, add files to `exams/<exam-id>/` and rebuild. Vite discovers every `*.exam.json` automatically; no registry or engine code change is needed. Companion files must share a stem (`quiz.exam.json`, `quiz.paper.md`, `quiz.solutions.md`). Shared taxonomies live in `exams/taxonomies/`. Import also works without rebuilding. Taxonomy references resolve by their filename within the selected files; duplicate filenames are rejected. Reimporting an exam replaces its library entry; existing attempts retain their own immutable copy.
 

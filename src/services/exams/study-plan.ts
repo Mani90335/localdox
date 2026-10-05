@@ -11,6 +11,7 @@ import {
   type PracticeAnswer,
   type PracticeSet,
 } from "./practice.ts";
+import type { ExamFileContent, ExamSetup } from "./exam-setup.ts";
 
 export const studyPlanSchema = z
   .object({
@@ -61,6 +62,7 @@ export interface PaperCycle {
 export interface DayRecord {
   tasks: Record<string, boolean>;
   note: string;
+  /** Empty only while a configured exam waits for its file (`hasExamFile`). */
   cycles: PaperCycle[];
   /** Step 1: the learner said they finished studying. */
   learnedAt?: number;
@@ -80,6 +82,9 @@ export interface StudyPlanRecord {
   createdAt: number;
   updatedAt: number;
   days: Record<string, DayRecord>;
+  /** Rules configured in the app; the exam file arrives later. Absent on
+   * plans imported whole (plan JSON with its exams). */
+  setup?: ExamSetup;
 }
 export type DayStatus = "ready" | "in_progress" | "failed" | "revision_required" | "passed";
 export interface DayProgress {
@@ -160,6 +165,63 @@ function validateStudyExam(exam: ExamRecord, location: string) {
       `The rewrite difficulty label ${policy.difficultyLabel} is not in this exam taxonomy.`,
     );
 }
+/** Practice reveals answers, so it may not contain the exam's questions. */
+function assertNoRepeats(sets: PracticeSet[], exam: ExamRecord, location: string) {
+  if (sets.some((set) => set.questions.some((q) => exam.exam.paper.some((p) => p.body === q.body))))
+    planError(
+      location,
+      "A practice question repeats a question from this topic's exam. Practice shows answers, so use different questions.",
+    );
+}
+/** False while a configured exam still waits for its file. */
+export const hasExamFile = (record: StudyPlanRecord) =>
+  record.plan.days.every((d) => record.days[d.id]?.cycles.length > 0);
+/** A configured exam: a one-topic plan whose content arrives as one file. */
+export function createExamPlan(
+  setup: ExamSetup,
+  now = Date.now(),
+  id: string = crypto.randomUUID(),
+): StudyPlanRecord {
+  const plan = studyPlanSchema.parse({
+    schemaVersion: 1,
+    id,
+    name: setup.name,
+    days: [{ id: "exam", title: setup.name, examId: `${id}-exam`, summaryMd: setup.summaryMd }],
+  });
+  return {
+    id,
+    plan,
+    createdAt: now,
+    updatedAt: now,
+    days: { exam: { tasks: {}, note: "", cycles: [] } },
+    setup,
+  };
+}
+/** Attach the file read by `readExamFile`. A file is attached once. */
+export async function attachExamFile(
+  record: StudyPlanRecord,
+  content: ExamFileContent,
+  now = Date.now(),
+): Promise<StudyPlanRecord> {
+  const day = record.plan.days[0];
+  if (!record.setup) throw new Error("This plan came with its exams; there is no file to add.");
+  if (record.days[day.id].cycles.length) throw new Error("This exam already has its file.");
+  if (content.exam.id !== day.examId) throw new Error("This file was read for a different exam.");
+  validateStudyExam(content.exam, "exam.md");
+  const sets = content.practice ? [content.practice] : [];
+  assertNoRepeats(sets, content.exam, "exam.md");
+  const fingerprint = await paperFingerprint(content.exam.exam.paper);
+  return withDay(
+    record,
+    day.id,
+    (d) => ({
+      ...d,
+      ...(sets.length ? { practice: { sets, answers: {} } } : {}),
+      cycles: [{ index: 0, exam: content.exam, fingerprint, assignedAt: now }],
+    }),
+    now,
+  );
+}
 export async function importStudyPlan(
   source: string,
   library: ExamRecord[],
@@ -184,13 +246,7 @@ export async function importStudyPlan(
         planError(`days.${day.id}.practice`, `Add ${id}.practice.md to the files you import.`);
       return structuredClone(set);
     });
-    if (
-      sets.some((set) => set.questions.some((q) => exam.exam.paper.some((p) => p.body === q.body)))
-    )
-      planError(
-        `days.${day.id}.practice`,
-        "A practice file repeats a question from this topic's exam. Practice shows answers, so use different questions.",
-      );
+    assertNoRepeats(sets, exam, `days.${day.id}.practice`);
     days[day.id] = {
       tasks: {},
       note: "",

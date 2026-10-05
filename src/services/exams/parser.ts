@@ -186,6 +186,92 @@ export function parsePracticeFile(
     solutions: nodes.filter((n) => n.name === "solution").map((n) => toSolution(source, n, file)),
   };
 }
+export interface ExamFile {
+  practice: { questions: Question[]; solutions: Solution[] };
+  exam: { questions: Question[]; solutions: Solution[] };
+}
+type Part = "practice" | "exam" | "solutions";
+/** "Practice questions" → practice; "Keys and solutions" → solutions. */
+function partOf(heading: string): Part | undefined {
+  const text = heading.trim().toLowerCase();
+  if (/^practi[cs]e\b/.test(text)) return "practice";
+  if (/^exam\b/.test(text)) return "exam";
+  if (/^(answer keys?|answers|keys?|solutions?)\b/.test(text)) return "solutions";
+}
+/**
+ * One study-plan exam file: `# Practice` and `# Exam` headings split the
+ * questions; `:::solution` blocks (key + explanation) may sit anywhere,
+ * including under a `# Solutions` heading, and are matched by id. Ids are
+ * unique across the whole file for that reason. `section` is optional.
+ */
+export function parseExamFile(source: string, file = "exam.md"): ExamFile {
+  const root = processor.parse(source) as Node,
+    errors: Issue[] = [],
+    at = (n: Node) => `${file}:${n.position?.start.line}`,
+    questions: { part: "practice" | "exam"; node: Node }[] = [],
+    solutionNodes: Node[] = [];
+  let part: Part | undefined;
+  for (const n of root.children ?? []) {
+    if (n.type === "heading") {
+      const text = sourceOf(source, n)
+        .split("\n")[0]
+        .replace(/^#+\s*|\s*#*\s*$/g, "");
+      part = partOf(text);
+      if (!part)
+        errors.push({
+          severity: "error",
+          location: at(n),
+          message: `Unknown heading "${text}". Use # Practice, # Exam or # Solutions`,
+        });
+      continue;
+    }
+    if (n.type === "thematicBreak") continue;
+    if (n.type !== "containerDirective" || (n.name !== "question" && n.name !== "solution")) {
+      errors.push({
+        severity: "error",
+        location: at(n),
+        message: "Expected a heading or a :::question or :::solution block (put text inside it)",
+      });
+      continue;
+    }
+    if (!/^:{3,}\s*$/.test(sourceOf(source, n).trimEnd().split("\n").at(-1) ?? ""))
+      errors.push({ severity: "error", location: at(n), message: "Unclosed directive" });
+    if (n.name === "solution") solutionNodes.push(n);
+    else if (part === "practice" || part === "exam") questions.push({ part, node: n });
+    else
+      errors.push({
+        severity: "error",
+        location: at(n),
+        message: "Put this question under a # Practice or # Exam heading",
+      });
+  }
+  if (errors.length) throw new ExamImportError(errors);
+  const result: ExamFile = {
+      practice: { questions: [], solutions: [] },
+      exam: { questions: [], solutions: [] },
+    },
+    owner = new Map<string, "practice" | "exam">();
+  for (const { part, node } of questions) {
+    const q = toQuestion(source, node, file, { section: part });
+    if (owner.has(q.id))
+      errors.push({ severity: "error", location: q.location, message: `Duplicate id: ${q.id}` });
+    owner.set(q.id, part);
+    result[part].questions.push(q);
+  }
+  for (const node of solutionNodes) {
+    const s = toSolution(source, node, file),
+      part = owner.get(s.id);
+    if (part) result[part].solutions.push(s);
+    else
+      errors.push({
+        severity: "error",
+        location: s.location,
+        message: `No question for solution ${s.id}`,
+      });
+  }
+  if (errors.length) throw new ExamImportError(errors);
+  return result;
+}
 export const optionLabel = (index: number) => String.fromCharCode(65 + index);
 export const numeric = (s: string) =>
   /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(s.trim()) && Number.isFinite(Number(s));

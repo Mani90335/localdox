@@ -44,6 +44,9 @@ export default defineConfig({
         "src/components/docs/editor/MarkdownEditor.tsx",
         "src/components/docs/viewer/DocumentViewer.tsx",
         "src/components/docs/pages/SettingsPage.tsx",
+        // Exam Workspaces are a core offline feature.
+        "src/services/exams/ExamApp.tsx",
+        "plans/example-exam.md",
         // Split view's panes.
         "src/components/ui/resizable.tsx",
         // Search's main-thread fallback, for when the worker can't start.
@@ -70,6 +73,7 @@ export default defineConfig({
     // code splitting. Excluding these libraries causes large module waterfalls
     // and leaves CommonJS imports unconverted when a viewer is first opened.
     include: [
+      "react/jsx-runtime",
       "mermaid",
       "@babel/standalone",
       "xlsx",

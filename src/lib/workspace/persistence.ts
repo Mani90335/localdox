@@ -1,3 +1,4 @@
+import type { WorkspaceKind } from "./kinds";
 import { sameData, migrateData, migrateFileData, portableFiles } from "./binary.ts";
 import type { FileData } from "./binary.ts";
 // Local-first persistence, Excalidraw-style. No backend.
@@ -114,6 +115,7 @@ import type { Note } from "./notes";
 import type { Scratchpad } from "./rough-work";
 
 export interface WorkspaceRecord {
+  kind?: WorkspaceKind;
   /**
    * Storage revision this snapshot was read at (or last written as). A write
    * without one creates the workspace and fails if it already exists; a write
@@ -186,6 +188,7 @@ const SUMMARIES = "workspace-summaries";
 const SPLIT_BODIES = "file-bodies";
 
 export interface WorkspaceSummary {
+  kind?: WorkspaceKind;
   id: string;
   name: string;
   createdAt: number;
@@ -223,6 +226,7 @@ function summaryOf(w: WorkspaceRecord, bytes: number): WorkspaceSummary {
   return {
     id: w.id,
     name: w.name,
+    kind: w.kind ?? "reader",
     createdAt: w.createdAt,
     updatedAt: w.updatedAt,
     docCount: w.files.length,
@@ -794,11 +798,12 @@ export function emptyUI(): PersistedUI {
   };
 }
 
-export function newWorkspaceRecord(name: string): WorkspaceRecord {
+export function newWorkspaceRecord(name: string, kind: WorkspaceKind = "reader"): WorkspaceRecord {
   const now = Date.now();
   return {
     id: crypto.randomUUID(),
     name,
+    kind,
     createdAt: now,
     updatedAt: now,
     files: [],
@@ -1052,6 +1057,7 @@ export function parseWorkspaceImport(json: string): WorkspaceRecord {
   return {
     id: w.id ?? crypto.randomUUID(),
     name: w.name,
+    kind: w.kind ?? "reader",
     createdAt: w.createdAt ?? now,
     updatedAt: now,
     files: w.files.map((file) => {

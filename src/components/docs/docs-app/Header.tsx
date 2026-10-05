@@ -1,11 +1,11 @@
-import { Code2, Menu, Search, Settings } from "lucide-react";
-import { Link } from "@tanstack/react-router";
+import { Menu, Search, Settings } from "lucide-react";
 
 import { WorkspaceMenu } from "../workspace/WorkspaceMenu";
 import { WorkspaceSheet } from "../workspace/WorkspaceSheet";
 
 /** The app's top chrome bar: home, search, workspace switcher, settings. */
 export function Header({
+  onBackToExams,
   onMenu,
   hideMenu,
   hideOnDesktop,
@@ -20,6 +20,7 @@ export function Header({
   onOpenSettings,
   saveIndicator,
 }: {
+  onBackToExams?: () => void;
   onMenu: (() => void) | null;
   hideMenu?: boolean;
   hideOnDesktop?: boolean;
@@ -42,6 +43,11 @@ export function Header({
       }`}
     >
       <div className="flex items-center gap-3">
+        {onBackToExams && (
+          <button className="text-sm font-medium text-primary" onClick={onBackToExams}>
+            Back to exams
+          </button>
+        )}
         {!hideMenu && (
           <button
             onClick={() => onMenu?.()}
@@ -93,14 +99,6 @@ export function Header({
 
       <div className="flex items-center gap-3">
         {saveIndicator}
-        <Link
-          to="/code-studio"
-          className="inline-flex h-10 items-center gap-2 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-          title="Code Studio"
-        >
-          <Code2 className="h-4 w-4" />
-          <span className="hidden sm:inline">Code Studio</span>
-        </Link>
         {hasFiles && (
           <button
             onClick={onOpenPalette}

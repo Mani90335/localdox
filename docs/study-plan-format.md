@@ -1,6 +1,6 @@
 # Study plans
 
-Open **Exam Sessions** (`/exams`). It opens on **Study plan**. Choose **Upload files** and select one `.zip`, or the loose files together: the plan, every exam it uses, its practice files and images. **Try the example** loads two sample topics; **Download example files** gives the same course as a zip to copy.
+Open an **Exam Workspace** in Localdox (the legacy `/exams` link also works). Choose **More > Import files** and select a ZIP or the plan, exams, practice files and images together. **Try the example** creates a small GATE variation, and **Download example file** gives its Markdown template.
 
 Everything stays in this browser (IndexedDB). There are no accounts, dates, schedules or reminders.
 

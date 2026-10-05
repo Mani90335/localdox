@@ -1,3 +1,5 @@
+import { WorkspaceNavigation } from "./workspace/WorkspaceNavigation";
+import { LEGACY_EXAM_WORKSPACE, workspaceKind, type WorkspaceKind } from "@/lib/workspace/kinds";
 import { dataBytes } from "@/lib/workspace/binary";
 import { ConversionContext } from "@/services/doc-conversion/ConversionContext";
 import { ensureEmbedMediaFolder } from "@/lib/workspace/embed-media";
@@ -99,6 +101,7 @@ import type { AskAiPrefill } from "@/services/ai";
 // the download that stands between the reader and their first paint. Each is
 // mounted only once it is actually asked for, so the fetch overlaps the
 // interaction that triggered it.
+const ExamApp = lazy(() => import("@/services/exams/ExamApp"));
 const DocumentViewer = lazy(() =>
   import("./viewer/DocumentViewer").then((m) => ({ default: m.DocumentViewer })),
 );
@@ -296,7 +299,7 @@ function importSharedWorkspaceOnce(key: string): Promise<WorkspaceRecord> {
   return pending;
 }
 
-export function DocsApp() {
+export function DocsApp({ initialExamWorkspace = false }: { initialExamWorkspace?: boolean }) {
   const [files, setFiles] = useState<MdFile[]>([]);
   const officeDirtyPanes = useRef(new Set<string>());
   // Sidebar folders. Flat buckets over the file list — a file's `folderId` says
@@ -616,6 +619,16 @@ export function DocsApp() {
   const readingModeRef = useRef(readingMode);
   const activeHeadingIdRef = useRef<string | null>(null);
   const workspaceIdRef = useRef<string | null>(null);
+  const workspaceKindRef = useRef<WorkspaceKind>("reader");
+  const [kind, setKind] = useState<WorkspaceKind>("reader");
+  const [examMaterials, setExamMaterials] = useState(false);
+  const [examImmersive, setExamImmersive] = useState(false);
+  const showExamMaterials = (show: boolean) => {
+    if (show && workspaceIdRef.current)
+      sessionStorage.setItem("localdox:exam-materials", workspaceIdRef.current);
+    else sessionStorage.removeItem("localdox:exam-materials");
+    setExamMaterials(show);
+  };
   const workspaceNameRef = useRef("My workspace");
   const createdAtRef = useRef(Date.now());
   const hydratedRef = useRef(false);
@@ -685,6 +698,7 @@ export function DocsApp() {
       id: workspaceIdRef.current ?? crypto.randomUUID(),
       revision: storageRevisionRef.current,
       name: workspaceNameRef.current,
+      kind: workspaceKindRef.current,
       createdAt: createdAtRef.current,
       updatedAt: Date.now(),
       files: s.files.map((f) => ({
@@ -866,6 +880,9 @@ export function DocsApp() {
     // `background`: another tab saved this workspace while this one was idle.
     // Adopt its data without moving the reader's scroll or flashing a status.
     (ws: WorkspaceRecord, { background = false }: { background?: boolean } = {}) => {
+      workspaceKindRef.current = workspaceKind(ws);
+      setKind(workspaceKind(ws));
+      setExamMaterials(sessionStorage.getItem("localdox:exam-materials") === ws.id);
       storageRevisionRef.current = ws.revision;
       storedRecordRef.current = ws;
       baseRecordRef.current = ws;
@@ -990,9 +1007,30 @@ export function DocsApp() {
         // Queued behind any write still in flight — including the final save of
         // the route this instance replaced — so it reads what that route saw.
         const { list, ws } = await persistence.serial(async () => {
-          const list = await persistence.listWorkspaceSummaries();
+          let list = await persistence.listWorkspaceSummaries();
+          let hasLegacy = initialExamWorkspace;
+          if (
+            !hasLegacy &&
+            typeof indexedDB.databases === "function" &&
+            (await indexedDB.databases()).some((db) => db.name === "localdox-exams-v2")
+          ) {
+            const legacy = await import("@/services/exams/storage");
+            hasLegacy = (
+              await Promise.all([legacy.listExams(), legacy.listPlans(), legacy.listAttempts()])
+            ).some((rows) => rows.length > 0);
+          }
+          if (hasLegacy && !list.some((w) => w.id === LEGACY_EXAM_WORKSPACE)) {
+            const legacy = newWorkspaceRecord("Exam Workspace", "exam");
+            legacy.id = LEGACY_EXAM_WORKSPACE;
+            await persistence.putWorkspace(legacy);
+            list = await persistence.listWorkspaceSummaries();
+          }
           if (list.length === 0 && !hashSharedWs) return { list, ws: undefined };
-          const selected = list.find((w) => w.id === prefs.lastWorkspaceId) ?? list[0];
+          const selected =
+            list.find(
+              (w) =>
+                w.id === (initialExamWorkspace ? LEGACY_EXAM_WORKSPACE : prefs.lastWorkspaceId),
+            ) ?? list[0];
           return { list, ws: hashSharedWs ?? (await persistence.getWorkspace(selected.id)) };
         });
         if (list.length === 0 && !hashSharedWs) {
@@ -3162,13 +3200,13 @@ flowchart LR
   const storedWorkspaces = useCallback(() => persistence.listWorkspaceSummaries(), []);
 
   const newWorkspace = useCallback(
-    async (name?: string) => {
+    async (name?: string, kind: WorkspaceKind = "reader") => {
       const asked = name || window.prompt("Enter new workspace name:");
       if (!asked) return;
       const finalName = resolveWorkspaceName(asked, await storedWorkspaces());
       if (!finalName) return;
       if (!(await persistNow(true))) return;
-      const ws = newWorkspaceRecord(finalName);
+      const ws = newWorkspaceRecord(finalName, kind);
       await persistence.serial(() => persistence.putWorkspace(ws));
       await refreshWorkspaceList();
       hydrateWorkspace(ws);
@@ -3462,6 +3500,17 @@ flowchart LR
         savedMutationRef.current = mutationRef.current;
       }
       const { list, next } = await persistence.serial(async () => {
+        const record = await persistence.getWorkspace(id);
+        if (record?.kind === "exam") {
+          try {
+            await (
+              await import("@/services/exams/manage")
+            ).removeExamWorkspace(id === LEGACY_EXAM_WORKSPACE ? undefined : id);
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Could not delete exam data");
+            throw error;
+          }
+        }
         await persistence.deleteWorkspace(id);
         let list: WorkspaceSummary[] = await persistence.listWorkspaceSummaries();
         if (list.length === 0) {
@@ -3516,6 +3565,12 @@ flowchart LR
   );
 
   const clearAllStorage = useCallback(async () => {
+    try {
+      await (await import("@/services/exams/manage")).clearAllExamStorage();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not clear exam storage");
+      return;
+    }
     if (saveTimer.current) clearTimeout(saveTimer.current);
     if (scrollTimer.current) clearTimeout(scrollTimer.current);
     if (restoredFlash.current) clearTimeout(restoredFlash.current);
@@ -4255,13 +4310,53 @@ flowchart LR
       />
     ) : null);
 
+  const workspaceNavigation =
+    kind === "exam" ? (
+      <WorkspaceNavigation
+        name={workspaceNameRef.current}
+        materials={examMaterials}
+        materialCount={files.filter((file) => !file.deletedAt).length}
+        onSelect={showExamMaterials}
+      />
+    ) : null;
+
   if (booting) {
     return <div className="min-h-dvh bg-background">{statusBanner}</div>;
+  }
+
+  if (kind === "exam" && !examMaterials && workspaceId) {
+    return (
+      <div className="min-h-dvh bg-background">
+        {!examImmersive && (
+          <Header
+            onMenu={null}
+            hideMenu
+            onOpenPalette={() => {}}
+            hasFiles={false}
+            onHome={kind === "exam" ? () => showExamMaterials(false) : goHome}
+            workspaces={workspaces}
+            currentWorkspaceId={workspaceId}
+            onSwitchWorkspace={switchWorkspace}
+            onOpenSettings={openSettings}
+          />
+        )}
+        {!examImmersive && workspaceNavigation}
+        {!showSettings && (
+          <LazyBoundary>
+            <ExamApp key={workspaceId} workspaceId={workspaceId} onImmersive={setExamImmersive} />
+          </LazyBoundary>
+        )}
+        {settingsDialog}
+        {statusBanner}
+      </div>
+    );
   }
 
   if (files.length === 0) {
     return (
       <EmptyWorkspace
+        workspaceNavigation={workspaceNavigation}
+        learningMaterials={kind === "exam"}
         onHome={goHome}
         workspaces={workspaces}
         currentWorkspaceId={workspaceId}
@@ -4285,7 +4380,7 @@ flowchart LR
       <DraftJournalContext.Provider value={journalContext}>
         <div className="min-h-dvh bg-background">
           <Header
-            hideOnDesktop
+            hideOnDesktop={kind !== "exam"}
             onMenu={openDrawer}
             onOpenPalette={() => {
               openDrawer();
@@ -4294,7 +4389,7 @@ flowchart LR
             hasFiles
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={toggleSidebar}
-            onHome={goHome}
+            onHome={kind === "exam" ? () => showExamMaterials(false) : goHome}
             workspaces={workspaces}
             currentWorkspaceId={workspaceId}
             onSwitchWorkspace={switchWorkspace}
@@ -4302,6 +4397,7 @@ flowchart LR
             saveIndicator={saveState ? <SaveIndicator state={saveState} compact /> : null}
           />
 
+          {workspaceNavigation}
           <div className="flex">
             <div
               ref={sidebarWrapRef}
@@ -4774,7 +4870,7 @@ flowchart LR
                           pendingSearch?.fileId === activeFile.id ? pendingSearch : null
                         }
                         onSearchShown={clearPendingSearch}
-                        onHome={goHome}
+                        onHome={kind === "exam" ? () => showExamMaterials(false) : goHome}
                         onRenameFile={renameActiveFile}
                         onShareFile={shareActiveFile}
                         onAskAi={aiEnabled ? askAiFromSelection : undefined}

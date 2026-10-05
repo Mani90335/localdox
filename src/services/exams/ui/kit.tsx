@@ -1,5 +1,6 @@
+import { Button as AppButton } from "@/components/ui/button";
 /**
- * The Exam Sessions component kit. Small, unopinionated wrappers over the
+ * The Exam Workspaces component kit. Small, unopinionated wrappers over the
  * `ex-` classes in exams.css. Build screens from these, not from raw classes,
  * so focus rings, target sizes and states stay consistent.
  */
@@ -24,7 +25,16 @@ export function Button({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; block?: boolean }) {
   return (
-    <button
+    <AppButton
+      variant={
+        variant === "primary"
+          ? "default"
+          : variant === "secondary"
+            ? "outline"
+            : variant === "danger"
+              ? "destructive"
+              : "ghost"
+      }
       type={type}
       className={[
         "ex-btn",

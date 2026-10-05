@@ -5,6 +5,7 @@ import { measureStoredBytes } from "@/lib/workspace/storage-budget";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import { StorageProtection } from "./StorageProtection";
 import { OfflineAccess } from "./OfflineAccess";
+import { ExamFiles } from "./ExamFiles";
 
 /** Fraction of the cap at which the Bin is worth pointing at. */
 const STORAGE_PRESSURE = 0.8;
@@ -124,6 +125,8 @@ export function StorageSettings({
           <OfflineAccess />
         </Group>
       </Section>
+
+      <ExamFiles />
 
       <Section
         title="Danger zone"

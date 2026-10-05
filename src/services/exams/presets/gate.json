@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 2,
+  "meta": {
+    "id": "gate",
+    "name": "GATE",
+    "version": "1",
+    "instructionsMd": "GATE practice variation. MCQ: one correct option and one-third negative marking. MSQ: all correct options required, no partial or negative marks. NAT: numeric answer, no negative marks."
+  },
+  "timing": {
+    "mode": "global",
+    "durationMinutes": 180,
+    "pausable": false,
+    "autoSubmitOnExpiry": true
+  },
+  "sections": [
+    {
+      "id": "GA",
+      "name": "General Aptitude",
+      "questionCount": 10,
+      "composition": [
+        {
+          "marks": 1,
+          "count": 5
+        },
+        {
+          "marks": 2,
+          "count": 5
+        }
+      ]
+    },
+    {
+      "id": "subject",
+      "name": "Subject",
+      "questionCount": 55,
+      "composition": [
+        {
+          "marks": 1,
+          "count": 25
+        },
+        {
+          "marks": 2,
+          "count": 30
+        }
+      ]
+    }
+  ],
+  "questionTypes": {
+    "mcq": {
+      "optionCount": 4,
+      "negativeMarking": {
+        "fractionOfMarks": [
+          1,
+          3
+        ]
+      }
+    },
+    "msq": {
+      "optionCount": 4,
+      "scoring": "all_or_nothing",
+      "negativeMarking": null
+    },
+    "nat": {
+      "inputMode": "virtual_keypad",
+      "negativeMarking": null
+    }
+  },
+  "tools": {
+    "calculator": "scientific"
+  },
+  "navigation": {
+    "free": true,
+    "sectionLocking": false
+  },
+  "results": {
+    "scoreVisibility": "immediate",
+    "solutionsRelease": "immediate_after_submit"
+  },
+  "diagnostics": {
+    "enabled": false
+  },
+  "ui": {
+    "profile": "gate"
+  }
+}

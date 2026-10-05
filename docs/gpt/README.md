@@ -33,7 +33,7 @@ One GPT for every kind of Localdox content:
 
 ## Using what it produces
 
-- **Zip or several files:** download, then in Exam Sessions choose **Study plan → Upload files** (or **Exam library → Import exam files** for a single exam). Select the zip or all files at once.
+- **Zip or several files:** download, then in Exam Workspaces choose **Study plan → Upload files** (or **Exam library → Import exam files** for a single exam). Select the zip or all files at once.
 - **A lesson:** copy the answer with ChatGPT's copy button (Markdown source), save as `.md`, open it in Localdox.
 - **If an import fails,** Localdox lists each problem with the file and line ("paper.md, line 12: A ::: block is not closed"). Paste that message back to the GPT and ask for corrected files.
 

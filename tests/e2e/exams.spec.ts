@@ -1,8 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
-// The app opens on the study plan; standalone exams live in the library.
+// The app opens on the study plan; standalone exams live in the library, reached
+// from the workspace sidebar.
 async function openLibrary(page: Page, url = "/exams") {
   await page.goto(url);
-  await page.getByRole("button", { name: "Exam library", exact: true }).click();
+  await page.getByRole("button", { name: "Library", exact: true }).click();
 }
 test("complete exam: sealed solutions, resume, result and mistake review", async ({ page }) => {
   const solutionRequests: string[] = [];
@@ -14,7 +15,7 @@ test("complete exam: sealed solutions, resume, result and mistake review", async
       solutionRequests.push(request.url());
   });
   await openLibrary(page);
-  await expect(page.getByRole("heading", { name: "Exam library", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   await page
     .getByRole("article")
     .filter({ hasText: "Two-section reasoning quiz" })
@@ -69,7 +70,7 @@ test("developer demo is hidden from learners and loads with ?dev=1", async ({ pa
 test("mobile exam library and invalid import report", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openLibrary(page);
-  await expect(page.getByRole("heading", { name: "Exam library", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   await page.getByLabel("Import exam files", { exact: true }).setInputFiles({
     name: "invalid.exam.json",
     mimeType: "application/json",

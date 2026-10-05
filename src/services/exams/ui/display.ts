@@ -1,5 +1,5 @@
 /**
- * Presentation rules for Exam Sessions: formats, copy and derived view state.
+ * Presentation rules for Exam Workspaces: formats, copy and derived view state.
  *
  * Everything here is pure and read-only over the engine's data. Nothing in this
  * file may change grading, timing, attempts or integrity; it only decides how

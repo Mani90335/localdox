@@ -86,6 +86,14 @@ export function clearCheckpoint(token: RecoveryToken, store: RecoveryStore = loc
   // An older transaction must never clear a newer edit's recovery data.
   if (store.getItem(token.key) === token.value) store.removeItem(token.key);
 }
+/** Drop journal entries of deleted plans and attempts so none is replayed. */
+export function forgetCheckpoints(
+  { planIds = [], attemptIds = [] }: { planIds?: string[]; attemptIds?: string[] },
+  store: RecoveryStore = localStorage,
+) {
+  for (const id of planIds) store.removeItem(prefix + "plan:" + id);
+  for (const id of attemptIds) store.removeItem(prefix + "attempt:" + id);
+}
 export function recoverPending(
   attempts: AttemptRecord[],
   plans: StudyPlanRecord[],
@@ -153,4 +161,26 @@ export function recoverPending(
     }
   }
   return { attempts: recoveredAttempts, plans: recoveredPlans, tokens };
+}
+
+/** A workspace sees only its own journal, including when authored ids overlap. */
+export function workspaceRecoveryStore(
+  workspaceId: string | undefined,
+  store: RecoveryStore = localStorage,
+): RecoveryStore {
+  if (!workspaceId) return store;
+  const namespace = `localdox:workspace-exam-recovery:${encodeURIComponent(workspaceId)}:`;
+  const keys = () =>
+    Array.from({ length: store.length }, (_, i) => store.key(i)).filter(
+      (key): key is string => !!key?.startsWith(namespace),
+    );
+  return {
+    get length() {
+      return keys().length;
+    },
+    key: (i) => keys()[i]?.slice(namespace.length) ?? null,
+    getItem: (key) => store.getItem(namespace + key),
+    setItem: (key, value) => store.setItem(namespace + key, value),
+    removeItem: (key) => store.removeItem(namespace + key),
+  };
 }
