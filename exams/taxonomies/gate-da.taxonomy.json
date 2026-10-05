@@ -1,0 +1,140 @@
+{
+  "id": "gate-da",
+  "difficulty": ["easy", "medium", "hard"],
+  "causes": [
+    {
+      "id": "concept_gap",
+      "name": "Concept gap"
+    },
+    {
+      "id": "trap",
+      "name": "Fell for a known trap"
+    },
+    {
+      "id": "careless",
+      "name": "Careless or rushed"
+    },
+    {
+      "id": "time_pressure",
+      "name": "Time mismanagement"
+    },
+    {
+      "id": "overconfidence",
+      "name": "Overconfidence"
+    },
+    {
+      "id": "guess",
+      "name": "Unjustified guess"
+    }
+  ],
+  "topics": [
+    {
+      "id": "prob",
+      "name": "Probability & Statistics",
+      "children": [
+        {
+          "id": "prob.bayes",
+          "name": "Conditional probability & Bayes"
+        },
+        {
+          "id": "prob.dist",
+          "name": "Distributions"
+        },
+        {
+          "id": "prob.stats",
+          "name": "Descriptive & inferential statistics"
+        }
+      ]
+    },
+    {
+      "id": "la",
+      "name": "Linear Algebra",
+      "children": [
+        {
+          "id": "la.eigen",
+          "name": "Eigenvalues & eigenvectors"
+        },
+        {
+          "id": "la.decomp",
+          "name": "Matrix decompositions"
+        }
+      ]
+    },
+    {
+      "id": "calc",
+      "name": "Calculus & Optimization",
+      "children": [
+        {
+          "id": "calc.grad",
+          "name": "Gradients & optimization"
+        }
+      ]
+    },
+    {
+      "id": "prog",
+      "name": "Programming, DS & Algorithms",
+      "children": []
+    },
+    {
+      "id": "dbms",
+      "name": "Databases & Warehousing",
+      "children": []
+    },
+    {
+      "id": "ml",
+      "name": "Machine Learning",
+      "children": []
+    },
+    {
+      "id": "ai",
+      "name": "Artificial Intelligence",
+      "children": []
+    },
+    {
+      "id": "ga",
+      "name": "General Aptitude",
+      "children": [
+        {
+          "id": "ga.verbal",
+          "name": "Verbal"
+        },
+        {
+          "id": "ga.quant",
+          "name": "Quantitative"
+        }
+      ]
+    }
+  ],
+  "traps": [
+    {
+      "id": "sign_error",
+      "name": "Sign error",
+      "cause": "careless"
+    },
+    {
+      "id": "misread_negation",
+      "name": "Missed NOT / EXCEPT",
+      "cause": "careless"
+    },
+    {
+      "id": "rounding_nat",
+      "name": "Rounding or precision slip (NAT)",
+      "cause": "careless"
+    },
+    {
+      "id": "n_vs_n_minus_1",
+      "name": "Population vs sample formula",
+      "cause": "trap"
+    },
+    {
+      "id": "conditional_vs_joint",
+      "name": "Conditional vs joint probability",
+      "cause": "trap"
+    },
+    {
+      "id": "msq_partial",
+      "name": "Picked only some correct options (MSQ)",
+      "cause": "trap"
+    }
+  ]
+}

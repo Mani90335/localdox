@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 2,
+  "meta": {
+    "id": "gate-2027-da",
+    "name": "GATE 2027: Data Science & AI (DA)",
+    "version": "1.0",
+    "instructionsMd": "# GATE DA sample exam\n\nThis 12-question practice paper demonstrates the recent GATE DA pattern; it is not an official paper. The full pattern is 65 questions in 180 minutes.\n\n- MCQ: one correct option; one-third negative marking.\n- MSQ: all correct options required; no negative marking.\n- NAT: enter a number; no negative marking.\n\nFullscreen is required. More than three integrity violations submits the attempt. Closing the app does not stop the clock. Verify the pattern and syllabus against the official GATE 2027 brochure."
+  },
+  "timing": {
+    "mode": "global",
+    "durationMinutes": 180,
+    "autoSubmitOnExpiry": true,
+    "pausable": false,
+    "warnAtMinutesLeft": [30, 10, 1]
+  },
+  "sections": [
+    {
+      "id": "GA",
+      "name": "General Aptitude",
+      "questionCount": 10,
+      "composition": [
+        {
+          "marks": 1,
+          "count": 5
+        },
+        {
+          "marks": 2,
+          "count": 5
+        }
+      ]
+    },
+    {
+      "id": "DA",
+      "name": "Data Science & AI",
+      "questionCount": 55,
+      "composition": [
+        {
+          "marks": 1,
+          "count": 25
+        },
+        {
+          "marks": 2,
+          "count": 30
+        }
+      ]
+    }
+  ],
+  "questionTypes": {
+    "mcq": {
+      "optionCount": 4,
+      "selection": "single",
+      "negativeMarking": {
+        "fractionOfMarks": [1, 3]
+      }
+    },
+    "msq": {
+      "selection": "multiple",
+      "scoring": "all_or_nothing",
+      "negativeMarking": null
+    },
+    "nat": {
+      "inputMode": "virtual_keypad",
+      "negativeMarking": null
+    }
+  },
+  "navigation": {
+    "free": true,
+    "sectionLocking": false,
+    "markForReview": true,
+    "markedForReviewAnswerCounts": true,
+    "clearResponse": true,
+    "shuffleQuestions": false,
+    "shuffleOptions": false
+  },
+  "tools": {
+    "calculator": "scientific"
+  },
+  "integrity": {
+    "requireFullscreen": true,
+    "maxTabSwitches": 3,
+    "onViolation": "warn_then_autosubmit",
+    "blockCopyPaste": true,
+    "blockContextMenu": true
+  },
+  "results": {
+    "scoreVisibility": "immediate",
+    "solutionsRelease": "immediate_after_submit",
+    "showSectionBreakdown": true,
+    "showTimePerQuestion": true,
+    "rounding": 2
+  },
+  "attempts": {
+    "max": 3,
+    "resumeInterrupted": true
+  },
+  "diagnostics": {
+    "enabled": true,
+    "taxonomyRef": "../taxonomies/gate-da.taxonomy.json",
+    "capture": {
+      "eventLog": true,
+      "confidence": {
+        "mode": "post_submit",
+        "levels": ["sure", "unsure", "guess"]
+      },
+      "selfTagging": true
+    },
+    "pacing": {
+      "expectedSeconds": {
+        "derive": "proportional_to_marks"
+      },
+      "slowRatio": 1.5,
+      "fastRatio": 0.4
+    },
+    "causePriority": [
+      "trap",
+      "overconfidence",
+      "careless",
+      "time_pressure",
+      "concept_gap",
+      "guess"
+    ],
+    "impact": {
+      "marksLostWeight": 1.0,
+      "timeWastedPerMinuteWeight": 0.25
+    },
+    "disabledRules": [],
+    "rules": [
+      {
+        "id": "slow_on_easy",
+        "scope": "question",
+        "label": "Time sink on an easy question",
+        "cause": "time_pressure",
+        "severity": 2,
+        "when": {
+          "all": [
+            {
+              "signal": "difficulty",
+              "op": "==",
+              "value": "easy"
+            },
+            {
+              "signal": "timeRatio",
+              "op": ">=",
+              "value": 1.5
+            }
+          ]
+        },
+        "advice": "{topic}: you spent {spentSec}s on a question budgeted at {expectedSec}s. Easy questions should be banked fast; cap them and move on."
+      }
+    ],
+    "report": {
+      "topWeaknessCount": 5,
+      "minEvidenceQuestions": 2,
+      "persistentWeaknessMinAttempts": 2
+    }
+  },
+  "sampleMode": true,
+  "progression": {
+    "passPercentage": 80,
+    "rewriteDifficultyPercentage": 50,
+    "difficultyLabel": "hard"
+  }
+}
