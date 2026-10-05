@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as MdReaderRouteImport } from './routes/md-reader'
-import { Route as CodeStudioRouteImport } from './routes/code-studio'
 import { Route as ExamsRouteImport } from './routes/exams'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -23,11 +22,6 @@ const SettingsRoute = SettingsRouteImport.update({
 const MdReaderRoute = MdReaderRouteImport.update({
   id: '/md-reader',
   path: '/md-reader',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CodeStudioRoute = CodeStudioRouteImport.update({
-  id: '/code-studio',
-  path: '/code-studio',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ExamsRoute = ExamsRouteImport.update({
@@ -43,14 +37,12 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/code-studio': typeof CodeStudioRoute
   '/exams': typeof ExamsRoute
   '/md-reader': typeof MdReaderRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/code-studio': typeof CodeStudioRoute
   '/exams': typeof ExamsRoute
   '/md-reader': typeof MdReaderRoute
   '/settings': typeof SettingsRoute
@@ -58,22 +50,20 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/code-studio': typeof CodeStudioRoute
   '/exams': typeof ExamsRoute
   '/md-reader': typeof MdReaderRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/code-studio' | '/exams' | '/md-reader' | '/settings'
+  fullPaths: '/' | '/exams' | '/md-reader' | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/code-studio' | '/exams' | '/md-reader' | '/settings'
-  id: '__root__' | '/' | '/code-studio' | '/exams' | '/md-reader' | '/settings'
+  to: '/' | '/exams' | '/md-reader' | '/settings'
+  id: '__root__' | '/' | '/exams' | '/md-reader' | '/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  CodeStudioRoute: typeof CodeStudioRoute
   ExamsRoute: typeof ExamsRoute
   MdReaderRoute: typeof MdReaderRoute
   SettingsRoute: typeof SettingsRoute
@@ -95,13 +85,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MdReaderRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/code-studio': {
-      id: '/code-studio'
-      path: '/code-studio'
-      fullPath: '/code-studio'
-      preLoaderRoute: typeof CodeStudioRouteImport
-  parentRoute: typeof rootRouteImport
-    }
     '/exams': {
       id: '/exams'
       path: '/exams'
@@ -121,7 +104,6 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  CodeStudioRoute: CodeStudioRoute,
   ExamsRoute: ExamsRoute,
   MdReaderRoute: MdReaderRoute,
   SettingsRoute: SettingsRoute,
