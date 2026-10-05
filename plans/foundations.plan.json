@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "foundations-week",
+  "name": "Build your foundations",
+  "description": "A two-day example: learn, test your understanding, and move forward when you are ready.",
+  "days": [
+    {
+      "id": "day-1",
+      "title": "Reasoning & arithmetic",
+      "examId": "section-quiz",
+      "estimatedMinutes": 35,
+      "summaryMd": "Start with the fundamentals. Work through a few examples, then take a short exam to check your understanding.",
+      "tasks": [
+        {
+          "id": "read",
+          "label": "Review even numbers and divisibility"
+        },
+        {
+          "id": "practice",
+          "label": "Practice rounding fractions to two decimal places"
+        },
+        {
+          "id": "recall",
+          "label": "Solve three examples without looking at notes"
+        }
+      ]
+    },
+    {
+      "id": "day-2",
+      "title": "Connect the concepts",
+      "examId": "gate-2027-da",
+      "estimatedMinutes": 210,
+      "summaryMd": "Bring probability, algebra and reasoning together. Use your weakness report to decide what to revisit.",
+      "tasks": [
+        {
+          "id": "review",
+          "label": "Revisit yesterday\u2019s mistakes and notes"
+        },
+        {
+          "id": "probability",
+          "label": "Review conditional and joint probability"
+        },
+        {
+          "id": "algebra",
+          "label": "Practice determinants and eigenvalues"
+        }
+      ]
+    }
+  ]
+}

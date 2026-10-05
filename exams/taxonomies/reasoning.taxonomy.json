@@ -1,0 +1,47 @@
+{
+  "id": "reasoning",
+  "difficulty": ["easy", "medium", "hard"],
+  "causes": [
+    {
+      "id": "concept_gap",
+      "name": "Concept gap"
+    },
+    {
+      "id": "trap",
+      "name": "Fell for a known trap"
+    },
+    {
+      "id": "careless",
+      "name": "Careless or rushed"
+    },
+    {
+      "id": "time_pressure",
+      "name": "Time mismanagement"
+    },
+    {
+      "id": "overconfidence",
+      "name": "Overconfidence"
+    },
+    {
+      "id": "guess",
+      "name": "Unjustified guess"
+    }
+  ],
+  "topics": [
+    {
+      "id": "logic",
+      "name": "Logic"
+    },
+    {
+      "id": "arithmetic",
+      "name": "Arithmetic"
+    }
+  ],
+  "traps": [
+    {
+      "id": "boundary",
+      "name": "Missed a boundary",
+      "cause": "careless"
+    }
+  ]
+}

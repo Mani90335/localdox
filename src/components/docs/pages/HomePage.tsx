@@ -103,6 +103,14 @@ export function HomePage({
           </div>
         </div>
 
+        <a
+          href="/exams"
+          className="mt-6 inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+        >
+          Study plans & exams · daily progress and weakness reports{" "}
+          <ArrowRight className="h-4 w-4" />
+        </a>
+
         <section className="mt-12">
           <div className="mb-6 flex items-end justify-between gap-4">
             <div className="min-w-0">

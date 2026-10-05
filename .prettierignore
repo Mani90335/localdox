@@ -6,3 +6,6 @@ pnpm-lock.yaml
 package-lock.json
 bun.lock
 routeTree.gen.ts
+
+# remark-directive exam containers must retain their closing delimiter indentation.
+exams/**/*.md

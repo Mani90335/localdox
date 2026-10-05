@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "meta": {
+    "id": "section-quiz-rewrite",
+    "name": "Reasoning quiz \u00b7 new paper",
+    "version": "1.0",
+    "instructionsMd": "# Ten-minute quiz\n\nTwo locked five-minute sections. MSQ awards proportional credit when no wrong option is selected. Finish a section to move forward; you cannot return."
+  },
+  "timing": {
+    "mode": "per_section",
+    "durationMinutes": 10
+  },
+  "sections": [
+    {
+      "id": "logic",
+      "name": "Logic",
+      "questionCount": 1,
+      "durationMinutes": 5
+    },
+    {
+      "id": "numbers",
+      "name": "Numbers",
+      "questionCount": 1,
+      "durationMinutes": 5
+    }
+  ],
+  "questionTypes": {
+    "msq": {
+      "scoring": "partial_no_wrong"
+    },
+    "nat": {
+      "inputMode": "keyboard"
+    }
+  },
+  "tools": {
+    "calculator": "basic"
+  },
+  "diagnostics": {
+    "taxonomyRef": "../taxonomies/reasoning.taxonomy.json",
+    "report": {
+      "minEvidenceQuestions": 1
+    }
+  },
+  "attempts": {
+    "max": 3,
+    "resumeInterrupted": true
+  },
+  "progression": {
+    "passPercentage": 80,
+    "rewriteDifficultyPercentage": 50,
+    "difficultyLabel": "hard"
+  }
+}
