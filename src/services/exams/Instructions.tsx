@@ -6,6 +6,7 @@ import { Button, Chip, Dialog, DialogClose, Segmented, StatBlocks } from "./ui/k
 import { ExamAssets } from "./ExamMarkdown";
 import { Glyph, type Status } from "./ui/Palette";
 import {
+  answeringSteps,
   formatDuration,
   isShortSample,
   markingCards,
@@ -21,12 +22,21 @@ import {
 /** Author instructions often repeat the title as a leading "# Heading". */
 const withoutLeadingTitle = (md: string) => md.replace(/^\s*#\s+[^\n]*\n+/, "").trim();
 
-const LEGEND: { status: Status; label: string }[] = [
-  { status: "not_visited", label: "Not visited" },
-  { status: "not_answered", label: "Not answered" },
-  { status: "answered", label: "Answered" },
-  { status: "marked", label: "Marked for review" },
-  { status: "answered_marked", label: "Answered & marked for review" },
+/** The palette legend in the words of a TCS iON instructions page. */
+const legend = (counted: boolean): { status: Status; label: string }[] => [
+  { status: "not_visited", label: "You have not visited the question yet." },
+  { status: "not_answered", label: "You have not answered the question." },
+  { status: "answered", label: "You have answered the question." },
+  {
+    status: "marked",
+    label: "You have not answered the question, but have marked it for review.",
+  },
+  {
+    status: "answered_marked",
+    label: counted
+      ? "Answered and marked for review. It will be evaluated."
+      : "Answered and marked for review. It won't be evaluated.",
+  },
 ];
 
 /** Everything a candidate should know before starting. Shared by the page and the library preview. */
@@ -103,21 +113,27 @@ export function InstructionsSummary({
 
       <section className="ex-section" aria-labelledby="xi-palette">
         <h2 id="xi-palette">Question palette</h2>
-        <ul
-          className="xr-legend"
-          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}
-        >
-          {LEGEND.filter((l) => r.navigation.markForReview || !l.status.includes("marked")).map(
-            (l) => (
+        <ul className="xr-legend" style={{ gridTemplateColumns: "1fr" }}>
+          {legend(r.navigation.markedForReviewAnswerCounts)
+            .filter((l) => r.navigation.markForReview || !l.status.includes("marked"))
+            .map((l) => (
               <li key={l.status}>
                 <span className="xr-glyph">
                   <Glyph status={l.status} family={family} />
                 </span>
                 <span style={{ color: "var(--ex-text)" }}>{l.label}</span>
               </li>
-            ),
-          )}
+            ))}
         </ul>
+      </section>
+
+      <section className="ex-section" aria-labelledby="xi-answering">
+        <h2 id="xi-answering">Answering a question</h2>
+        <ol className="xi-list">
+          {answeringSteps(r).map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
       </section>
 
       <section className="ex-section xi-rules" aria-labelledby="xi-rules">

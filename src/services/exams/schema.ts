@@ -183,6 +183,13 @@ export const rulesetSchema = z
         markForReview: z.boolean().default(true),
         markedForReviewAnswerCounts: z.boolean().default(true),
         clearResponse: z.boolean().default(true),
+        /**
+         * TCS iON / GATE: choosing an option only selects it. It counts once
+         * saved with Save & next (or Mark for review & next); leaving the
+         * question any other way drops an unsaved choice. Off: every choice
+         * is saved as it is made.
+         */
+        requireSave: z.boolean().default(false),
         shuffleQuestions: z.boolean().default(false),
         shuffleOptions: z.boolean().default(false),
       })

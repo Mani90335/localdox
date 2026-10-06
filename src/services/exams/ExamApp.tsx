@@ -33,12 +33,13 @@ import {
 import { ExamImportError } from "./schema";
 import type { Solution } from "./parser";
 import { ExamScreen, type SaveState } from "./ExamScreen";
-import { ResultScreen, ReviewScreen } from "./Reports";
-import { InstructionsScreen } from "./Instructions";
+import { ResultScreen } from "./Reports";
+import { InstructionsScreen, InstructionsSummary } from "./Instructions";
 import { ExamPanel } from "./ExamPanel";
 import { topicList } from "./topics";
 import { Button, EmptyState, LinkButton, Skeleton, Toast, ToastRegion } from "./ui/kit";
-import { describeImportIssues, setupFacts } from "./ui/display";
+import { describeImportIssues, sameResponse, setupFacts } from "./ui/display";
+import { isAnswered } from "./scoring";
 import { paperPlanId, sourceFingerprint, syncPaperPlan, type RulesLookup } from "./paper-plan";
 import {
   prepareStudyAttempt,
@@ -542,9 +543,12 @@ export default function ExamApp({
       setError(errorText(e));
     }
   }
+  // Only the timed part covers the screen. Afterwards the result and its
+  // answers sit in the reader, beside the workspace.
   const session = current?.session,
     active = session?.phase === "in_progress",
-    immersive = active || session?.phase === "instructions";
+    immersive = active || session?.phase === "instructions",
+    reporting = !!current && !immersive;
   const studyRecord = current?.study
     ? plans.find((p) => p.id === current.study!.planId)
     : undefined;
@@ -580,7 +584,6 @@ export default function ExamApp({
 
   const paperRecord = plans.find((p) => p.id === planId);
   const item = paperRecord ? topicList([paperRecord], attempts)[0] : undefined;
-  const immersiveView = !!current;
 
   let panel: ReactNode;
   if (rules.kind === "missing" || rules.kind === "ambiguous")
@@ -661,84 +664,105 @@ export default function ExamApp({
       </>
     );
 
-  const immersiveContent = !current ? null : session!.phase === "instructions" ? (
-    <InstructionsScreen
-      record={current.exam}
-      ack={ack}
-      busy={busy}
-      dev={dev}
-      exitLabel="Back to paper"
-      onAck={setAck}
-      onStart={(scale) => void start(scale)}
-      onExit={backToPaper}
-    />
-  ) : active ? (
-    <ExamScreen
-      exam={current.exam.exam}
-      assets={current.exam}
-      session={session!}
-      now={now}
-      saveState={saveState}
-      onAnswer={(v) =>
-        update((s, a) =>
-          setAnswer(
-            s,
-            a.exam.exam.rules,
-            a.exam.exam.paper.find((q) => q.id === s.currentId)!,
-            v,
-          ),
-        )
-      }
-      onNavigate={(id) => update((s, a) => navigate(s, a.exam.exam.rules, a.exam.exam.paper, id))}
-      onMark={() =>
-        update((s, a) => {
-          const marked = markQuestion(s, a.exam.exam.rules, !questionState(s, s.currentId).marked),
-            id = s.order[s.order.indexOf(s.currentId) + 1];
-          if (!id) return marked;
-          try {
-            return navigate(marked, a.exam.exam.rules, a.exam.exam.paper, id);
-          } catch {
-            return marked;
-          }
-        })
-      }
-      onClear={() =>
-        update((s, a) =>
-          setAnswer(
-            s,
-            a.exam.exam.rules,
-            a.exam.exam.paper.find((q) => q.id === s.currentId)!,
-            null,
-          ),
-        )
-      }
-      onSubmit={() => update((s) => submitSession(s))}
-      onFinishSection={() =>
-        update((s, a) => finishSection(s, a.exam.exam.rules, a.exam.exam.paper))
-      }
-      onPause={() =>
-        update((s, a) =>
-          s.pausedAt === undefined
-            ? pauseSession(s, a.exam.exam.rules)
-            : unpauseSession(s, a.exam.exam.rules),
-        )
-      }
-      onConfidence={(c) => update((s, a) => setConfidence(s, a.exam.exam.rules, s.currentId, c))}
-    />
-  ) : session!.phase === "review" && current.analysis && solutions.length ? (
-    <ReviewScreen
-      attempt={current}
-      solutions={solutions}
-      dev={dev}
-      onBack={() => update((s) => ({ ...s, phase: "submitted" }))}
-    />
-  ) : session!.phase === "submitted" && current.analysis ? (
+  const immersiveContent =
+    !current || !immersive ? null : session!.phase === "instructions" ? (
+      <InstructionsScreen
+        record={current.exam}
+        ack={ack}
+        busy={busy}
+        dev={dev}
+        exitLabel="Back to paper"
+        onAck={setAck}
+        onStart={(scale) => void start(scale)}
+        onExit={backToPaper}
+      />
+    ) : active ? (
+      <ExamScreen
+        exam={current.exam.exam}
+        assets={current.exam}
+        session={session!}
+        now={now}
+        saveState={saveState}
+        instructions={
+          <InstructionsSummary
+            record={current.exam}
+            dev={false}
+            scale={current.session.timeScale ?? 1}
+          />
+        }
+        onAnswer={(v) =>
+          update((s, a) =>
+            setAnswer(
+              s,
+              a.exam.exam.rules,
+              a.exam.exam.paper.find((q) => q.id === s.currentId)!,
+              v,
+            ),
+          )
+        }
+        onNavigate={(id) => update((s, a) => navigate(s, a.exam.exam.rules, a.exam.exam.paper, id))}
+        onSave={(response, step) =>
+          // Save & next and Mark for review & next are one step, saved together.
+          update((s, a) => {
+            const rules = a.exam.exam.rules,
+              paper = a.exam.exam.paper,
+              q = paper.find((q) => q.id === s.currentId)!;
+            let next = s;
+            if (
+              response !== undefined &&
+              !sameResponse(response, questionState(next, q.id).response) &&
+              (isAnswered(response) || rules.navigation.clearResponse)
+            )
+              next = setAnswer(next, rules, q, response);
+            if (
+              step.mark !== undefined &&
+              rules.navigation.markForReview &&
+              step.mark !== questionState(next, q.id).marked
+            )
+              next = markQuestion(next, rules, step.mark);
+            if (step.nextId)
+              try {
+                next = navigate(next, rules, paper, step.nextId);
+              } catch {
+                // The last question the rules let you reach: stay on it, saved.
+              }
+            return next;
+          })
+        }
+        onClear={() =>
+          update((s, a) =>
+            setAnswer(
+              s,
+              a.exam.exam.rules,
+              a.exam.exam.paper.find((q) => q.id === s.currentId)!,
+              null,
+            ),
+          )
+        }
+        onSubmit={() => update((s) => submitSession(s))}
+        onFinishSection={() =>
+          update((s, a) => finishSection(s, a.exam.exam.rules, a.exam.exam.paper))
+        }
+        onPause={() =>
+          update((s, a) =>
+            s.pausedAt === undefined
+              ? pauseSession(s, a.exam.exam.rules)
+              : unpauseSession(s, a.exam.exam.rules),
+          )
+        }
+        onConfidence={(c) => update((s, a) => setConfidence(s, a.exam.exam.rules, s.currentId, c))}
+      />
+    ) : null;
+
+  const graded = reporting && ["submitted", "review"].includes(session!.phase) && current!.analysis;
+  const reportContent = !reporting ? null : graded ? (
     <ResultScreen
-      attempt={current}
+      attempt={current!}
+      solutions={solutions}
       studyDay={studyDay}
+      focusAnswers={session!.phase === "review"}
       dev={dev}
-      onStudyPlan={backToPaper}
-      onReview={() => update((s, a) => openReview(s, a.exam.exam.rules))}
+      onBack={backToPaper}
     />
   ) : (
     <div className="ex-page" role="status">
@@ -814,19 +838,24 @@ export default function ExamApp({
         {toasts}
       </div>
     );
-  // A session, result or review takes the whole screen, above the reader,
-  // the way the exam hall does; the paper's panel stays underneath.
+  // The instructions and the running exam take the whole screen, above the
+  // reader, the way the exam hall does; the paper's panel stays underneath.
+  // The result and its answers replace the panel in place.
   return (
     <>
       <div className="exam-app exam-app--embedded">
-        <fieldset disabled={busy || storageFailed || immersiveView} className="exam-root-fieldset">
-          {panel}
+        <fieldset
+          disabled={busy || storageFailed || immersive}
+          className="exam-root-fieldset"
+          key={reporting ? "report" : "paper"}
+        >
+          {reporting ? reportContent : panel}
         </fieldset>
-        {!immersiveView && toasts}
+        {!immersive && toasts}
       </div>
-      {immersiveView &&
+      {immersive &&
         createPortal(
-          <div className="exam-app exam-overlay" data-immersive={immersive}>
+          <div className="exam-app exam-overlay" data-immersive="true">
             <fieldset disabled={busy || storageFailed} className="exam-root-fieldset">
               {immersiveContent}
             </fieldset>

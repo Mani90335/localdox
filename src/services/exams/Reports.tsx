@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Check } from "lucide-react";
 import type { AttemptRecord } from "./storage";
 import type { Solution } from "./parser";
 import { questionState, canReleaseScore, canReleaseSolutions } from "./session";
 import { ExamAssets, ExamMarkdown } from "./ExamMarkdown";
 import { scorePercentage, type DayProgress } from "./study-plan";
-import { Button, Chip, EmptyState, PageHeader, Segmented, StatBlocks, type Tone } from "./ui/kit";
+import { Button, Chip, EmptyState, Segmented, Skeleton, StatBlocks, type Tone } from "./ui/kit";
 import {
   formatDateTime,
   formatDuration,
@@ -29,17 +29,26 @@ function BarRow({ label, share, value }: { label: string; share: number; value: 
   );
 }
 
+/**
+ * One screen after submission: the result, then every answer with its key and
+ * solution (once the rules release them). It sits in the reader beside the
+ * workspace, not over it: the timed part is over.
+ */
 export function ResultScreen({
   attempt,
-  onReview,
+  solutions,
   studyDay,
-  onStudyPlan,
+  focusAnswers,
+  onBack,
   dev,
 }: {
   attempt: AttemptRecord;
-  onReview: () => void;
+  /** Empty while they load; the answers wait for them. */
+  solutions: Solution[];
   studyDay?: DayProgress;
-  onStudyPlan?: () => void;
+  /** Opened to review answers: start at them rather than the score. */
+  focusAnswers?: boolean;
+  onBack: () => void;
   dev: boolean;
 }) {
   const a = attempt.analysis!,
@@ -57,8 +66,27 @@ export function ResultScreen({
   const scoreText = `${a.score.toFixed(r.results.rounding)} / ${trimNumber(a.totalMarks)}`;
   const passed = studyDay?.status === "passed",
     inPlan = !!studyDay && scoreReleased;
+  const root = useRef<HTMLDivElement>(null),
+    heading = useRef<HTMLHeadingElement>(null),
+    answersHeading = useRef<HTMLHeadingElement>(null);
+  // The screen replaces the exam the learner just left, so focus lands on it
+  // rather than on the page. Reviewing starts at the answers.
+  useEffect(() => {
+    const answers = focusAnswers && solutionsReleased;
+    (answers ? answersHeading : heading).current?.focus({ preventScroll: true });
+    // The reader's header is sticky; scroll-margin-top (exams.css) clears it.
+    const target = (answers ? answersHeading : root).current;
+    if (answers || (target && target.getBoundingClientRect().top < 64))
+      target?.scrollIntoView({ block: "start" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
-    <div className="ex-page">
+    <div className="ex-page xs-result" ref={root}>
+      <div className="xs-back">
+        <Button variant="ghost" onClick={onBack}>
+          <ArrowLeft size={16} aria-hidden="true" /> Back to paper
+        </Button>
+      </div>
       <section className="xs-hero" aria-label="Result">
         <p className="ex-meta">
           <span>{r.meta.name}</span>
@@ -67,6 +95,8 @@ export function ResultScreen({
         {inPlan ? (
           <div className="ex-stack" style={{ gap: 4 }}>
             <h1
+              ref={heading}
+              tabIndex={-1}
               className={passed ? "xs-pass" : "xs-fail"}
               style={{ fontSize: 36, letterSpacing: "-0.03em" }}
             >
@@ -82,7 +112,9 @@ export function ResultScreen({
           </div>
         ) : (
           <div className="ex-stack" style={{ gap: 4 }}>
-            <h1 className="sr-only">Exam result</h1>
+            <h1 ref={heading} tabIndex={-1} className="sr-only">
+              Exam result
+            </h1>
             <div className="xs-verdict">
               {scoreReleased ? (
                 <>
@@ -102,24 +134,9 @@ export function ResultScreen({
             )}
           </div>
         )}
-        <div className="ex-row">
-          {solutionsReleased && (
-            <Button variant="primary" onClick={onReview}>
-              Review answers &amp; solutions
-            </Button>
-          )}
-          {studyDay && <Button onClick={onStudyPlan}>Back to paper</Button>}
-        </div>
-        {!solutionsReleased && (
-          <p className="ex-small">
-            {r.results.solutionsRelease === "never"
-              ? "This exam doesn't release solutions."
-              : `Solutions release ${formatDateTime(Date.parse(r.results.releaseAt!))}.`}
-          </p>
-        )}
       </section>
 
-      <div className="ex-stack" style={{ gap: 32, marginTop: 32 }}>
+      <div className="ex-stack" style={{ gap: 32, marginTop: 24 }}>
         <StatBlocks
           label="Summary"
           items={[
@@ -162,6 +179,28 @@ export function ResultScreen({
             </div>
           </section>
         )}
+        <section className="ex-section" aria-labelledby="xs-answers">
+          <h2 id="xs-answers" ref={answersHeading} tabIndex={-1}>
+            Answers &amp; solutions
+          </h2>
+          {solutionsReleased ? (
+            solutions.length ? (
+              <Answers attempt={attempt} solutions={solutions} dev={dev} />
+            ) : (
+              <div className="ex-stack" role="status" aria-busy="true" style={{ gap: 16 }}>
+                <span className="sr-only">Loading answers…</span>
+                <Skeleton height={40} />
+                <Skeleton height={160} />
+              </div>
+            )
+          ) : (
+            <p className="ex-small">
+              {r.results.solutionsRelease === "never"
+                ? "This exam doesn't release solutions."
+                : `Solutions release ${formatDateTime(Date.parse(r.results.releaseAt!))}.`}
+            </p>
+          )}
+        </section>
         {dev && (
           <details className="xi-author">
             <summary>Session event log (dev)</summary>
@@ -189,6 +228,9 @@ export function ResultScreen({
             </div>
           </details>
         )}
+        <div className="ex-row">
+          <Button onClick={onBack}>Back to paper</Button>
+        </div>
       </div>
     </div>
   );
@@ -240,19 +282,20 @@ export function AnswerKey({
   );
 }
 
-export function ReviewScreen({
+/**
+ * Every question with the learner's answer, the key and the solution, behind a
+ * map that shows each outcome at a glance and jumps to it.
+ */
+function Answers({
   attempt,
   solutions,
-  onBack,
   dev,
 }: {
   attempt: AttemptRecord;
   solutions: Solution[];
-  onBack: () => void;
   dev: boolean;
 }) {
-  const { exam, session, analysis } = attempt,
-    rules = exam.exam.rules;
+  const { exam, session, analysis } = attempt;
   const ordered = session.order
     .map((id) => exam.exam.paper.find((q) => q.id === id))
     .filter((q): q is NonNullable<typeof q> => !!q);
@@ -260,100 +303,109 @@ export function ReviewScreen({
       String(analysis!.questions.find((a) => a.id === id)?.signals.outcome ?? "unanswered"),
     mistakes = ordered.filter((q) => outcomeOf(q.id) !== "correct").length;
   const [filter, setFilter] = useState<"mistakes" | "all">(mistakes ? "mistakes" : "all");
-  if (!canReleaseSolutions(rules))
-    return (
-      <div className="ex-page">
-        <EmptyState
-          title="Solutions aren't released yet"
-          actions={<Button onClick={onBack}>Back to result</Button>}
-        />
-      </div>
-    );
   const shown = ordered
     .map((q, i) => ({ q, n: i + 1 }))
     .filter(({ q }) => filter === "all" || outcomeOf(q.id) !== "correct");
+  const jump = (id: string) => {
+    if (filter === "mistakes" && outcomeOf(id) === "correct") setFilter("all");
+    // After the filter renders the card.
+    requestAnimationFrame(() => {
+      const card = document.getElementById(`xs-q-${id}`);
+      card?.scrollIntoView({ block: "start", behavior: "smooth" });
+      card?.focus({ preventScroll: true });
+    });
+  };
   return (
     <ExamAssets source={exam}>
-      <div className="ex-page">
-        <div style={{ marginBottom: 8 }}>
-          <Button variant="ghost" onClick={onBack}>
-            <ArrowLeft size={16} aria-hidden="true" /> Back to result
-          </Button>
-        </div>
-        <PageHeader
-          title="Answer review"
-          subtitle={rules.meta.name}
-          actions={
-            <Segmented
-              label="Show"
-              value={filter}
-              onChange={setFilter}
-              options={[
-                { value: "mistakes", label: `Mistakes (${mistakes})` },
-                { value: "all", label: `All (${ordered.length})` },
-              ]}
-            />
-          }
-        />
-        <div className="ex-stack">
-          {!shown.length && (
-            <EmptyState quiet icon={<Check size={20} />} title="No mistakes">
-              Every question was answered correctly.
-            </EmptyState>
-          )}
-          {shown.map(({ q, n }) => {
-            const solution = solutions.find((s) => s.id === q.id)!,
-              state = questionState(session, q.id),
-              a = analysis!.questions.find((a) => a.id === q.id)!,
-              outcome = OUTCOME[outcomeOf(q.id)] ?? OUTCOME.unanswered;
-            const picked = Array.isArray(state.response)
-              ? state.response
-              : state.response
-                ? [state.response]
-                : [];
+      <div className="ex-stack" style={{ gap: 16 }}>
+        <nav className="xs-map" aria-label="Questions by outcome">
+          {ordered.map((q, i) => {
+            const outcome = OUTCOME[outcomeOf(q.id)] ?? OUTCOME.unanswered;
             return (
-              <article className="ex-surface xs-review-q" key={q.id} aria-labelledby={`rq-${q.id}`}>
-                <header className="ex-row">
-                  <h2 id={`rq-${q.id}`} style={{ fontSize: 16 }}>
-                    Question {n}
-                  </h2>
-                  <Chip tone={outcome.tone}>{outcome.label}</Chip>
-                  <span className="ex-small tabular">
-                    {a.score > 0 ? "+" : a.score < 0 ? "−" : ""}
-                    {Math.abs(a.score).toFixed(2)} marks
-                  </span>
-                  {dev && <Chip>{q.id}</Chip>}
-                </header>
-                <ExamMarkdown source={q.body} />
-                {q.options.length > 0 && (
-                  <AnswerKey
-                    options={q.options}
-                    correct={solution.answer.split(",").map((v) => v.trim())}
-                    picked={picked}
-                  />
-                )}
-                {q.type === "nat" && (
-                  <p className="xs-answer-line tabular">
-                    <span>
-                      Your answer: <strong>{state.response || "Not answered"}</strong>
-                    </span>
-                    <span>
-                      Correct: <strong>{solution.answer.replace(":", " to ")}</strong>
-                      {solution.tolerance !== undefined ? ` ± ${solution.tolerance}` : ""}
-                    </span>
-                  </p>
-                )}
-                <div className="xs-solution">
-                  <h3 style={{ fontSize: 14, marginBottom: 4 }}>Solution</h3>
-                  <ExamMarkdown source={solution.body} />
-                </div>
-              </article>
+              <button
+                key={q.id}
+                type="button"
+                data-tone={outcome.tone}
+                aria-label={`Question ${i + 1}: ${outcome.label}`}
+                title={outcome.label}
+                onClick={() => jump(q.id)}
+              >
+                {i + 1}
+              </button>
             );
           })}
+        </nav>
+        <div className="ex-row">
+          <Segmented
+            label="Show"
+            value={filter}
+            onChange={setFilter}
+            options={[
+              { value: "mistakes", label: `Mistakes (${mistakes})` },
+              { value: "all", label: `All (${ordered.length})` },
+            ]}
+          />
         </div>
-        <div className="ex-row" style={{ marginTop: 32 }}>
-          <Button onClick={onBack}>Back to result</Button>
-        </div>
+        {!shown.length && (
+          <EmptyState quiet icon={<Check size={20} />} title="No mistakes">
+            Every question was answered correctly.
+          </EmptyState>
+        )}
+        {shown.map(({ q, n }) => {
+          const solution = solutions.find((s) => s.id === q.id)!,
+            state = questionState(session, q.id),
+            a = analysis!.questions.find((a) => a.id === q.id)!,
+            outcome = OUTCOME[outcomeOf(q.id)] ?? OUTCOME.unanswered;
+          const picked = Array.isArray(state.response)
+            ? state.response
+            : state.response
+              ? [state.response]
+              : [];
+          return (
+            <article
+              className="ex-surface xs-review-q"
+              key={q.id}
+              id={`xs-q-${q.id}`}
+              tabIndex={-1}
+              aria-labelledby={`rq-${q.id}`}
+            >
+              <header className="ex-row">
+                <h3 id={`rq-${q.id}`} style={{ fontSize: 16 }}>
+                  Question {n}
+                </h3>
+                <Chip tone={outcome.tone}>{outcome.label}</Chip>
+                <span className="ex-small tabular">
+                  {a.score > 0 ? "+" : a.score < 0 ? "−" : ""}
+                  {Math.abs(a.score).toFixed(2)} marks
+                </span>
+                {dev && <Chip>{q.id}</Chip>}
+              </header>
+              <ExamMarkdown source={q.body} />
+              {q.options.length > 0 && (
+                <AnswerKey
+                  options={q.options}
+                  correct={solution.answer.split(",").map((v) => v.trim())}
+                  picked={picked}
+                />
+              )}
+              {q.type === "nat" && (
+                <p className="xs-answer-line tabular">
+                  <span>
+                    Your answer: <strong>{state.response || "Not answered"}</strong>
+                  </span>
+                  <span>
+                    Correct: <strong>{solution.answer.replace(":", " to ")}</strong>
+                    {solution.tolerance !== undefined ? ` ± ${solution.tolerance}` : ""}
+                  </span>
+                </p>
+              )}
+              <div className="xs-solution">
+                <h4 style={{ fontSize: 14, marginBottom: 4 }}>Solution</h4>
+                <ExamMarkdown source={solution.body} />
+              </div>
+            </article>
+          );
+        })}
       </div>
     </ExamAssets>
   );

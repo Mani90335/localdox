@@ -1280,6 +1280,15 @@ fieldset:disabled .xr-option {
   padding-top: 16px;
   border-top: 1px solid var(--ex-hairline);
 }
+/* Reference and tools, two to a row; the exam actions below run full width. */
+.xr-panel-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
+}
+.xr-panel-tools .ex-btn {
+  min-width: 0;
+}
 .xr-panel-foot .ex-btn--ghost {
   justify-content: flex-start;
   padding: 0 12px;
@@ -1500,6 +1509,9 @@ fieldset:disabled .xr-option {
   gap: 6px;
   font-size: var(--ex-fs-14);
 }
+ol.xi-list {
+  list-style: decimal;
+}
 .xi-list li::marker {
   color: var(--ex-text-2);
 }
@@ -1618,6 +1630,92 @@ fieldset:disabled .xr-option {
 .xs-bar-row strong {
   color: var(--ex-text);
   font-weight: 600;
+}
+/* Scrolled to under the reader's sticky header, which they must clear. */
+.xs-result,
+.xs-result #xs-answers,
+.xs-review-q {
+  scroll-margin-top: 72px;
+}
+.xs-back {
+  margin: -8px 0 16px -12px;
+}
+.xs-result :is(h1, h2)[tabindex="-1"]:focus,
+.xs-review-q:focus {
+  outline: none;
+}
+/* Every question's outcome at a glance; colour and the label both carry it. */
+.xs-map {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  gap: 6px;
+}
+.xs-map button {
+  min-height: 40px;
+  border: 1px solid var(--ex-hairline);
+  border-radius: var(--ex-r-control);
+  background: var(--ex-surface);
+  color: var(--ex-text);
+  font-size: var(--ex-fs-14);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--ex-fast) var(--ex-ease);
+}
+.xs-map button[data-tone="success"] {
+  background: var(--ex-success-tint);
+  border-color: var(--ex-success);
+}
+.xs-map button[data-tone="danger"] {
+  background: var(--ex-danger-tint);
+  border-color: var(--ex-danger);
+}
+.xs-map button[data-tone="warning"] {
+  background: var(--ex-warning-tint);
+  border-color: var(--ex-warning);
+}
+.xs-map button[data-tone="neutral"] {
+  border-style: dashed;
+  color: var(--ex-text-2);
+}
+.xs-map button:focus-visible {
+  outline: 2px solid var(--ex-accent);
+  outline-offset: 2px;
+}
+/* TCS iON's "Question paper": every question, read-only. */
+.xr-paper {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.xr-paper-q {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 0;
+  border-top: 1px solid var(--ex-hairline);
+}
+.xr-paper-q:first-child {
+  border-top: 0;
+  padding-top: 4px;
+}
+.xr-paper-options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.xr-paper-options li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.xr-paper-options .exam-markdown p {
+  margin: 0;
 }
 .xs-review-q {
   display: flex;
@@ -1812,6 +1910,11 @@ fieldset:disabled .xr-option {
 }
 /* A session, practice or review covers the reader, above its chrome and below
    exam dialogs (--z-modal), which portal into it or into fullscreen. */
+/* The result sits in the reader's own column, which already has padding. */
+.exam-app--embedded .ex-page {
+  max-width: none;
+  padding: 0 0 24px;
+}
 .exam-overlay {
   position: fixed;
   inset: 0;

@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Calculator as CalcIcon,
   Check,
+  FileText,
   Grid3x3,
+  Info,
   LockKeyhole,
   Pause,
   Play,
@@ -22,8 +24,8 @@ import {
   crossedThreshold,
   formatClock,
   marksLabel,
+  sameResponse,
   sectionIds,
-  statusCounts,
   thresholdCopy,
   timerTone,
   TYPE_LABEL,
@@ -91,7 +93,7 @@ function NumericAnswer({
       />
       <p className="xr-nat-error" aria-live="polite">
         {draft && !numeric(draft)
-          ? `Not a number yet. Saved answer: ${String(value ?? "none")}`
+          ? `Not a number yet.${value ? ` Your answer stays ${String(value)}.` : ""}`
           : " "}
       </p>
       {virtual && (
@@ -138,9 +140,10 @@ export function ExamScreen({
   session,
   now,
   saveState,
+  instructions,
   onAnswer,
   onNavigate,
-  onMark,
+  onSave,
   onClear,
   onSubmit,
   onFinishSection,
@@ -152,9 +155,15 @@ export function ExamScreen({
   session: Session;
   now: number;
   saveState: SaveState;
+  /** The rules as read before starting, to re-read during the exam. */
+  instructions?: ReactNode;
   onAnswer: (v: Response) => void;
   onNavigate: (id: string) => void;
-  onMark: () => void;
+  /**
+   * One step on the current question, saved together: store `response`
+   * (undefined keeps the saved one), set the review mark, then move to `nextId`.
+   */
+  onSave: (response: Response | undefined, step: { mark?: boolean; nextId?: string }) => void;
   onClear: () => void;
   onSubmit: () => void;
   onFinishSection: () => void;
@@ -165,6 +174,7 @@ export function ExamScreen({
     [sectionConfirm, setSectionConfirm] = useState(false),
     [sheet, setSheet] = useState(false),
     [calc, setCalc] = useState(false),
+    [reference, setReference] = useState<"instructions" | "paper" | null>(null),
     [lowGlare, setLowGlare] = useState(readGlare);
   const r = exam.rules,
     paper = exam.paper,
@@ -184,13 +194,42 @@ export function ExamScreen({
     sameSection = next?.section === q.section,
     lastSection = session.sectionIndex === r.sections.length - 1;
   const ids = sectionIds(session, paper, q.section),
-    tally = statusTally(session, ids),
-    answered = isAnswered(state.response);
+    tally = statusTally(session, ids);
   const prevDisabled =
     !prevId ||
     (r.timing.mode === "per_section" && prev?.section !== q.section) ||
     session.lockedSections.includes(prev?.section ?? "");
   const nextDisabled = !nextId || (r.timing.mode === "per_section" && !sameSection);
+
+  // ── Answering. With requireSave (TCS iON / GATE) a choice is a draft until
+  // Save & next or Mark for review & next; leaving the question any other way
+  // (palette, Previous, a section tab) drops it, as in the real exam. ──
+  const requireSave = r.navigation.requireSave;
+  const [draft, setDraft] = useState<{ id: string; value: Response } | null>(null),
+    [numericReset, setNumericReset] = useState(0);
+  useEffect(() => setDraft(null), [session.currentId]);
+  const shown: Response = requireSave && draft?.id === q.id ? draft.value : state.response,
+    unsaved = requireSave && draft?.id === q.id && !sameResponse(draft.value, state.response),
+    showsAnswer = isAnswered(shown);
+  const choose = (value: Response) =>
+    requireSave ? setDraft({ id: q.id, value }) : onAnswer(value);
+  const advanceTo = nextDisabled ? undefined : nextId;
+  const primary = () => {
+    // Save & next records exactly what is on screen and clears a review mark.
+    if (requireSave) onSave(shown, { mark: false, nextId: advanceTo });
+    else if (advanceTo) onNavigate(advanceTo);
+  };
+  const markNext = () =>
+    // Requiring a save, marking always marks (Save & next unmarks); otherwise it toggles.
+    onSave(requireSave ? shown : undefined, {
+      mark: requireSave ? true : !state.marked,
+      nextId: advanceTo,
+    });
+  const clear = () => {
+    setDraft(null);
+    setNumericReset((n) => n + 1);
+    if (isAnswered(state.response)) onClear();
+  };
 
   // ── The one notice slot (fixed height; never pushes the question). ──
   const fullscreenMissing =
@@ -227,7 +266,9 @@ export function ExamScreen({
           ? { tone: "warning", text: violationCopy(r, session.violations) }
           : crossed !== null
             ? { tone: "warning", text: thresholdCopy(crossed) }
-            : null;
+            : unsaved
+              ? { tone: "info", text: `Not saved. ${profile.labels.saveNext} keeps this answer.` }
+              : null;
 
   const noticeEl = notice && (
     <span className="xr-notice" data-tone={notice.tone} title={notice.text}>
@@ -236,7 +277,7 @@ export function ExamScreen({
     </span>
   );
 
-  // ── Keyboard: A–D / 1–9 choose, N next, P previous, M mark. ──
+  // ── Keyboard: A–D / 1–9 choose, N save & next, P previous, M mark. ──
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   keys.current = (e) => {
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || locked) return;
@@ -247,13 +288,14 @@ export function ExamScreen({
       ) ||
       confirm ||
       sectionConfirm ||
-      sheet
+      sheet ||
+      reference
     )
       return;
     const key = e.key.toLowerCase();
-    if (key === "n" && !nextDisabled) onNavigate(nextId);
+    if (key === "n" && (requireSave || !nextDisabled)) primary();
     else if (key === "p" && r.navigation.free && !prevDisabled) onNavigate(prevId);
-    else if (key === "m" && r.navigation.markForReview) onMark();
+    else if (key === "m" && r.navigation.markForReview) markNext();
     else if (q.type !== "nat") {
       const i = /^[a-d]$/.test(key)
         ? key.charCodeAt(0) - 97
@@ -262,10 +304,10 @@ export function ExamScreen({
           : -1;
       const label = session.optionOrder[q.id][i];
       if (!label) return;
-      if (q.type === "mcq") onAnswer(label);
+      if (q.type === "mcq") choose(label);
       else {
-        const list = Array.isArray(state.response) ? state.response : [];
-        onAnswer(list.includes(label) ? list.filter((v) => v !== label) : [...list, label]);
+        const list = Array.isArray(shown) ? shown : [];
+        choose(list.includes(label) ? list.filter((v) => v !== label) : [...list, label]);
       }
     } else return;
     e.preventDefault();
@@ -302,43 +344,65 @@ export function ExamScreen({
         showMarked={r.navigation.markForReview}
       />
       <div className="xr-panel-foot">
-        {r.tools.calculator !== "none" && (
+        <div className="xr-panel-tools">
+          {instructions && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setSheet(false);
+                setReference("instructions");
+              }}
+            >
+              <Info size={16} aria-hidden="true" /> Instructions
+            </Button>
+          )}
           <Button
             variant="ghost"
-            aria-pressed={calc}
             onClick={() => {
-              setCalc((v) => !v);
-              if (inSheet) setSheet(false);
+              setSheet(false);
+              setReference("paper");
             }}
           >
-            <CalcIcon size={16} aria-hidden="true" /> Calculator
+            <FileText size={16} aria-hidden="true" /> Question paper
           </Button>
-        )}
-        {r.timing.pausable && (
-          <Button variant="ghost" onClick={onPause}>
-            {paused ? (
-              <Play size={16} aria-hidden="true" />
-            ) : (
-              <Pause size={16} aria-hidden="true" />
-            )}
-            {paused ? "Resume timer" : "Pause timer"}
+          {r.tools.calculator !== "none" && (
+            <Button
+              variant="ghost"
+              aria-pressed={calc}
+              onClick={() => {
+                setCalc((v) => !v);
+                if (inSheet) setSheet(false);
+              }}
+            >
+              <CalcIcon size={16} aria-hidden="true" /> Calculator
+            </Button>
+          )}
+          {r.timing.pausable && (
+            <Button variant="ghost" onClick={onPause}>
+              {paused ? (
+                <Play size={16} aria-hidden="true" />
+              ) : (
+                <Pause size={16} aria-hidden="true" />
+              )}
+              {paused ? "Resume timer" : "Pause timer"}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            aria-pressed={lowGlare}
+            onClick={() => {
+              const v = !lowGlare;
+              setLowGlare(v);
+              try {
+                localStorage.setItem(GLARE_KEY, v ? "low" : "normal");
+              } catch {
+                /* a preference only */
+              }
+            }}
+          >
+            <SunDim size={16} aria-hidden="true" /> Low glare
           </Button>
-        )}
-        <Button
-          variant="ghost"
-          aria-pressed={lowGlare}
-          onClick={() => {
-            const v = !lowGlare;
-            setLowGlare(v);
-            try {
-              localStorage.setItem(GLARE_KEY, v ? "low" : "normal");
-            } catch {
-              /* a preference only */
-            }
-          }}
-        >
-          <SunDim size={16} aria-hidden="true" /> Low glare
-        </Button>
+        </div>
         {r.timing.mode === "per_section" && (
           <Button
             onClick={() => {
@@ -364,9 +428,8 @@ export function ExamScreen({
 
   const allSections = r.sections.map((s) => ({
     name: s.name,
-    counts: statusCounts(session, sectionIds(session, paper, s.id)),
+    counts: statusTally(session, sectionIds(session, paper, s.id)),
   }));
-  const markedAnswered = statusCounts(session, session.order);
   const tone = timerTone(r, session.sectionIndex, remaining, scale);
 
   return (
@@ -477,11 +540,11 @@ export function ExamScreen({
                   </div>
                   {q.type === "nat" ? (
                     <NumericAnswer
-                      key={`${q.id}-${state.response === null ? "empty" : "value"}`}
-                      value={state.response}
+                      key={`${q.id}-${state.response === null ? "empty" : "value"}-${numericReset}`}
+                      value={shown}
                       virtual={r.questionTypes.nat?.inputMode === "virtual_keypad"}
                       canClear={r.navigation.clearResponse}
-                      onChange={onAnswer}
+                      onChange={choose}
                     />
                   ) : (
                     <>
@@ -491,9 +554,9 @@ export function ExamScreen({
                         aria-label="Options"
                       >
                         {session.optionOrder[q.id].map((label, i) => {
-                          const checked = Array.isArray(state.response)
-                            ? state.response.includes(label)
-                            : state.response === label;
+                          const checked = Array.isArray(shown)
+                            ? shown.includes(label)
+                            : shown === label;
                           return (
                             <label
                               className={checked ? "xr-option is-selected" : "xr-option"}
@@ -505,20 +568,19 @@ export function ExamScreen({
                                 name={q.id}
                                 checked={checked}
                                 aria-keyshortcuts={i < 4 ? String.fromCharCode(65 + i) : undefined}
+                                // TCS iON: clicking the chosen option again deselects it.
+                                onClick={() => {
+                                  if (requireSave && q.type === "mcq" && checked) choose(null);
+                                }}
                                 onChange={() =>
-                                  onAnswer(
+                                  choose(
                                     q.type === "mcq"
                                       ? label
                                       : checked
-                                        ? Array.isArray(state.response)
-                                          ? state.response.filter((v) => v !== label)
+                                        ? Array.isArray(shown)
+                                          ? shown.filter((v) => v !== label)
                                           : []
-                                        : [
-                                            ...(Array.isArray(state.response)
-                                              ? state.response
-                                              : []),
-                                            label,
-                                          ],
+                                        : [...(Array.isArray(shown) ? shown : []), label],
                                   )
                                 }
                               />
@@ -528,7 +590,13 @@ export function ExamScreen({
                           );
                         })}
                       </div>
-                      {q.type === "msq" && <p className="xr-hint">Select all that apply.</p>}
+                      {(q.type === "msq" || requireSave) && (
+                        <p className="xr-hint">
+                          {q.type === "msq"
+                            ? "Select all that apply."
+                            : "Click a chosen option again to deselect it."}
+                        </p>
+                      )}
                     </>
                   )}
                   {r.diagnostics.enabled && r.diagnostics.capture.confidence.mode === "in_exam" && (
@@ -551,12 +619,18 @@ export function ExamScreen({
                 {noticeEl}
               </div>
               {r.navigation.markForReview && (
-                <Button disabled={locked} onClick={onMark} aria-keyshortcuts="M">
-                  {state.marked ? profile.labels.unmarkNext : profile.labels.markNext}
+                <Button disabled={locked} onClick={markNext} aria-keyshortcuts="M">
+                  {state.marked && !requireSave
+                    ? profile.labels.unmarkNext
+                    : profile.labels.markNext}
                 </Button>
               )}
               {r.navigation.clearResponse && (
-                <Button variant="ghost" disabled={locked || !answered} onClick={onClear}>
+                <Button
+                  variant="ghost"
+                  disabled={locked || (!showsAnswer && !isAnswered(state.response))}
+                  onClick={clear}
+                >
                   {profile.labels.clear}
                 </Button>
               )}
@@ -572,8 +646,9 @@ export function ExamScreen({
               )}
               <Button
                 variant="primary"
-                disabled={locked || nextDisabled}
-                onClick={() => onNavigate(nextId)}
+                // Requiring a save, the last question still needs Save & next to keep its answer.
+                disabled={locked || (nextDisabled && !requireSave)}
+                onClick={primary}
                 aria-keyshortcuts="N"
                 title={
                   nextDisabled && !locked
@@ -583,7 +658,9 @@ export function ExamScreen({
                     : undefined
                 }
               >
-                {answered ? profile.labels.saveNext : profile.labels.next}
+                {requireSave || isAnswered(state.response)
+                  ? profile.labels.saveNext
+                  : profile.labels.next}
               </Button>
             </div>
           </main>
@@ -610,6 +687,7 @@ export function ExamScreen({
           open={confirm}
           onOpenChange={setConfirm}
           title="Submit exam?"
+          wide
           description="You can't change your answers after submitting."
           footer={
             <>
@@ -628,10 +706,11 @@ export function ExamScreen({
             </>
           }
         >
-          <SummaryTable rows={allSections} />
-          {!r.navigation.markedForReviewAnswerCounts && markedAnswered.marked > 0 && (
+          <SummaryTable rows={allSections} counted={r.navigation.markedForReviewAnswerCounts} />
+          {unsaved && (
             <p className="xs-note" style={{ marginTop: 16 }}>
-              Answers marked for review won't be counted.
+              Your choice on question {index + 1} isn't saved, so it won't be counted. Cancel and
+              use {profile.labels.saveNext} to keep it.
             </p>
           )}
         </Dialog>
@@ -640,6 +719,7 @@ export function ExamScreen({
           open={sectionConfirm}
           onOpenChange={setSectionConfirm}
           title={lastSection ? "Finish the last section?" : `Finish ${section.name}?`}
+          wide
           description={
             lastSection
               ? "This submits your exam. You can't change answers afterwards."
@@ -666,12 +746,106 @@ export function ExamScreen({
             rows={[
               {
                 name: section.name,
-                counts: statusCounts(session, sectionIds(session, paper, section.id)),
+                counts: statusTally(session, sectionIds(session, paper, section.id)),
               },
             ]}
+            counted={r.navigation.markedForReviewAnswerCounts}
           />
+        </Dialog>
+
+        <Dialog
+          open={reference !== null}
+          onOpenChange={(open) => !open && setReference(null)}
+          title={reference === "paper" ? "Question paper" : "Instructions"}
+          description={
+            reference === "paper"
+              ? "Every question in this exam. Answer them on the question screen."
+              : undefined
+          }
+          wide
+          footer={
+            <DialogClose asChild>
+              <Button variant="primary">Back to the exam</Button>
+            </DialogClose>
+          }
+        >
+          {reference === "paper" ? (
+            <QuestionPaper
+              r={r}
+              paper={paper}
+              session={session}
+              onGo={
+                // Going there leaves this question: the same as the palette.
+                (id) => {
+                  setReference(null);
+                  onNavigate(id);
+                }
+              }
+            />
+          ) : (
+            instructions
+          )}
         </Dialog>
       </div>
     </ExamAssets>
+  );
+}
+
+/**
+ * TCS iON's "Question Paper": every question at once, read-only. A question
+ * the rules let you reach can be opened from here; answering happens on the
+ * question screen, so the save rules stay in one place.
+ */
+function QuestionPaper({
+  r,
+  paper,
+  session,
+  onGo,
+}: {
+  r: Exam["rules"];
+  paper: Exam["paper"];
+  session: Session;
+  onGo: (id: string) => void;
+}) {
+  const current = paper.find((q) => q.id === session.currentId)!;
+  return (
+    <ol className="xr-paper">
+      {session.order.map((id, i) => {
+        const q = paper.find((q) => q.id === id)!,
+          reachable =
+            r.navigation.free &&
+            !session.lockedSections.includes(q.section) &&
+            (r.timing.mode !== "per_section" || q.section === current.section);
+        return (
+          <li key={id} className="xr-paper-q">
+            <div className="ex-row">
+              <strong>Question {i + 1}</strong>
+              <Chip>{TYPE_LABEL[q.type]}</Chip>
+              <Chip>{marksLabel(r, q.type, q.marks)}</Chip>
+              {r.sections.length > 1 && (
+                <span className="ex-small">{r.sections.find((s) => s.id === q.section)?.name}</span>
+              )}
+              <span className="ex-spacer" />
+              {reachable && id !== session.currentId && (
+                <Button variant="ghost" onClick={() => onGo(id)}>
+                  Go to question
+                </Button>
+              )}
+            </div>
+            <ExamMarkdown source={q.body} />
+            {q.options.length > 0 && (
+              <ol className="xr-paper-options">
+                {session.optionOrder[q.id].map((label, j) => (
+                  <li key={label}>
+                    <span className="xr-letter">{String.fromCharCode(65 + j)}</span>
+                    <ExamMarkdown source={q.options[label.charCodeAt(0) - 65]} />
+                  </li>
+                ))}
+              </ol>
+            )}
+          </li>
+        );
+      })}
+    </ol>
   );
 }

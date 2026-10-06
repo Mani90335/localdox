@@ -69,7 +69,8 @@
   },
   "navigation": {
     "free": true,
-    "sectionLocking": false
+    "sectionLocking": false,
+    "requireSave": true
   },
   "results": {
     "scoreVisibility": "immediate",

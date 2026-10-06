@@ -90,7 +90,7 @@ The paper's grammar, made lighter: no `.xrule`, no header, `marks` optional (def
 
 ## Sitting a paper
 
-In an **Exam Workspace**, opening a `.xam` shows its rules, then one action for where the learner stands (Start, Resume, Retake, Review answers, or Use the edited paper) and the attempts so far. The exam, its result and its review cover the whole screen while they run. Nothing unlocks first. Keys and solutions are read only from a submitted attempt (`loadSolutions` refuses earlier), and the result's **Review answers & solutions** is the first place they appear.
+In an **Exam Workspace**, opening a `.xam` shows its rules, then one action for where the learner stands (Start, Resume, Retake, Review answers, or Use the edited paper) and the attempts so far. The instructions and the running exam cover the whole screen; once it is submitted, the result replaces the paper's panel in the reader, with the sidebar back beside it. Nothing unlocks first. Keys and solutions are read only from a submitted attempt (`loadSolutions` refuses earlier), and the result's **Answers & solutions**, on the same screen as the score, is the first place they appear.
 
 Outside Exam Workspaces a `.xam` previews its questions and options without keys, with a note saying so. The source, through **Edit**, is the one place a key is visible before submission: it is the author's file.
 

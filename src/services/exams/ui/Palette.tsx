@@ -5,7 +5,7 @@
 import type { Ruleset } from "../schema.ts";
 import type { Question } from "../parser.ts";
 import { questionState, type Session } from "../session.ts";
-import type { StatusCounts, UiProfile } from "./display.ts";
+import type { UiProfile } from "./display.ts";
 
 export type Status = "not_visited" | "not_answered" | "answered" | "marked" | "answered_marked";
 export const STATUS_WORDS: Record<Status, string> = {
@@ -163,7 +163,28 @@ export function statusTally(session: Session, ids: string[]): Record<Status, num
   for (const id of ids) tally[questionState(session, id).status as Status]++;
   return tally;
 }
-export function SummaryTable({ rows }: { rows: { name: string; counts: StatusCounts }[] }) {
+/**
+ * The TCS iON submit summary: each palette state in its own column, so the
+ * columns add up to the section's questions.
+ */
+export function SummaryTable({
+  rows,
+  counted,
+}: {
+  rows: { name: string; counts: Record<Status, number> }[];
+  /** Whether answers marked for review are graded; the column says so. */
+  counted: boolean;
+}) {
+  const columns: { status: Status; label: string }[] = [
+    { status: "answered", label: "Answered" },
+    { status: "not_answered", label: "Not answered" },
+    { status: "marked", label: "Marked for review" },
+    {
+      status: "answered_marked",
+      label: counted ? "Answered & marked (counted)" : "Answered & marked (not counted)",
+    },
+    { status: "not_visited", label: "Not visited" },
+  ];
   return (
     <div className="ex-table-wrap">
       <table className="ex-table">
@@ -171,27 +192,25 @@ export function SummaryTable({ rows }: { rows: { name: string; counts: StatusCou
           <tr>
             <th scope="col">Section</th>
             <th scope="col" className="num">
-              Answered
+              Questions
             </th>
-            <th scope="col" className="num">
-              Not answered
-            </th>
-            <th scope="col" className="num">
-              Marked
-            </th>
-            <th scope="col" className="num">
-              Not visited
-            </th>
+            {columns.map((c) => (
+              <th scope="col" className="num" key={c.status}>
+                {c.label}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.name}>
               <th scope="row">{row.name}</th>
-              <td className="num">{row.counts.answered}</td>
-              <td className="num">{row.counts.notAnswered}</td>
-              <td className="num">{row.counts.marked}</td>
-              <td className="num">{row.counts.notVisited}</td>
+              <td className="num">{Object.values(row.counts).reduce((sum, n) => sum + n, 0)}</td>
+              {columns.map((c) => (
+                <td className="num" key={c.status}>
+                  {row.counts[c.status]}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
