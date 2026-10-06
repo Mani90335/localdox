@@ -39,7 +39,8 @@ const marksText = (n: number) => `${trimNumber(n)} mark${n === 1 ? "" : "s"}`;
  */
 export function ExamFileViewer(props: Props) {
   const { file, prevFile, nextFile, onNavFile, onContentChange, onOpenPalette } = props;
-  const workspace = useContext(ExamWorkspaceContext);
+  const context = useContext(ExamWorkspaceContext);
+  const workspace = context?.examEnabled ? context : null;
   const read = useCallback(
     (source: string) => readQuestions(() => parseExamFile(source, file.name)),
     [file.name],

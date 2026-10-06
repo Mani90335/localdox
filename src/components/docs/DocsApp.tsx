@@ -4497,9 +4497,10 @@ flowchart LR
   // (rules, images) and the folder tree that scopes them.
   const examWorkspace = useMemo<ExamWorkspace | null>(
     () =>
-      kind === "exam" && workspaceId
+      workspaceId
         ? {
             workspaceId,
+            examEnabled: kind === "exam",
             paused: showSettings,
             files,
             folders,
