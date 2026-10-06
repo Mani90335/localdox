@@ -3,6 +3,7 @@
 **You will understand:** why a cache makes systems fast, what happens on a hit and a miss, and how to reason about whether a cache is worth it.
 
 > [!NOTE]
+>
 > **In one breath:** a cache is a small, fast copy of data you asked for recently. Asking the copy is cheap; asking the original is expensive. Speed comes from how often the copy already has the answer.
 
 ## The big picture
@@ -124,6 +125,7 @@ $$
 With $t_{\text{cache}} = 1$ ms, $t_{\text{origin}} = 50$ ms and $h = 0.9$, {{eq:effective-latency}} gives $T = 0.9 + 5 = 5.9$ ms. That is about 8× faster than no cache. Notice that the misses dominate: raising $h$ from 0.9 to 0.99 cuts $T$ to about 1.5 ms.
 
 > [!TIP]
+>
 > Improving the hit rate usually pays more than making the cache itself faster.
 
 ## Try it
@@ -168,9 +170,11 @@ Move the slider to see how the hit rate changes the average read time from {{eq:
 ## Common mistakes
 
 > [!WARNING]
+>
 > **Caching without an expiry.** Without a TTL or an invalidation rule, a cache serves stale data forever. Every cached value needs an answer to "when does this stop being true?"
 
 > [!CAUTION]
+>
 > **Cache stampede.** When a popular key expires, thousands of requests can miss together and flood the database. Refresh hot keys before they expire, or let only one request rebuild the value.
 
 ## Check yourself

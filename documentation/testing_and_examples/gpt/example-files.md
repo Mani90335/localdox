@@ -1,264 +1,221 @@
-# Example course: every file of a valid upload
+# Example: a valid exam, its rules and a practice set
 
-A complete two-topic study plan that imports cleanly; it was checked with Localdox's own importers. Zip these ten files together (any folder layout, unique names), for example as `prob-basics.zip`. Copy the shapes; change the content. Topics are named by subject (never "Day N"), and closing `:::` lines always sit alone at column 0.
+Three files that Localdox reads cleanly. Every one was checked with Localdox's own parsers and with `localdox_check.py`. Copy the shapes, change the content.
 
-## `prob-basics.plan.json`
+What to notice:
 
-````json
-{
-  "schemaVersion": 1,
-  "id": "prob-basics",
-  "name": "Probability basics",
-  "description": "Two topics: learn, practise, pass the exam, review.",
-  "days": [
-    {
-      "id": "conditional",
-      "title": "Conditional probability",
-      "examId": "prob-conditional",
-      "summaryMd": "- Definition of $P(A \\mid B)$\n- Multiplication rule\n- Independent events",
-      "tasks": [
-        {
-          "id": "lesson",
-          "label": "Read the conditional probability lesson"
-        }
-      ],
-      "practice": [
-        "prob-conditional"
-      ]
-    },
-    {
-      "id": "bayes",
-      "title": "Bayes' theorem",
-      "examId": "prob-bayes",
-      "summaryMd": "- Total probability\n- Bayes' theorem\n- Reading a probability tree",
-      "practice": [
-        "prob-bayes"
-      ]
-    }
-  ]
-}
-````
-## `prob-conditional.exam.json`
+- The paper's header names its rules file exactly, so the pair links wherever the files sit.
+- `questionCount` (6) equals the number of `:::question` blocks.
+- Every exam question has `difficulty`; no `topic=`. Ids are `q1`…`q6`, without dots.
+- `q4` puts numbered statements before bulleted options, so the two lists don't merge.
+- NAT keys are decimals: exact (`0.75`) when the answer is exact, a range (`"0.66:0.67"`) when it is rounded.
+- Solutions follow all the questions, under `# Solutions`, and each one names the tempting wrong answer.
+- The practice set has no header and no `marks`; its headings group questions, and each solution sits right after its question.
+
+## `probability-mock-1.xrule`
 
 ````json
 {
-  "schemaVersion": 2,
-  "meta": { "id": "prob-conditional", "name": "Conditional probability", "version": "1", "instructionsMd": "Answer all four questions." },
-  "timing": { "mode": "global", "durationMinutes": 12, "warnAtMinutesLeft": [2] },
-  "sections": [{ "id": "main", "name": "Probability", "questionCount": 4 }],
-  "questionTypes": {
-    "mcq": { "optionCount": 4, "negativeMarking": { "fractionOfMarks": [1, 3] } },
-    "msq": { "scoring": "all_or_nothing" },
-    "nat": { "inputMode": "virtual_keypad" }
-  },
-  "attempts": { "max": 3 },
-  "progression": { "passPercentage": 70, "rewriteDifficultyPercentage": 50, "difficultyLabel": "hard" },
-  "results": { "scoreVisibility": "immediate", "solutionsRelease": "immediate_after_submit" },
-  "diagnostics": { "enabled": false },
-  "ui": { "profile": "gate", "kind": "quiz" }
+  "xrule": 1,
+  "name": "Probability mock 1",
+  "summary": "- Events, independence and mutually exclusive events\n- Conditional probability and Bayes' theorem\n- Binomial distribution, expectation and variance\n- Continuous random variables: uniform, order statistics",
+  "durationMinutes": 15,
+  "questionCount": 6,
+  "passPercentage": 60,
+  "maxAttempts": 3,
+  "mcqPenalty": "third",
+  "calculator": "basic"
 }
 ````
 
-## `prob-conditional.paper.md`
+## `probability-mock-1.xam`
 
 ````markdown
-:::question{#q1 section=main type=mcq marks=2 difficulty=medium}
-Given $P(A \cap B) = 0.2$ and $P(B) = 0.5$, find $P(A \mid B)$.
+---
+rules: probability-mock-1.xrule
+---
 
-- 0.1
-- 0.2
-- 0.4
-- 0.7
+# Exam
+
+:::question{#q1 type=mcq marks=1 difficulty=easy}
+Events $A$ and $B$ are independent, with $P(A) = 0.5$ and $P(B) = 0.4$. Find $P(A \cup B)$.
+
+- $0.2$
+- $0.7$
+- $0.9$
+- $0.5$
 :::
 
-:::question{#q2 section=main type=nat marks=1 difficulty=easy}
-A fair die is rolled. What is the probability of an even number? Give a decimal.
-:::
+:::question{#q2 type=msq marks=2 difficulty=medium}
+Events $A$ and $B$ are mutually exclusive, with $P(A) > 0$ and $P(B) > 0$. Which of the following are true?
 
-:::question{#q3 section=main type=msq marks=2 difficulty=hard}
-$A$ and $B$ are independent with $P(A) = 0.5$ and $P(B) = 0.4$. Select every true statement.
-
-- $P(A \cap B) = 0.2$
-- $P(A \mid B) = 0.5$
-- $A$ and $B$ are mutually exclusive
-- $P(A \cup B) = 0.9$
-:::
-
-:::question{#q4 section=main type=mcq marks=1 difficulty=easy}
-Using the tree, what is $P(\text{Rain} \cap \text{Late})$?
-
-![Probability tree: Rain 0.3 then Late 0.6; No rain 0.7 then Late 0.1](rain-tree.svg)
-
-- 0.18
-- 0.07
-- 0.25
-- 0.9
-:::
-````
-
-## `prob-conditional.solutions.md`
-
-````markdown
-:::solution{#q1 answer=C}
-$P(A \mid B) = \dfrac{P(A \cap B)}{P(B)} = \dfrac{0.2}{0.5} = 0.4$.
-:::
-
-:::solution{#q2 answer=0.5 tolerance=0.01}
-Three of the six faces are even, so $3/6 = 0.5$.
-:::
-
-:::solution{#q3 answer="A,B"}
-Independence gives $P(A \cap B) = 0.5 \times 0.4 = 0.2$ and $P(A \mid B) = P(A) = 0.5$. They are not mutually exclusive because $P(A \cap B) \ne 0$, and $P(A \cup B) = 0.5 + 0.4 - 0.2 = 0.7$.
-:::
-
-:::solution{#q4 answer=A}
-Multiply along the branch: $0.3 \times 0.6 = 0.18$.
-
-```mermaid
-flowchart LR
-  S([Start]) -->|0.3| R[Rain]
-  R -->|0.6| L[Late]
-```
-:::
-````
-
-## `prob-conditional.practice.md`
-
-````markdown
-:::question{#p1 type=mcq marks=1}
-Events $A$ and $B$ are independent with $P(A) = 0.3$ and $P(B) = 0.5$. Find $P(A \cap B)$.
-
-- 0.15
-- 0.8
-- 0.2
-:::
-
-:::solution{#p1 answer=A}
-Independence: $P(A \cap B) = P(A) P(B) = 0.15$.
-:::
-
-:::question{#p2 type=nat marks=1}
-$P(A \cap B) = 0.12$ and $P(A) = 0.4$. Find $P(B \mid A)$.
-:::
-
-:::solution{#p2 answer=0.3 tolerance=0.001}
-$P(B \mid A) = 0.12 / 0.4 = 0.3$.
-:::
-````
-
-## `prob-bayes.exam.json`
-
-````json
-{
-  "schemaVersion": 2,
-  "meta": { "id": "prob-bayes", "name": "Bayes' theorem", "version": "1", "instructionsMd": "Answer all four questions." },
-  "timing": { "mode": "global", "durationMinutes": 12, "warnAtMinutesLeft": [2] },
-  "sections": [{ "id": "main", "name": "Probability", "questionCount": 4 }],
-  "questionTypes": {
-    "mcq": { "optionCount": 4, "negativeMarking": { "fractionOfMarks": [1, 3] } },
-    "msq": { "scoring": "all_or_nothing" },
-    "nat": { "inputMode": "virtual_keypad" }
-  },
-  "attempts": { "max": 3 },
-  "progression": { "passPercentage": 70, "rewriteDifficultyPercentage": 50, "difficultyLabel": "hard" },
-  "results": { "scoreVisibility": "immediate", "solutionsRelease": "immediate_after_submit" },
-  "diagnostics": { "enabled": false },
-  "ui": { "profile": "gate", "kind": "quiz" }
-}
-````
-
-## `prob-bayes.paper.md`
-
-````markdown
-:::question{#q1 section=main type=mcq marks=2 difficulty=medium}
-A test is 90% accurate for the disease and has a 5% false positive rate. 1% of people have the disease. Roughly what is $P(\text{disease} \mid \text{positive})$?
-
-- 0.15
-- 0.5
-- 0.9
-- 0.01
-:::
-
-:::question{#q2 section=main type=nat marks=1 difficulty=easy}
-$P(A) = 0.6$, $P(B \mid A) = 0.5$. Find $P(A \cap B)$.
-:::
-
-:::question{#q3 section=main type=mcq marks=1 difficulty=hard}
-Which statement is the law of total probability?
-
-- $P(B) = \sum_i P(B \mid A_i) P(A_i)$
+- $A$ and $B$ cannot be independent.
 - $P(A \cup B) = P(A) + P(B)$
 - $P(A \mid B) = P(A)$
-- $P(A) + P(A^c) = 0$
+- $P(A^c \cap B^c) = 1 - P(A) - P(B)$
 :::
 
-:::question{#q4 section=main type=mcq marks=1 difficulty=easy}
-In the chart, which group has the higher positive rate?
+:::question{#q3 type=nat marks=2 difficulty=medium}
+Urn 1 holds 3 red and 2 blue balls; urn 2 holds 1 red and 4 blue. A fair coin picks the urn, then one ball is drawn. The ball is red. Find the probability that it came from urn 1, to two decimal places.
+:::
+
+:::question{#q4 type=mcq marks=2 difficulty=medium tags=pyq-style}
+Let $X \sim \text{Binomial}(n = 4, p = \tfrac12)$. Consider the statements:
+
+1. $E[X] = 2$
+2. $\operatorname{Var}(X) = 1$
+3. $P(X = 2) = \tfrac12$
+
+Which of the statements are correct?
+
+- 1 only
+- 1 and 2 only
+- 2 and 3 only
+- 1, 2 and 3
+:::
+
+:::question{#q5 type=nat marks=2 difficulty=hard}
+$U_1$ and $U_2$ are independent, each uniform on $[0, 1]$. Let $Y = \max(U_1, U_2)$. Find $E[Y]$ to two decimal places.
+:::
+
+:::question{#q6 type=mcq marks=1 difficulty=medium}
+A discrete random variable $X$ has this distribution:
 
 ```chart
-{"type":"bar","title":"Positive tests per 100","data":[{"group":"Clinic","rate":12},{"group":"Screening","rate":4}],"series":[{"key":"rate","name":"Positives"}],"xKey":"group"}
+{"type":"bar","title":"P(X = x)","data":[{"x":"0","p":0.1},{"x":"1","p":0.3},{"x":"2","p":0.4},{"x":"3","p":0.2}],"series":[{"key":"p","name":"Probability"}],"xKey":"x"}
 ```
 
-- Clinic
-- Screening
-- Equal
-- Cannot tell
+Find $E[X]$.
+
+- $1.5$
+- $1.7$
+- $2.0$
+- $1.2$
+:::
+
+# Solutions
+
+:::solution{#q1 answer=B}
+Independence gives $P(A \cap B) = 0.5 \times 0.4 = 0.2$, so
+
+$$P(A \cup B) = 0.5 + 0.4 - 0.2 = 0.7$$
+
+**Trap:** $0.9$ adds the probabilities as if the events were mutually exclusive.
+:::
+
+:::solution{#q2 answer="A,B,D"}
+Mutually exclusive means $P(A \cap B) = 0$.
+
+- **A** is true: independence would need $P(A \cap B) = P(A)P(B) > 0$.
+- **B** is true: the overlap term is zero.
+- **C** is false: $P(A \mid B) = 0 \ne P(A)$.
+- **D** is true: $P(A^c \cap B^c) = 1 - P(A \cup B) = 1 - P(A) - P(B)$.
+:::
+
+:::solution{#q3 answer=0.75}
+$$P(U_1 \mid R) = \frac{\tfrac12 \cdot \tfrac35}{\tfrac12 \cdot \tfrac35 + \tfrac12 \cdot \tfrac15} = \frac{0.3}{0.4} = 0.75$$
+
+**Trap:** $0.6$ is $P(R \mid U_1)$, the reverse conditional.
+:::
+
+:::solution{#q4 answer=B}
+$E[X] = np = 2$ and $\operatorname{Var}(X) = np(1-p) = 1$, so statements 1 and 2 hold. But $P(X = 2) = \binom42 / 2^4 = 6/16 = 0.375$, so statement 3 is false.
+:::
+
+:::solution{#q5 answer="0.66:0.67"}
+$P(Y \le y) = y^2$ on $[0, 1]$, so $f_Y(y) = 2y$ and
+
+$$E[Y] = \int_0^1 y \cdot 2y \, dy = \tfrac23 \approx 0.667$$
+
+Any value from 0.66 to 0.67 is accepted.
+:::
+
+:::solution{#q6 answer=B}
+$E[X] = 0(0.1) + 1(0.3) + 2(0.4) + 3(0.2) = 1.7$.
 :::
 ````
 
-## `prob-bayes.solutions.md`
+## `conditional-probability.xp`
 
 ````markdown
-:::solution{#q1 answer=A}
-$P(+) = 0.9 \times 0.01 + 0.05 \times 0.99 = 0.0585$, so $P(D \mid +) = 0.009 / 0.0585 \approx 0.15$.
+# Warm-up
+
+:::question{#cp1 type=mcq difficulty=easy}
+A fair die shows an even number. What is the probability that it is a 6?
+
+- $\tfrac16$
+- $\tfrac13$
+- $\tfrac12$
+- $\tfrac23$
 :::
 
-:::solution{#q2 answer=0.3 tolerance=0.001}
-$P(A \cap B) = P(B \mid A) P(A) = 0.5 \times 0.6 = 0.3$.
+:::solution{#cp1 answer=B}
+Given "even", the outcomes are $\{2, 4, 6\}$, and one of the three is a 6: $\tfrac13$.
 :::
 
-:::solution{#q3 answer=A}
-Total probability sums $B$'s probability over a partition $A_1, A_2, \dots$.
+:::question{#cp2 type=nat difficulty=easy}
+$P(A \cap B) = 0.12$ and $P(B) = 0.4$. Find $P(A \mid B)$.
 :::
 
-:::solution{#q4 answer=A}
-The clinic bar (12) is taller than screening (4).
+:::solution{#cp2 answer=0.3}
+$P(A \mid B) = \dfrac{P(A \cap B)}{P(B)} = \dfrac{0.12}{0.4} = 0.3$.
+:::
+
+# Exam level
+
+:::question{#cp3 type=nat difficulty=medium}
+1% of a population has a condition. A test detects it 90% of the time and gives a false positive 5% of the time. A person tests positive. Find the probability that they have the condition, to three decimal places.
+:::
+
+:::solution{#cp3 answer="0.152:0.155"}
+Draw the tree first:
+
+```mermaid
+flowchart TD
+  P([Person]) -->|"0.01"| C[Condition]
+  P -->|"0.99"| N[No condition]
+  C -->|"0.90"| CP[Positive]
+  N -->|"0.05"| NP[Positive]
+```
+
+$$P(C \mid +) = \frac{0.01 \times 0.90}{0.01 \times 0.90 + 0.99 \times 0.05} = \frac{0.009}{0.0585} \approx 0.154$$
+
+Most positives come from the large healthy group, so a positive result is far from certain.
+:::
+
+:::question{#cp4 type=msq difficulty=medium}
+For events with $P(A) > 0$ and $P(B) > 0$, which statements always hold?
+
+- $P(A \cap B) = P(A \mid B)\,P(B)$
+- $P(A \mid B) = P(B \mid A)$
+- $P(A \mid B) + P(A^c \mid B) = 1$
+- $P(A \mid B) \ge P(A \cap B)$
+:::
+
+:::solution{#cp4 answer="A,C,D"}
+- **A**: the multiplication rule.
+- **B** fails in general: $P(A \mid B) = P(B \mid A)\,P(A)/P(B)$.
+- **C**: given $B$, either $A$ or $A^c$ happens.
+- **D**: $P(A \mid B) = P(A \cap B)/P(B)$ and $P(B) \le 1$.
 :::
 ````
 
-## `prob-bayes.practice.md`
+## Delivering them
 
-````markdown
-:::question{#p1 type=msq marks=1}
-Which are needed to apply Bayes' theorem for $P(A \mid B)$?
+**As loose files:** the learner opens an Exam Workspace, chooses **+ ▸ Upload files** and selects all three at once.
 
-- $P(B \mid A)$
-- $P(A)$
-- $P(B)$
-- $P(A \cup B)$
-:::
+**As a workspace with folders:** put them in a folder tree and pack it.
 
-:::solution{#p1 answer="A,B,C"}
-$P(A \mid B) = P(B \mid A) P(A) / P(B)$.
-:::
-````
+```text
+course/
+  probability-mock-1.xrule
+  01 Probability/
+    probability-mock-1.xam
+    conditional-probability.xp
+```
 
-## `rain-tree.svg`
+```bash
+python localdox_check.py --build course probability-course.json "Probability course"
+```
 
-````svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 160" width="320" height="160" font-family="system-ui, sans-serif" font-size="13">
-  <title>Probability tree: Rain 0.3 then Late 0.6; No rain 0.7 then Late 0.1</title>
-  <g stroke="#5b6270" stroke-width="2" fill="none">
-    <path d="M20 80 L120 40"/><path d="M20 80 L120 120"/>
-    <path d="M150 40 L250 25"/><path d="M150 120 L250 135"/>
-  </g>
-  <g fill="#111318">
-    <text x="125" y="44">Rain</text><text x="125" y="124">No rain</text>
-    <text x="255" y="29">Late</text><text x="255" y="139">Late</text>
-  </g>
-  <g fill="#4f5bd5" font-weight="600">
-    <text x="55" y="50">0.3</text><text x="55" y="118">0.7</text>
-    <text x="190" y="26">0.6</text><text x="190" y="140">0.1</text>
-  </g>
-</svg>
-````
+`--build` checks every file first and writes nothing if any check fails. The learner imports `probability-course.json` with Settings ▸ Workspace ▸ Transfer ▸ **Import workspace**, which creates an Exam Workspace with the folder `01 Probability`. The `.xrule` sits at the workspace root, listed under Settings ▸ Exam rules.
