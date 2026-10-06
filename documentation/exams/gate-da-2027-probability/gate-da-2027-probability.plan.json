@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "gate-da-2027-probability-foundations",
+  "name": "GATE DA 2027: Probability and Statistics",
+  "description": "A focused, provisional DA Probability and Statistics module. Verify the 2027 syllabus against the official bulletin; the included PYQ-style questions are original, not reproduced past-paper questions.",
+  "days": [
+    {
+      "id": "probability-statistics",
+      "title": "Probability and Statistics",
+      "examId": "gate-da-2027-probability-sectional",
+      "summaryMd": "- Counting and combinatorics; probability axioms, events, conditional and joint probability, independence, total probability and Bayes' theorem\n- Random variables; PMF, PDF, CDF; expectation, variance, covariance and correlation\n- Bernoulli, binomial, Poisson, uniform, exponential and normal distributions\n- Sampling, central limit theorem, confidence intervals, z/t tests and chi-square tests",
+      "tasks": [
+        { "id": "guide", "label": "Read the companion Probability and Statistics study guide" },
+        { "id": "formula-sheet", "label": "Recall the event, distribution and inference formulas from memory" },
+        { "id": "error-log", "label": "Keep an error log and re-solve missed questions after a delay" }
+      ],
+      "practice": [
+        "gate-da-2027-probability-easy",
+        "gate-da-2027-probability-medium",
+        "gate-da-2027-probability-hard",
+        "gate-da-2027-probability-pyq-style"
+      ],
+      "estimatedMinutes": 900
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 2,
+  "meta": {
+    "id": "gate-da-2027-probability-sectional",
+    "name": "GATE DA Probability and Statistics Sectional",
+    "version": "1",
+    "instructionsMd": "A 12-question mixed-topic sectional practice paper. It is original practice material, not an official GATE paper."
+  },
+  "timing": {
+    "mode": "global",
+    "durationMinutes": 30,
+    "warnAtMinutesLeft": [5, 1]
+  },
+  "sections": [
+    { "id": "main", "name": "Probability and Statistics", "questionCount": 12 }
+  ],
+  "questionTypes": {
+    "mcq": {
+      "optionCount": 4,
+      "negativeMarking": { "fractionOfMarks": [1, 3] }
+    },
+    "msq": { "scoring": "all_or_nothing" },
+    "nat": { "inputMode": "virtual_keypad" }
+  },
+  "attempts": { "max": 3 },
+  "progression": {
+    "passPercentage": 70,
+    "rewriteDifficultyPercentage": 50,
+    "difficultyLabel": "hard"
+  },
+  "results": {
+    "scoreVisibility": "immediate",
+    "solutionsRelease": "immediate_after_submit"
+  },
+  "diagnostics": {
+    "enabled": false,
+    "taxonomyRef": "gate-da-2027-probability.taxonomy.json"
+  },
+  "tools": { "calculator": "scientific" },
+  "ui": { "profile": "gate", "kind": "quiz" }
+}

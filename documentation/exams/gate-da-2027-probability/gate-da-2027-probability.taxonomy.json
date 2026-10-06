@@ -1,0 +1,37 @@
+{
+  "id": "gate-da-probability",
+  "difficulty": ["easy", "medium", "hard"],
+  "causes": [
+    { "id": "concept_gap", "name": "Concept gap" },
+    { "id": "trap", "name": "Fell for a known trap" },
+    { "id": "careless", "name": "Careless or rushed" },
+    { "id": "time_pressure", "name": "Time mismanagement" },
+    { "id": "overconfidence", "name": "Overconfidence" },
+    { "id": "guess", "name": "Unjustified guess" }
+  ],
+  "topics": [
+    {
+      "id": "prob",
+      "name": "Probability and Statistics",
+      "children": [
+        { "id": "prob.count", "name": "Counting and combinatorics" },
+        { "id": "prob.events", "name": "Probability axioms and events" },
+        { "id": "prob.cond", "name": "Conditional probability and independence" },
+        { "id": "prob.bayes", "name": "Total probability and Bayes' theorem" },
+        { "id": "prob.rv", "name": "Random variables, PMF, PDF and CDF" },
+        { "id": "prob.moments", "name": "Expectation, variance and moments" },
+        { "id": "prob.joint", "name": "Joint distributions, covariance and correlation" },
+        { "id": "prob.dist", "name": "Named probability distributions" },
+        { "id": "prob.limit", "name": "Sampling distributions and central limit theorem" },
+        { "id": "prob.inference", "name": "Confidence intervals and hypothesis tests" }
+      ]
+    }
+  ],
+  "traps": [
+    { "id": "union-overcount", "name": "Double-counted the overlap", "cause": "trap" },
+    { "id": "binomial-coefficient", "name": "Omitted the combination count", "cause": "concept_gap" },
+    { "id": "expected-value", "name": "Misweighted an outcome", "cause": "careless" },
+    { "id": "independence-covariance", "name": "Assumed covariance terms vanish", "cause": "trap" },
+    { "id": "normal-tail", "name": "Used the lower tail instead of the upper tail", "cause": "trap" }
+  ]
+}
