@@ -28,7 +28,7 @@ export function ReadingSettings(
   >,
 ) {
   return (
-    <div className="space-y-7">
+    <div className="space-y-5">
       <Section title="Page layout">
         <Group>
           {MODES.map((mode) => {

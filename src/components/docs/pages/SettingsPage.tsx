@@ -101,28 +101,28 @@ const SECTIONS = [
   {
     id: "appearance",
     label: "Appearance",
-    description: "A space that feels like yours.",
+    description: "Theme and app features.",
     icon: Palette,
     group: "Preferences",
   },
   {
     id: "reading",
     label: "Reading",
-    description: "Find your rhythm, one page at a time.",
+    description: "Page layout, text width and fonts.",
     icon: BookOpen,
     group: "Preferences",
   },
   {
     id: "diagrams",
     label: "Diagrams",
-    description: "Bring a little clarity to complex ideas.",
+    description: "Colors and step-by-step playback.",
     icon: GitBranch,
     group: "Preferences",
   },
   {
     id: "math",
     label: "Equations",
-    description: "Make every expression easy to read.",
+    description: "Typesetting and accessibility.",
     icon: Sigma,
     group: "Preferences",
   },
@@ -180,7 +180,7 @@ export function SettingsPage(props: SettingsPageProps) {
       <Dialog.Portal>
         <Dialog.Overlay className="settings-overlay fixed inset-0 z-(--z-overlay) bg-foreground/25 backdrop-blur-sm" />
         <Dialog.Content
-          className="settings-dialog fixed inset-0 z-(--z-overlay) flex flex-col overflow-hidden bg-background text-foreground shadow-2xl outline-none sm:inset-auto sm:left-1/2 sm:top-1/2 sm:h-[min(720px,90dvh)] sm:w-[min(960px,calc(100vw-48px))] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[22px] sm:border sm:border-border"
+          className="settings-dialog fixed inset-0 z-(--z-overlay) flex flex-col overflow-hidden bg-background text-foreground shadow-2xl outline-none sm:inset-auto sm:left-1/2 sm:top-1/2 sm:h-[min(720px,90dvh)] sm:w-[min(960px,calc(100vw-48px))] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:border sm:border-border"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             returnFocus.current =
@@ -221,12 +221,11 @@ export function SettingsPage(props: SettingsPageProps) {
             orientation={isNarrow ? "horizontal" : "vertical"}
             className="flex min-h-0 flex-1 flex-col sm:flex-row"
           >
-            <aside className="flex shrink-0 flex-col border-b border-hairline bg-surface-sunken sm:w-[216px] sm:border-b-0 sm:border-r">
-              <div className="hidden px-6 pb-7 pt-8 sm:block">
-                <div aria-hidden="true" className="text-xl font-semibold tracking-tight">
+            <aside className="flex shrink-0 flex-col border-b border-hairline bg-surface-sunken sm:w-[188px] sm:border-b-0 sm:border-r">
+              <div className="hidden px-5 pb-5 pt-5 sm:block">
+                <div aria-hidden="true" className="text-lg font-semibold tracking-tight">
                   Settings
                 </div>
-                <p className="mt-1.5 text-xs text-muted-foreground">Make yourself at home.</p>
               </div>
               <Tabs.List
                 ref={sidebarRef}
@@ -244,7 +243,7 @@ export function SettingsPage(props: SettingsPageProps) {
                           className={
                             index === 0
                               ? "mb-2 hidden px-3 text-2xs font-medium text-muted-foreground sm:block"
-                              : "mb-2 mt-6 hidden px-3 text-2xs font-medium text-muted-foreground sm:block"
+                              : "mb-2 mt-4 hidden px-3 text-2xs font-medium text-muted-foreground sm:block"
                           }
                         >
                           {section.group}
@@ -252,7 +251,7 @@ export function SettingsPage(props: SettingsPageProps) {
                       )}
                       <Tabs.Trigger
                         value={section.id}
-                        className="flex min-h-10 w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=active]:bg-card data-[state=active]:font-medium data-[state=active]:text-foreground data-[state=active]:shadow-xs coarse:min-h-11"
+                        className="flex min-h-9 w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=active]:bg-card data-[state=active]:font-medium data-[state=active]:text-foreground data-[state=active]:shadow-xs coarse:min-h-11"
                       >
                         <Icon className="size-4 shrink-0" aria-hidden="true" />
                         {section.label}
@@ -261,20 +260,15 @@ export function SettingsPage(props: SettingsPageProps) {
                   );
                 })}
               </Tabs.List>
-              <div className="hidden px-6 pb-6 pt-8 sm:block">
-                <p className="text-xs font-medium text-foreground">Localdox</p>
-                <p className="mt-1 text-2xs text-muted-foreground">
-                  Your own little reading space.
-                </p>
-              </div>
+              <p className="hidden px-5 py-4 text-xs text-muted-foreground sm:block">Localdox</p>
             </aside>
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface-sunken/35">
-              <header className="shrink-0 px-5 pb-6 pt-6 sm:px-9 sm:pb-7 sm:pt-8">
-                <div className="mx-auto flex max-w-[580px] items-start justify-between gap-4">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+              <header className="shrink-0 border-b border-hairline px-4 py-4 sm:px-6">
+                <div className="mx-auto flex max-w-[640px] items-start justify-between gap-4">
                   <div>
                     <h2
                       id="settings-section-title"
-                      className="text-2xl font-semibold tracking-tight"
+                      className="text-lg font-semibold tracking-tight"
                     >
                       {current.label}
                     </h2>
@@ -291,9 +285,9 @@ export function SettingsPage(props: SettingsPageProps) {
                 <Tabs.Content
                   key={section.id}
                   value={section.id}
-                  className="settings-panel min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-8 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-9"
+                  className="settings-panel min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6"
                 >
-                  <div className="mx-auto max-w-[580px]">
+                  <div className="mx-auto max-w-[640px]">
                     {section.id === "appearance" && <AppearanceSettings {...props} />}
                     {section.id === "reading" && <ReadingSettings {...props} />}
                     {section.id === "diagrams" && <DiagramSettings {...props} />}

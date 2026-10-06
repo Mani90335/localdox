@@ -38,7 +38,7 @@ export function MathSettings(
   >,
 ) {
   return (
-    <div className="space-y-7">
+    <div className="space-y-5">
       <Section title="Equation display">
         <Group>
           <div className="px-4 py-4">

@@ -43,7 +43,7 @@ export function WorkspaceSettings({
   };
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-5">
       <Section title="Sidebar">
         <Group>
           <Row

@@ -16,7 +16,7 @@ export function DiagramSettings(
   >,
 ) {
   return (
-    <div className="space-y-7">
+    <div className="space-y-5">
       <Section title="Colour">
         <Group>
           <Row

@@ -131,7 +131,7 @@ export function AiSettings() {
   const patchConfig = (patch: Partial<AIConfig>) => setConfig(saveAIConfig(patch));
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-5">
       {/* The encrypted-storage case is the norm, so it stays silent. Only the
           degraded case earns a banner. */}
       {mode !== "encrypted" && (

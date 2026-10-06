@@ -15,8 +15,8 @@ export function AppearanceSettings({
   onSetAiEnabled,
 }: Pick<SettingsPageProps, "theme" | "onSetTheme" | "aiEnabled" | "onSetAiEnabled">) {
   return (
-    <div className="space-y-7">
-      <Section title="Theme" description="Choose the light that feels right.">
+    <div className="space-y-5">
+      <Section title="Theme">
         <div className="grid grid-cols-2 gap-3 sm:gap-4">
           {THEMES.map((option) => {
             const active = theme === option.id;
@@ -28,12 +28,12 @@ export function AppearanceSettings({
                 onClick={() => onSetTheme(option.id)}
                 aria-pressed={active}
                 aria-label={option.label}
-                className={`group rounded-2xl border p-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${active ? "border-primary bg-primary/5" : "border-border bg-card hover:border-muted-foreground/50"}`}
+                className={`group rounded-lg border p-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${active ? "border-primary bg-primary/5" : "border-border bg-card hover:border-muted-foreground/50"}`}
               >
                 <div
                   aria-hidden="true"
                   data-theme-preview={option.id}
-                  className="settings-theme-preview flex h-28 overflow-hidden rounded-xl border sm:h-32"
+                  className="settings-theme-preview flex h-20 overflow-hidden rounded-md border sm:h-24"
                 >
                   <div className="settings-preview-rail w-[28%] space-y-2 border-r p-2.5 sm:p-3">
                     <div className="settings-preview-line mb-4 h-1.5 w-3/4 rounded-full" />
@@ -49,7 +49,7 @@ export function AppearanceSettings({
                     <div className="mt-3 h-5 rounded bg-primary/10" />
                   </div>
                 </div>
-                <span className="flex items-center gap-2 px-1 py-2.5">
+                <span className="flex items-center gap-2 px-1 py-2">
                   <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
                   <span className="flex-1 text-sm font-medium text-foreground">{option.label}</span>
                   <span

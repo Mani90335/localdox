@@ -67,7 +67,7 @@ export function StorageSettings({
   const underPressure = pct !== null && pct >= STORAGE_PRESSURE * 100 && binCount > 0;
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-5">
       <Section title="Storage">
         <Group>
           <div className="px-4 py-3.5">

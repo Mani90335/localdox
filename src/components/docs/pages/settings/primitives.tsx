@@ -20,8 +20,8 @@ export function Section({
 }) {
   const titleId = useId();
   return (
-    <section aria-labelledby={titleId} className="space-y-3">
-      <div className="flex items-end justify-between gap-4 px-0.5">
+    <section aria-labelledby={titleId} className="space-y-2">
+      <div className="flex items-start justify-between gap-3 px-0.5">
         <div className="min-w-0">
           <h3 id={titleId} className="text-sm font-semibold tracking-tight text-foreground">
             {title}
@@ -41,7 +41,7 @@ export function Section({
 export function Group({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
     <div
-      className={`overflow-hidden rounded-xl border border-border/80 bg-card divide-y divide-hairline ${className}`}
+      className={`overflow-hidden rounded-lg border border-border/80 bg-card divide-y divide-hairline ${className}`}
     >
       {children}
     </div>
@@ -61,11 +61,11 @@ export function Row({
   className?: string;
 }) {
   return (
-    <div className={`flex items-center justify-between gap-4 px-4 py-3.5 ${className}`}>
+    <div className={`flex items-center justify-between gap-3 px-3 py-2.5 ${className}`}>
       <div className="min-w-0 flex-1">
         <div className="wrap-anywhere text-sm font-medium text-foreground">{label}</div>
         {hint && (
-          <div className="mt-1 wrap-anywhere text-xs leading-relaxed text-muted-foreground">
+          <div className="mt-0.5 wrap-anywhere text-xs leading-relaxed text-muted-foreground">
             {hint}
           </div>
         )}
@@ -77,7 +77,7 @@ export function Row({
 
 /** Quiet placeholder for empty groups — no dashed borders, no icons shouting. */
 export function Empty({ children }: { children: ReactNode }) {
-  return <p className="px-4 py-8 text-center text-sm text-muted-foreground">{children}</p>;
+  return <p className="px-3 py-5 text-center text-sm text-muted-foreground">{children}</p>;
 }
 
 /** Small icon-only affordance used at the trailing edge of rows. */
