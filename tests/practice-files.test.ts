@@ -160,6 +160,46 @@ test("the starter and the bundled example read cleanly", async () => {
   assert.equal(readPracticeFile(example, "example.xp").questions.length, 3);
 });
 
+test("the conditional probability pack: every key is the computed answer, every trap is wrong", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(
+    new URL("../documentation/plans/conditional-probability-tough.xp", import.meta.url),
+    "utf8",
+  );
+  const sheet = readPracticeFile(source, "conditional-probability-tough.xp");
+  assert.equal(sheet.questions.length, 14);
+  assert.equal(sheet.groups.length, 4);
+  const grade = (id: string, response: string | string[]) =>
+    checkPractice(sheet.questions.find((q) => q.id === id)!, sheet.solutionFor[id], response);
+  // Exact values, worked independently of the file; the trap is the usual wrong answer.
+  const nat: Record<string, [exact: number, trap: number]> = {
+    "cp-two-tests": [(0.01 * 0.95 ** 2) / (0.01 * 0.95 ** 2 + 0.99 * 0.05 ** 2), 0.16],
+    "cp-three-coins": [24.75 / 29, 0.75],
+    "cp-tuesday": [13 / 27, 1 / 3],
+    "cp-three-cards": [2 / 3, 0.5],
+    "cp-urn-at-least": [10 / 25, 4 / 7],
+    "cp-even-until-six": [1.5, 3],
+    "cp-exp-sum": [0.25, Math.exp(-3)],
+  };
+  for (const [id, [exact, trap]] of Object.entries(nat)) {
+    assert.equal(grade(id, exact.toFixed(3)), "correct", id);
+    assert.equal(grade(id, trap.toFixed(3)), "wrong", `${id} trap`);
+  }
+  const options: Record<string, [key: string | string[], trap: string | string[]]> = {
+    "cp-cabs": ["B", "D"],
+    "cp-monty-four": ["B", "D"],
+    "cp-max-four": ["B", "D"],
+    "cp-polya": ["C", "B"],
+    "cp-dice-parity": [["A", "B", "D"], ["A", "B", "C"]],
+    "cp-coin-mixture": [["B", "C"], ["A"]],
+    "cp-always-true": [["A", "C", "D"], ["A", "B"]],
+  };
+  for (const [id, [key, trap]] of Object.entries(options)) {
+    assert.equal(grade(id, key), "correct", id);
+    assert.notEqual(grade(id, trap), "correct", `${id} trap`);
+  }
+});
+
 test("practice and exams stay apart: a paper refuses a practice part", () => {
   assert.match(
     issuesOf(() => parseExamFile(`# Practice\n\n${XP_TEMPLATE.replace("# Warm-up\n", "")}`))[0],

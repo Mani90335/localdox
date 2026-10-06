@@ -1,0 +1,242 @@
+# Bayes and base rates
+
+:::question{#cp-cabs type=mcq difficulty=hard topic=bayes}
+In a city, 85% of cabs are green and 15% are blue. A witness says the cab in a hit-and-run was blue. Tested under the same conditions, the witness names a cab's colour correctly 80% of the time, whichever colour it is.
+
+What is the probability that the cab was actually blue?
+
+- $0.12$
+- $0.41$
+- $0.59$
+- $0.80$
+:::
+
+:::solution{#cp-cabs answer=B}
+Let $B$ be "the cab was blue" and $W$ be "the witness says blue".
+
+$$P(B \mid W) = \frac{P(W \mid B)\,P(B)}{P(W \mid B)\,P(B) + P(W \mid G)\,P(G)} = \frac{0.8 \times 0.15}{0.8 \times 0.15 + 0.2 \times 0.85} = \frac{0.12}{0.29} \approx 0.41$$
+
+The trap is $0.80$, the witness's reliability. That is $P(W \mid B)$, not $P(B \mid W)$. Green cabs are so common that the witness's mistakes about them (0.17) outnumber the correct "blue" reports (0.12).
+:::
+
+:::question{#cp-two-tests type=nat difficulty=hard topic=bayes}
+A disease affects 1% of a population. A test detects it in 95% of people who have it, and wrongly flags 5% of people who don't. Given the true status, repeat tests on the same person are independent.
+
+A person tests positive **twice**. Find the probability that they have the disease, to two decimal places.
+:::
+
+:::solution{#cp-two-tests answer=0.78:0.79}
+Let $D$ mean "has the disease" and $++$ mean "two positives". Given $D$, the two results are independent, so
+
+$$P(++ \mid D) = 0.95^2 = 0.9025, \qquad P(++ \mid D^c) = 0.05^2 = 0.0025.$$
+
+$$P(D \mid ++) = \frac{0.01 \times 0.9025}{0.01 \times 0.9025 + 0.99 \times 0.0025} = \frac{0.009025}{0.0115} \approx 0.785$$
+
+One positive alone gives only $\frac{0.0095}{0.0095 + 0.0495} \approx 0.16$. A second, conditionally independent positive turns that 16% into 78%. Note that the two results are **not** independent unconditionally, because both depend on $D$.
+:::
+
+:::question{#cp-three-coins type=nat difficulty=hard topic=bayes}
+A box holds three coins: a fair one, a double-headed one, and one that lands heads with probability $0.75$. You pick a coin at random and toss it twice. Both tosses land heads.
+
+Find the probability that a third toss of the same coin lands heads, to two decimal places.
+:::
+
+:::solution{#cp-three-coins answer=0.85:0.86}
+Update the coin first, then predict.
+
+| Coin | $P(HH \mid \text{coin})$ | Posterior |
+| --- | --- | --- |
+| Fair | $1/4 = 4/16$ | $4/29$ |
+| Double-headed | $1 = 16/16$ | $16/29$ |
+| $p = 0.75$ | $9/16$ | $9/29$ |
+
+The prior is uniform, so the posterior is in proportion $4 : 16 : 9$, out of $29$.
+
+$$P(H_3 \mid HH) = \frac{4}{29}\cdot\frac12 + \frac{16}{29}\cdot 1 + \frac{9}{29}\cdot\frac34 = \frac{2 + 16 + 6.75}{29} = \frac{24.75}{29} \approx 0.853$$
+
+Averaging the coins' head probabilities with the **prior** ($0.75$) ignores what the two heads said about which coin you hold.
+:::
+
+# Paradoxes
+
+:::question{#cp-tuesday type=nat difficulty=hard topic=conditioning}
+A family has two children. Each child is equally likely to be a boy or a girl, and equally likely to be born on any day of the week, independently. You learn that **at least one of the children is a boy born on a Tuesday**.
+
+Find the probability that both children are boys, to two decimal places.
+:::
+
+:::solution{#cp-tuesday answer=0.48:0.49}
+Each child is one of $2 \times 7 = 14$ equally likely (sex, day) types, so there are $14^2 = 196$ ordered pairs.
+
+- Pairs with at least one Tuesday boy: $196 - 13^2 = 27$.
+- Of those, both boys: each child is one of 7 boy types, so $7^2 - 6^2 = 13$ pairs have at least one Tuesday boy.
+
+$$P(\text{both boys} \mid \text{a Tuesday boy}) = \frac{13}{27} \approx 0.481$$
+
+Without the Tuesday, the answer is $1/3$. The extra detail makes it unlikely that two different boys both match it, so the condition nearly singles out one child, and the answer moves toward $1/2$.
+:::
+
+:::question{#cp-monty-four type=mcq difficulty=hard topic=conditioning}
+A game show has **four** doors: one car and three goats. You pick door 1. The host, who knows where the car is, opens one of the other doors that hides a goat, choosing at random when more than one qualifies. You then switch to one of the two remaining closed doors, chosen at random.
+
+What is the probability that you win the car?
+
+- $1/4$
+- $3/8$
+- $1/2$
+- $2/3$
+:::
+
+:::solution{#cp-monty-four answer=B}
+Switching can only win if your first pick was wrong, which has probability $3/4$. The host never opens the car's door, so the car is then behind one of the two doors you might switch to, and you pick it with probability $1/2$:
+
+$$P(\text{win}) = \frac34 \times \frac12 = \frac38.$$
+
+Staying wins with probability $1/4$, so switching still helps, but random switching among two doors doesn't reach the three-door game's $2/3$.
+:::
+
+:::question{#cp-three-cards type=nat difficulty=medium topic=conditioning}
+Three cards are in a hat: one red on both sides, one blue on both sides, and one red on one side and blue on the other. You draw a card at random and look at one side, chosen at random. It is red.
+
+Find the probability that the other side is also red, to two decimal places.
+:::
+
+:::solution{#cp-three-cards answer=0.66:0.67}
+Count **faces**, not cards. There are three red faces, all equally likely to be the one you see: two belong to the red-red card, one to the mixed card.
+
+$$P(\text{other side red} \mid \text{red seen}) = \frac{2}{3} \approx 0.67$$
+
+The tempting $1/2$ treats the two remaining cards as equally likely. They aren't: the red-red card is twice as likely to show red.
+:::
+
+# Conditioning on partial information
+
+:::question{#cp-max-four type=mcq difficulty=medium topic=conditioning}
+Two fair dice are rolled. Given that the larger of the two numbers is exactly $4$, what is the probability that their sum is $6$?
+
+- $1/7$
+- $2/7$
+- $3/7$
+- $1/4$
+:::
+
+:::solution{#cp-max-four answer=B}
+The outcomes with maximum exactly 4 are those with both dice at most 4, minus those with both at most 3: $4^2 - 3^2 = 7$.
+
+They are $(4,1), (4,2), (4,3), (4,4), (1,4), (2,4), (3,4)$. Two of them, $(4,2)$ and $(2,4)$, sum to 6, so the answer is $2/7$.
+
+The answer isn't $1/4$: the 7 outcomes are equally likely, but the four possible values of the other die are not, because $(4,4)$ is one outcome while each other value appears twice.
+:::
+
+:::question{#cp-urn-at-least type=nat difficulty=medium topic=conditioning}
+An urn holds 5 red and 3 blue balls. Two are drawn without replacement. Given that **at least one** of them is red, find the probability that both are red.
+:::
+
+:::solution{#cp-urn-at-least answer=0.4 tolerance=0.001}
+$$P(\text{both red}) = \frac{\binom52}{\binom82} = \frac{10}{28}, \qquad P(\text{at least one red}) = 1 - \frac{\binom32}{\binom82} = \frac{25}{28}.$$
+
+$$P(\text{both red} \mid \text{at least one red}) = \frac{10/28}{25/28} = 0.4$$
+
+Compare "the **first** ball is red", which gives $4/7 \approx 0.57$. "At least one" is weaker information, so it leaves more doubt.
+:::
+
+:::question{#cp-polya type=mcq difficulty=hard topic=conditioning}
+An urn holds 2 red balls and 1 blue ball. You draw a ball, note its colour, and put it back **together with one more ball of the same colour**. Then you draw again.
+
+Given that the second ball is red, what is the probability that the first ball was red?
+
+- $1/2$
+- $2/3$
+- $3/4$
+- $5/6$
+:::
+
+:::solution{#cp-polya answer=C}
+$$P(R_2 \mid R_1) = \frac34, \qquad P(R_2 \mid B_1) = \frac24, \qquad P(R_2) = \frac23\cdot\frac34 + \frac13\cdot\frac24 = \frac23.$$
+
+$$P(R_1 \mid R_2) = \frac{P(R_2 \mid R_1)\,P(R_1)}{P(R_2)} = \frac{\frac23 \cdot \frac34}{\frac23} = \frac34$$
+
+A red second draw is evidence that the first was red, because a red first draw made red more common. So the answer is above the prior $2/3$.
+:::
+
+:::question{#cp-even-until-six type=nat difficulty=hard topic=conditioning}
+A fair die is rolled until the first $6$ appears. Given that **every** roll was even (no 1, 3 or 5 came up before the 6), find the expected number of rolls.
+:::
+
+:::solution{#cp-even-until-six answer=1.5 tolerance=0.01}
+Let $N$ be the number of rolls. The condition holds with $N = n$ when the first $n - 1$ rolls are a 2 or a 4 and the $n$-th is a 6:
+
+$$P(N = n, \text{all even}) = \left(\tfrac13\right)^{n-1}\cdot\tfrac16, \qquad P(\text{all even}) = \frac{1/6}{1 - 1/3} = \frac14.$$
+
+So $P(N = n \mid \text{all even}) = \left(\frac13\right)^{n-1} \cdot \frac23$, a geometric distribution with success probability $\frac23$, and
+
+$$E[N \mid \text{all even}] = \frac{1}{2/3} = 1.5.$$
+
+The trap answer is 3: "roll a die with faces 2, 4, 6 until a 6". That conditions on the wrong event. Long runs are very likely to contain an odd number, so the condition favours short runs.
+:::
+
+:::question{#cp-exp-sum type=nat difficulty=hard topic=continuous}
+$X$ and $Y$ are independent exponential random variables with the same rate $\lambda > 0$. Given that $X + Y = 4$, find $P(X > 3)$.
+:::
+
+:::solution{#cp-exp-sum answer=0.25 tolerance=0.001}
+The joint density is $\lambda^2 e^{-\lambda(x+y)}$, which depends on $x$ and $y$ only through $x + y$. On the line $x + y = 4$ it is therefore constant, so given $X + Y = 4$, $X$ is **uniform** on $(0, 4)$:
+
+$$f_{X \mid X+Y=4}(x) = \frac{\lambda^2 e^{-4\lambda}}{\int_0^4 \lambda^2 e^{-4\lambda}\,dx} = \frac14, \qquad 0 < x < 4.$$
+
+$$P(X > 3 \mid X + Y = 4) = \frac{4 - 3}{4} = 0.25$$
+
+The answer doesn't depend on $\lambda$. Memorylessness ($P(X > 3) = e^{-3\lambda}$) doesn't apply: once the sum is known, $X$ and $Y$ are no longer independent.
+:::
+
+# Independence
+
+:::question{#cp-dice-parity type=msq difficulty=hard topic=independence}
+Two fair dice are rolled. Let $A$ = "the first die is odd", $B$ = "the second die is odd" and $C$ = "the sum is odd". Select every true statement.
+
+- $A$ and $B$ are independent.
+- $A$ and $C$ are independent.
+- $A$, $B$ and $C$ are mutually independent.
+- $P(C \mid A \cup B) = 2/3$.
+:::
+
+:::solution{#cp-dice-parity answer="A,B,D"}
+- **True.** The dice don't affect each other.
+- **True.** $P(A \cap C) = P(\text{first odd, second even}) = \frac14 = P(A)\,P(C)$.
+- **False.** $A$ and $B$ together force an even sum, so $P(A \cap B \cap C) = 0 \ne \frac18$. The three events are independent in pairs, but not mutually.
+- **True.** $P(A \cup B) = 1 - \frac14 = \frac34$, and $C \cap (A \cup B)$ is "exactly one die odd", with probability $\frac12$. So $P(C \mid A \cup B) = \frac{1/2}{3/4} = \frac23$.
+:::
+
+:::question{#cp-coin-mixture type=msq difficulty=hard topic=independence}
+One of two coins is chosen at random: a fair coin, or one that lands heads with probability $0.9$. The chosen coin is tossed twice. Let $H_1$ and $H_2$ be "heads on toss 1" and "heads on toss 2". Select every true statement.
+
+- $H_1$ and $H_2$ are independent.
+- $H_1$ and $H_2$ are independent given which coin was chosen.
+- $P(H_2 \mid H_1) > P(H_2)$.
+- $P(H_1 \cap H_2) = 0.49$.
+:::
+
+:::solution{#cp-coin-mixture answer="B,C"}
+$P(H_1) = P(H_2) = \frac12(0.5) + \frac12(0.9) = 0.7$, and $P(H_1 \cap H_2) = \frac12(0.25) + \frac12(0.81) = 0.53$.
+
+- **False.** $0.53 \ne 0.7^2 = 0.49$.
+- **True.** Once the coin is fixed, the tosses don't affect each other.
+- **True.** $P(H_2 \mid H_1) = \frac{0.53}{0.7} \approx 0.757 > 0.7$. A head makes the biased coin more likely, which raises the chance of the next head.
+- **False.** $0.49$ is what independence would give. Being independent given the coin doesn't make the tosses independent overall.
+:::
+
+:::question{#cp-always-true type=msq difficulty=hard topic=independence}
+$A$ and $B$ are events with $P(A) > 0$ and $0 < P(B) < 1$. Select every statement that is **always** true.
+
+- $P(A \mid B) + P(A^c \mid B) = 1$
+- $P(A \mid B) + P(A \mid B^c) = 1$
+- If $P(A \mid B) > P(A)$, then $P(B \mid A) > P(B)$.
+- If $P(A \mid B) > P(A \mid B^c)$, then $P(A \mid B) > P(A)$.
+:::
+
+:::solution{#cp-always-true answer="A,C,D"}
+- **True.** $P(\cdot \mid B)$ is a probability measure, and $A$, $A^c$ split the space.
+- **False.** These condition on different events. With $A$ independent of $B$ and $P(A) = 0.3$, the sum is $0.6$.
+- **True.** Both inequalities say $P(A \cap B) > P(A)\,P(B)$. Positive association is symmetric.
+- **True.** $P(A) = P(A \mid B)\,P(B) + P(A \mid B^c)\,P(B^c)$ is a weighted average of the two, with both weights positive, so it lies strictly between them.
+:::

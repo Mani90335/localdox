@@ -86,7 +86,7 @@ The paper's grammar, made lighter: no `.xrule`, no header, `marks` optional (def
 
 **Where answers live.** In this browser's `localStorage`, under `localdox:practice-answers:<file id>`. Practice progress is the reader's own and cheap to lose, so it isn't written into the file, exported, or put behind exam storage's writer lock (which would make a practice file wait for an open exam). Each answer stores a hash of its question and key; editing either retires that answer and leaves the others. Storage that is full or blocked only means answers don't survive a reload.
 
-**Making them.** Create ▸ Practice, or **New file** with a name ending in `.xp`, starts from a working template (`XP_TEMPLATE`). `scripts/generate-gate-da-probability-practice.mjs` writes generated packs as `.xp`.
+**Making them.** Create ▸ Practice, or **New file** with a name ending in `.xp`, starts from a working template (`XP_TEMPLATE`). `scripts/generate-gate-da-probability-practice.mjs` writes generated packs as `.xp`. `plans/conditional-probability-tough.xp` is a hand-written test pack (14 questions: Bayes, paradoxes, conditioning, independence); `tests/practice-files.test.ts` checks every key against an independently computed answer and the usual wrong one.
 
 ## Sitting a paper
 
