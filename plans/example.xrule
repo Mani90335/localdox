@@ -1,0 +1,10 @@
+{
+  "xrule": 1,
+  "name": "Reasoning & arithmetic",
+  "summary": "- Even and odd numbers, divisibility by 2, 3 and 5\n- Fractions as decimals, rounding to two places\n- Reading a simple bar chart and a directed graph",
+  "preset": "gate",
+  "durationMinutes": 10,
+  "questionCount": 4,
+  "passPercentage": 70,
+  "maxAttempts": 3
+}

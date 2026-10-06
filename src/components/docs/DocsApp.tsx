@@ -1,4 +1,3 @@
-import { WorkspaceNavigation } from "./workspace/WorkspaceNavigation";
 import { LEGACY_EXAM_WORKSPACE, workspaceKind, type WorkspaceKind } from "@/lib/workspace/kinds";
 import { dataBytes } from "@/lib/workspace/binary";
 import { ConversionContext } from "@/services/doc-conversion/ConversionContext";
@@ -6,7 +5,7 @@ import { ensureEmbedMediaFolder } from "@/lib/workspace/embed-media";
 import type { DocumentUpdate } from "@/services/office-editing";
 import { Fragment, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { PanelLeft, X, Search, Undo2, Settings } from "lucide-react";
+import { PanelLeft, X, Search, Undo2, Settings, Folder } from "lucide-react";
 
 import {
   ESCAPE_DEPTH,
@@ -79,6 +78,7 @@ import {
 import { WorkspaceMenu } from "./workspace/WorkspaceMenu";
 import { WorkspaceSheet } from "./workspace/WorkspaceSheet";
 import { MoveToWorkspaceDialog } from "./workspace/MoveToWorkspaceDialog";
+import { NewExamDialog } from "./workspace/NewExamDialog";
 import { MoveToBinDialog, type BinRequest } from "./workspace/MoveToBinDialog";
 import { NothingHere } from "./docs-app/NothingHere";
 import {
@@ -101,7 +101,6 @@ import type { AskAiPrefill } from "@/services/ai";
 // the download that stands between the reader and their first paint. Each is
 // mounted only once it is actually asked for, so the fetch overlaps the
 // interaction that triggered it.
-const ExamApp = lazy(() => import("@/services/exams/ExamApp"));
 const DocumentViewer = lazy(() =>
   import("./viewer/DocumentViewer").then((m) => ({ default: m.DocumentViewer })),
 );
@@ -121,7 +120,9 @@ const SettingsPage = lazy(() =>
 /** The settings section a caller asked for, handed over the route change that
  *  opens the dialog. DocsApp is the route component, so it remounts on the way
  *  to /settings and nothing held inside it survives to be read at mount. */
-let pendingSettingsTab: "workspace" | undefined;
+let pendingSettingsTab: "workspace" | "exams" | undefined;
+/** The ruleset Settings ▸ Exam rules should open on, when a paper asked to edit its rules. */
+let pendingSettingsRules: string | undefined;
 let pendingSettingsFocus = false;
 const AskAiPanel = lazy(() =>
   import("@/services/ai/AskAiPanel").then((m) => ({ default: m.AskAiPanel })),
@@ -150,6 +151,9 @@ import {
   estimateStoredBytes,
   SUPPORTED_ACCEPT,
 } from "@/lib/markdown/document-utils";
+import { XAM_TEMPLATE, XP_TEMPLATE, xruleTemplate } from "@/services/exams/templates";
+import { isRulesFile, rulesetTitle, withRulesTag } from "@/services/exams/rules-tag";
+import { ExamWorkspaceContext, type ExamWorkspace } from "./viewer/ExamWorkspaceContext";
 import { clearArtifactResolutionCache } from "@/lib/workspace/workspace-artifacts";
 import { IMPORT_QUEUE, runBounded } from "@/lib/workspace/import-queue";
 import { toast } from "sonner";
@@ -621,14 +625,6 @@ export function DocsApp({ initialExamWorkspace = false }: { initialExamWorkspace
   const workspaceIdRef = useRef<string | null>(null);
   const workspaceKindRef = useRef<WorkspaceKind>("reader");
   const [kind, setKind] = useState<WorkspaceKind>("reader");
-  const [examMaterials, setExamMaterials] = useState(false);
-  const [examImmersive, setExamImmersive] = useState(false);
-  const showExamMaterials = (show: boolean) => {
-    if (show && workspaceIdRef.current)
-      sessionStorage.setItem("localdox:exam-materials", workspaceIdRef.current);
-    else sessionStorage.removeItem("localdox:exam-materials");
-    setExamMaterials(show);
-  };
   const workspaceNameRef = useRef("My workspace");
   const createdAtRef = useRef(Date.now());
   const hydratedRef = useRef(false);
@@ -882,7 +878,6 @@ export function DocsApp({ initialExamWorkspace = false }: { initialExamWorkspace
     (ws: WorkspaceRecord, { background = false }: { background?: boolean } = {}) => {
       workspaceKindRef.current = workspaceKind(ws);
       setKind(workspaceKind(ws));
-      setExamMaterials(sessionStorage.getItem("localdox:exam-materials") === ws.id);
       storageRevisionRef.current = ws.revision;
       storedRecordRef.current = ws;
       baseRecordRef.current = ws;
@@ -1424,10 +1419,12 @@ export function DocsApp({ initialExamWorkspace = false }: { initialExamWorkspace
   );
 
   const { prevFile, nextFile } = useMemo(() => {
-    const idx = activeFile ? files.findIndex((f) => f.id === activeFile.id) : -1;
+    // Rulesets live in Settings, so paging through documents skips them too.
+    const visible = files.filter((file) => !file.deletedAt && !isRulesFile(file));
+    const idx = activeFile ? visible.findIndex((f) => f.id === activeFile.id) : -1;
     return {
-      prevFile: idx > 0 ? files[idx - 1] : null,
-      nextFile: idx >= 0 && idx < files.length - 1 ? files[idx + 1] : null,
+      prevFile: idx > 0 ? visible[idx - 1] : null,
+      nextFile: idx >= 0 && idx < visible.length - 1 ? visible[idx + 1] : null,
     };
   }, [files, activeFile]);
 
@@ -1897,18 +1894,43 @@ export function DocsApp({ initialExamWorkspace = false }: { initialExamWorkspace
   );
 
   /**
+   * Creating the very first document also creates the workspace it lives in,
+   * the same way the first upload does — otherwise nothing persists.
+   */
+  const ensureWorkspace = useCallback((docCount: number) => {
+    if (workspaceIdRef.current) return;
+    const workspace = crypto.randomUUID();
+    workspaceIdRef.current = workspace;
+    workspaceNameRef.current = "My workspace";
+    createdAtRef.current = Date.now();
+    setWorkspaceId(workspace);
+    setWorkspaces([{ id: workspace, name: workspaceNameRef.current, docCount }]);
+    savePrefs({ lastWorkspaceId: workspace });
+  }, []);
+
+  /**
    * Blank markdown document, created from the sidebar's New menu. It opens
    * immediately in the viewer's editor so the reader can paste markdown into
    * it; from there the normal autosave path takes over.
    */
   const createFile = useCallback(
-    (folderId?: string | null, documentKind: "markdown" | "mermaid" | "board" = "markdown") => {
+    (
+      folderId?: string | null,
+      documentKind: "markdown" | "mermaid" | "board" | "practice" = "markdown",
+    ) => {
       const taken = new Set(snapshotRef.current.files.map((f) => f.name));
       const isMermaid = documentKind === "mermaid";
       const isBoard = documentKind === "board";
-      const extension = isBoard ? ".board" : isMermaid ? ".mmd" : ".md";
+      const isPractice = documentKind === "practice";
+      const extension = isBoard ? ".board" : isMermaid ? ".mmd" : isPractice ? ".xp" : ".md";
       const suggested = uniqueFileName(
-        isBoard ? "Untitled board.board" : isMermaid ? "animation.mmd" : "new.md",
+        isBoard
+          ? "Untitled board.board"
+          : isMermaid
+            ? "animation.mmd"
+            : isPractice
+              ? "practice.xp"
+              : "new.md",
         taken,
       );
 
@@ -1925,18 +1947,30 @@ export function DocsApp({ initialExamWorkspace = false }: { initialExamWorkspace
       const trimmed = entered.trim();
       // The extension is what routes a document to its viewer and editor, so it
       // is appended when the reader leaves it off rather than left to chance.
+      // `.xam`, `.xrule` and `.xp` are text documents too: a name ending in
+      // one makes an exam paper, rules file or practice file, started from a
+      // working template.
+      const examName = documentKind === "markdown" && /^.+\.(xam|xrule|xp)$/i.test(trimmed);
       const withExtension =
         !trimmed || trimmed === extension
           ? suggested
-          : trimmed.toLowerCase().endsWith(extension)
+          : examName || trimmed.toLowerCase().endsWith(extension)
             ? trimmed
             : `${trimmed}${extension}`;
       // A name already in use would make two documents indistinguishable in the
       // sidebar, so it is disambiguated the same way the default one is.
       const name = taken.has(withExtension) ? uniqueFileName(withExtension, taken) : withExtension;
       const id = `${name}-${crypto.randomUUID().slice(0, 8)}`;
-      const content = isMermaid
-        ? `---
+      const kind = examName ? getDocumentKind(name) : documentKind;
+      const content =
+        kind === "exam"
+          ? XAM_TEMPLATE
+          : kind === "practice"
+            ? XP_TEMPLATE
+            : kind === "exam-rules"
+              ? xruleTemplate(name.replace(/\.xrule$/i, ""))
+              : isMermaid
+                ? `---
 flow:
   speed: 260
   loop:
@@ -1948,7 +1982,7 @@ flowchart LR
   Start[Start] --> Process[Process]
   Process --> Done[Done]
 `
-        : "";
+                : "";
       const doc: MdFile = {
         id,
         name,
@@ -1957,24 +1991,16 @@ flowchart LR
           ? "application/vnd.localdox.board+json"
           : isMermaid
             ? "text/vnd.mermaid"
-            : "text/markdown",
+            : kind === "exam-rules"
+              ? "application/json"
+              : "text/markdown",
         size: content.length,
         addedAt: Date.now(),
-        kind: documentKind,
+        kind,
         folderId: folderId ?? null,
         headings: [],
       };
-      // Creating the very first document also creates the workspace it lives
-      // in, the same way the first upload does — otherwise nothing persists.
-      if (!workspaceIdRef.current) {
-        const workspace = crypto.randomUUID();
-        workspaceIdRef.current = workspace;
-        workspaceNameRef.current = "My workspace";
-        createdAtRef.current = Date.now();
-        setWorkspaceId(workspace);
-        setWorkspaces([{ id: workspace, name: workspaceNameRef.current, docCount: 1 }]);
-        savePrefs({ lastWorkspaceId: workspace });
-      }
+      ensureWorkspace(1);
 
       setFiles((prev) => [...prev, doc]);
       setActiveFileId(id);
@@ -1997,14 +2023,120 @@ flowchart LR
       toast.success(`Created ${name}`, {
         description: isMermaid
           ? "Edit the flow script and Mermaid source, then preview the animation."
-          : "Paste your markdown, then Save.",
+          : kind === "exam" || kind === "practice"
+            ? "Replace the sample questions, then Save."
+            : kind === "exam-rules"
+              ? "Set the time, pass mark and attempts, then Save."
+              : "Paste your markdown, then Save.",
       });
     },
-    [location.pathname, navigate, markDirty],
+    [location.pathname, navigate, markDirty, ensureWorkspace],
+  );
+
+  /** The New exam dialog, opened from the Create menu. */
+  const [newExamOpen, setNewExamOpen] = useState(false);
+
+  /**
+   * A new exam: an `.xam` paper whose header names its ruleset, plus that
+   * ruleset when the dialog asked for a new one. Rulesets sit at the top level
+   * because Settings ▸ Exam rules lists them, not the folders. The paper opens
+   * in its editor, like any new document, so the sample questions can be
+   * replaced straight away.
+   */
+  const createExam = useCallback(
+    (requested: string, rulesName: string | null) => {
+      setNewExamOpen(false);
+      const taken = new Set(snapshotRef.current.files.map((f) => f.name));
+      const stem = requested.replace(/\.xam$/i, "").trim() || "Exam";
+      const paperName = uniqueFileName(`${stem}.xam`, taken);
+      taken.add(paperName);
+      const now = Date.now();
+      const made: MdFile[] = [];
+      const rules = rulesName ?? uniqueFileName(`${stem}.xrule`, taken);
+      if (!rulesName) {
+        const content = xruleTemplate(stem);
+        made.push({
+          id: `${rules}-${crypto.randomUUID().slice(0, 8)}`,
+          name: rules,
+          content,
+          mimeType: "application/json",
+          size: content.length,
+          addedAt: now,
+          kind: "exam-rules",
+          folderId: null,
+          headings: [],
+        });
+      }
+      const content = withRulesTag(XAM_TEMPLATE, rules);
+      const id = `${paperName}-${crypto.randomUUID().slice(0, 8)}`;
+      made.push({
+        id,
+        name: paperName,
+        content,
+        mimeType: "text/markdown",
+        size: content.length,
+        addedAt: now,
+        kind: "exam",
+        folderId: null,
+        headings: [],
+      });
+      ensureWorkspace(made.length);
+      setFiles((prev) => [...prev, ...made]);
+      setActiveFileId(id);
+      setActiveHeadingId(null);
+      setAutoEditFileId(id);
+      setDrawerOpen(false);
+      if (location.pathname !== "/") navigate({ to: "/" });
+      // On the trail, so Back — and closing Settings after editing its rules —
+      // returns to the new paper rather than the document before it.
+      navHistoryRef.current.push({ path: "/", fileId: id, headingId: null, query: null });
+      markDirty();
+      toast.success(`Created ${paperName}`, {
+        description: rulesName
+          ? `Runs under ${rulesName}. Replace the sample questions, then Save.`
+          : `Its rules are in ${rules}, in Settings ▸ Exam rules. Replace the sample questions, then Save.`,
+      });
+    },
+    [location.pathname, navigate, markDirty, ensureWorkspace],
+  );
+
+  /**
+   * A text file added beside the open one without leaving it — an exam
+   * paper's new `.xrule`, created from the paper itself. Returns the name it
+   * got, which the paper then names in its header.
+   */
+  const addTextFile = useCallback(
+    (requested: string, content: string, folderId: string | null) => {
+      const name = uniqueFileName(requested, new Set(snapshotRef.current.files.map((f) => f.name)));
+      const kind = getDocumentKind(name);
+      const id = `${name}-${crypto.randomUUID().slice(0, 8)}`;
+      setFiles((prev) => [
+        ...prev,
+        {
+          id,
+          name,
+          content,
+          mimeType: kind === "exam-rules" || kind === "json" ? "application/json" : "text/markdown",
+          size: content.length,
+          addedAt: Date.now(),
+          kind,
+          folderId,
+          headings: [],
+        },
+      ]);
+      markDirty();
+      toast.success(`Created ${name}`);
+      return { id, name };
+    },
+    [markDirty],
   );
 
   const createMermaidFile = useCallback(
     (folderId?: string | null) => createFile(folderId, "mermaid"),
+    [createFile],
+  );
+  const createPracticeFile = useCallback(
+    (folderId?: string | null) => createFile(folderId, "practice"),
     [createFile],
   );
 
@@ -3871,12 +4003,20 @@ flowchart LR
   // component *is* the route, so it remounts on the way there and any state or
   // ref holding the request is wiped before the dialog mounts to read it.
   const openSettings = useCallback(
-    (tab?: "workspace") => {
+    (tab?: "workspace" | "exams") => {
       pendingSettingsTab = tab;
       navigate({ to: "/settings" });
       navHistoryRef.current.push({ path: "/settings", fileId: null, headingId: null });
     },
     [navigate],
+  );
+  /** Rulesets are edited in Settings, not the reader: open it on this one. */
+  const openRulesSettings = useCallback(
+    (fileId: string) => {
+      pendingSettingsRules = fileId;
+      openSettings("exams");
+    },
+    [openSettings],
   );
 
   // Closing the dialog is a route change back to the reader. Going through the
@@ -3885,6 +4025,7 @@ flowchart LR
   const closeSettings = useCallback(() => {
     // Spent: the next plain open starts where it always did.
     pendingSettingsTab = undefined;
+    pendingSettingsRules = undefined;
     pendingSettingsFocus = true;
     if (navHistoryRef.current.canBack) navHistoryRef.current.back();
     else navigate({ to: "/" });
@@ -4194,6 +4335,34 @@ flowchart LR
     />
   );
 
+  const rulesetOptions = useMemo(
+    () =>
+      newExamOpen
+        ? files
+            .filter((f) => !f.deletedAt && isRulesFile(f))
+            .map((f) => ({ name: f.name, title: rulesetTitle(f) }))
+        : [],
+    [newExamOpen, files],
+  );
+  const newExamDialog = (
+    <NewExamDialog
+      open={newExamOpen}
+      rulesets={rulesetOptions}
+      onCancel={() => setNewExamOpen(false)}
+      onCreate={createExam}
+    />
+  );
+
+  /** A new ruleset from Settings ▸ Exam rules: the default rules, named. */
+  const createRules = useCallback(
+    (requested: string) => {
+      const stem = requested.replace(/\.xrule$/i, "").trim() || "Rules";
+      ensureWorkspace(1);
+      return addTextFile(`${stem}.xrule`, xruleTemplate(stem), null);
+    },
+    [ensureWorkspace, addTextFile],
+  );
+
   const moveDialog = (
     <MoveToWorkspaceDialog
       open={pendingMove !== null}
@@ -4255,6 +4424,10 @@ flowchart LR
         onExportWorkspace={exportWorkspace}
         onShareWorkspace={shareWorkspace}
         initialTab={pendingSettingsTab}
+        initialRulesId={pendingSettingsRules}
+        onSaveFile={handleContentChange}
+        onCreateRules={createRules}
+        onBinFile={binNow}
         onClose={closeSettings}
       />
     </LazyBoundary>
@@ -4310,53 +4483,31 @@ flowchart LR
       />
     ) : null);
 
-  const workspaceNavigation =
-    kind === "exam" ? (
-      <WorkspaceNavigation
-        name={workspaceNameRef.current}
-        materials={examMaterials}
-        materialCount={files.filter((file) => !file.deletedAt).length}
-        onSelect={showExamMaterials}
-      />
-    ) : null;
+  // Exam Workspaces study `.xam` files in place; the paper needs its siblings
+  // (rules, images) and the folder tree that scopes them.
+  const examWorkspace = useMemo<ExamWorkspace | null>(
+    () =>
+      kind === "exam" && workspaceId
+        ? {
+            workspaceId,
+            paused: showSettings,
+            files,
+            folders,
+            openFile: navToFile,
+            openRules: openRulesSettings,
+            addTextFile,
+          }
+        : null,
+    [kind, workspaceId, showSettings, files, folders, navToFile, openRulesSettings, addTextFile],
+  );
 
   if (booting) {
     return <div className="min-h-dvh bg-background">{statusBanner}</div>;
   }
 
-  if (kind === "exam" && !examMaterials && workspaceId) {
-    return (
-      <div className="min-h-dvh bg-background">
-        {!examImmersive && (
-          <Header
-            onMenu={null}
-            hideMenu
-            onOpenPalette={() => {}}
-            hasFiles={false}
-            onHome={kind === "exam" ? () => showExamMaterials(false) : goHome}
-            workspaces={workspaces}
-            currentWorkspaceId={workspaceId}
-            onSwitchWorkspace={switchWorkspace}
-            onOpenSettings={openSettings}
-          />
-        )}
-        {!examImmersive && workspaceNavigation}
-        {!showSettings && (
-          <LazyBoundary>
-            <ExamApp key={workspaceId} workspaceId={workspaceId} onImmersive={setExamImmersive} />
-          </LazyBoundary>
-        )}
-        {settingsDialog}
-        {statusBanner}
-      </div>
-    );
-  }
-
   if (files.length === 0) {
     return (
       <EmptyWorkspace
-        workspaceNavigation={workspaceNavigation}
-        learningMaterials={kind === "exam"}
         onHome={goHome}
         workspaces={workspaces}
         currentWorkspaceId={workspaceId}
@@ -4377,220 +4528,39 @@ flowchart LR
 
   return (
     <NavHistoryContext.Provider value={navHistory}>
-      <DraftJournalContext.Provider value={journalContext}>
-        <div className="min-h-dvh bg-background">
-          <Header
-            hideOnDesktop={kind !== "exam"}
-            onMenu={openDrawer}
-            onOpenPalette={() => {
-              openDrawer();
-              setSearchOpen(true);
-            }}
-            hasFiles
-            sidebarCollapsed={sidebarCollapsed}
-            onToggleSidebar={toggleSidebar}
-            onHome={kind === "exam" ? () => showExamMaterials(false) : goHome}
-            workspaces={workspaces}
-            currentWorkspaceId={workspaceId}
-            onSwitchWorkspace={switchWorkspace}
-            onOpenSettings={openSettings}
-            saveIndicator={saveState ? <SaveIndicator state={saveState} compact /> : null}
-          />
+      <ExamWorkspaceContext.Provider value={examWorkspace}>
+        <DraftJournalContext.Provider value={journalContext}>
+          <div className="min-h-dvh bg-background">
+            <Header
+              hideOnDesktop
+              onMenu={openDrawer}
+              onOpenPalette={() => {
+                openDrawer();
+                setSearchOpen(true);
+              }}
+              hasFiles
+              sidebarCollapsed={sidebarCollapsed}
+              onToggleSidebar={toggleSidebar}
+              onHome={goHome}
+              workspaces={workspaces}
+              currentWorkspaceId={workspaceId}
+              onSwitchWorkspace={switchWorkspace}
+              onOpenSettings={openSettings}
+              saveIndicator={saveState ? <SaveIndicator state={saveState} compact /> : null}
+            />
 
-          {workspaceNavigation}
-          <div className="flex">
-            <div
-              ref={sidebarWrapRef}
-              className="sticky top-0 hidden h-dvh shrink-0 border-r border-border bg-background lg:block"
-              style={{ width: sidebarCollapsed ? 56 : SIDEBAR_WIDTH }}
-            >
-              <div ref={sidebarInnerRef} className="h-full w-full">
-                <Sidebar
-                  showEmbedMedia={showEmbedMedia}
-                  files={files}
-                  activeFileId={activeFileId}
-                  activeHeadingId={activeHeadingId}
-                  expanded={expanded}
-                  onToggleFile={toggleFile}
-                  onSelect={handleSelect}
-                  onAddFiles={() => inputRef.current?.click()}
-                  onRemoveFile={moveToBin}
-                  onRemoveSelection={removeSelection}
-                  onDownloadFile={downloadFile}
-                  onDownloadFiles={downloadFiles}
-                  onMoveToWorkspace={workspaces.length > 1 ? setPendingMove : undefined}
-                  onShareFile={shareFile}
-                  onShareFiles={(ids) => void shareFiles(ids)}
-                  onRenameFile={renameFile}
-                  onEditFile={editFile}
-                  onConvertFile={conversion.start}
-                  convertingFileId={conversion.runningId}
-                  folders={folders}
-                  onCreateFile={createFile}
-                  onCreateMermaid={createMermaidFile}
-                  onCreateBoard={createBoardFile}
-                  onCreateFolder={createFolder}
-                  onRenameFolder={renameFolder}
-                  onDeleteFolder={deleteFolder}
-                  onMoveFileToFolder={moveFileToFolder}
-                  onMoveFolderToFolder={moveFolderToFolder}
-                  onReorderFile={reorderFile}
-                  onReorderFolder={reorderFolder}
-                  onSortByName={sortFilesByName}
-                  view={sidebarView}
-                  onView={setSidebarView}
-                  theme={theme}
-                  onCycleTheme={cycleTheme}
-                  currentWorkspaceName={workspaceNameRef.current}
-                  canDeleteWorkspace={workspaces.length > 1}
-                  onRenameCurrentWorkspace={(name) =>
-                    workspaceIdRef.current && void renameWorkspace(workspaceIdRef.current, name)
-                  }
-                  onDeleteCurrentWorkspace={() =>
-                    workspaceIdRef.current && void deleteWorkspace(workspaceIdRef.current)
-                  }
-                  onClearStorage={clearAllStorage}
-                  highlights={highlights}
-                  onRemoveHighlight={removeHighlight}
-                  onOpenSettings={openSettings}
-                  onAddToSplit={openBeside}
-                  splitFileIds={splitFileIds}
-                  onAskAi={aiEnabled ? openAskAi : undefined}
-                  onImportWorkspace={importWorkspace}
-                  onExportWorkspace={exportWorkspace}
-                  onShareWorkspace={shareWorkspace}
-                  workspaces={workspaces}
-                  currentWorkspaceId={workspaceId}
-                  onSwitchWorkspace={switchWorkspace}
-                  docked
-                  // Quiet while things are fine — an icon whose tooltip
-                  // explains it — and spelled out only when a save failed.
-                  saveIndicator={
-                    saveState ? (
-                      <SaveIndicator state={saveState} compact={saveState !== "error"} />
-                    ) : null
-                  }
-                  onOpenSearch={() => setSearchOpen(true)}
-                  onToggleSidebar={toggleSidebar}
-                  search={searchPanelState}
-                />
-              </div>
-
+            <div className="flex">
               <div
-                // Same padding and button class as the expanded sidebar's
-                // top row, so the toggle, and every icon, is the same size in
-                // the same place in both states.
-                className="absolute inset-y-0 left-0 z-20 flex w-14 flex-col items-center gap-0.5 border-r border-border bg-background py-2.5 transition-opacity duration-200"
-                style={{
-                  opacity: sidebarCollapsed ? 1 : 0,
-                  pointerEvents: sidebarCollapsed ? "auto" : "none",
-                }}
+                ref={sidebarWrapRef}
+                className="sticky top-0 hidden h-dvh shrink-0 border-r border-border bg-background lg:block"
+                style={{ width: sidebarCollapsed ? 56 : SIDEBAR_WIDTH }}
               >
-                {/* The panel glyph, not a hamburger: it is the same control as
-                  the expanded sidebar's collapse button, in the same spot. */}
-                <button
-                  onClick={() => setSidebarCollapsed(false)}
-                  className={CHROME_BUTTON}
-                  aria-label="Expand sidebar"
-                  title="Expand sidebar"
+                <div
+                  ref={sidebarInnerRef}
+                  className="h-full w-full"
+                  inert={sidebarCollapsed}
+                  style={{ visibility: sidebarCollapsed ? "hidden" : "visible" }}
                 >
-                  <PanelLeft className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => {
-                    setSidebarCollapsed(false);
-                    setSearchOpen(true);
-                  }}
-                  className={CHROME_BUTTON}
-                  aria-label="Search docs"
-                  title={`Search docs (${modKeyLabel}K)`}
-                >
-                  <Search className="h-4 w-4" />
-                </button>
-                {/* The same three ways to add as the expanded sidebar offers —
-                  the rail used to jump straight to the file picker, which was
-                  the one option of the three you could not undo by closing a
-                  menu. Opens rightwards, since there is nothing to its left. */}
-                <AddMenu
-                  align="left"
-                  onCreateFile={() => createFile(null)}
-                  onCreateMermaid={() => createMermaidFile(null)}
-                  onCreateBoard={() => createBoardFile(null)}
-                  onCreateFolder={promptNewFolderFromRail}
-                  onUpload={() => inputRef.current?.click()}
-                  buttonClassName={CHROME_BUTTON}
-                />
-                <div className="flex-1" />
-                {/* Status sits with the workspace it describes, as it does in
-                  the expanded footer — not among the actions, where a lone
-                  check mark read as one more button. */}
-                {saveState && (
-                  <span
-                    // The rail stays mounted behind the expanded sidebar;
-                    // only the visible copy of the status is read out.
-                    aria-hidden={!sidebarCollapsed}
-                    className="flex h-8 w-8 items-center justify-center"
-                  >
-                    <SaveIndicator state={saveState} compact />
-                  </span>
-                )}
-                <button
-                  onClick={() => openSettings()}
-                  className={CHROME_BUTTON}
-                  aria-label="Settings"
-                  title="Settings"
-                >
-                  <Settings className="h-4 w-4" />
-                </button>
-                {/* The workspace monogram opens the same avatar-strip switcher
-                  the expanded sidebar's footer shows inline. */}
-                <WorkspaceMenu
-                  variant="icon"
-                  workspaces={workspaces}
-                  currentId={workspaceId}
-                  onSwitch={(id) => void switchWorkspace(id)}
-                />
-              </div>
-            </div>
-
-            <Sheet open={drawerOpen && mobileNavigation} onOpenChange={setDrawerOpen}>
-              <SheetContent
-                ref={drawerContentRef}
-                side="left"
-                aria-describedby={undefined}
-                showCloseButton={false}
-                className="flex w-80 max-w-[85vw] flex-col gap-0 p-0 pl-[env(safe-area-inset-left)] pb-[env(safe-area-inset-bottom)]"
-                onCloseAutoFocus={(event) => {
-                  // There are multiple openers (menu, search, keyboard shortcut),
-                  // so a single SheetTrigger cannot restore the right one.
-                  event.preventDefault();
-                  const opener = drawerOpenerRef.current;
-                  if (opener?.isConnected && opener.getClientRects().length) opener.focus();
-                }}
-                onEscapeKeyDown={(event) => {
-                  // Sidebar menus and search own their Escape handlers. Let
-                  // those close first without also dismissing their parent.
-                  if (
-                    searchOpen ||
-                    drawerContentRef.current?.querySelector("[data-sidebar-menu-panel]")
-                  ) {
-                    event.preventDefault();
-                  }
-                }}
-              >
-                <SheetTitle className="sr-only">Workspace navigation</SheetTitle>
-                <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
-                  <span className="text-sm font-semibold truncate px-1">
-                    {workspaceNameRef.current || "Workspace"}
-                  </span>
-                  <SheetClose
-                    aria-label="Close"
-                    className="-mr-2 inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11"
-                  >
-                    <X className="h-4 w-4" />
-                  </SheetClose>
-                </div>
-                <div className="min-h-0 flex-1">
                   <Sidebar
                     showEmbedMedia={showEmbedMedia}
                     files={files}
@@ -4615,6 +4585,8 @@ flowchart LR
                     onCreateFile={createFile}
                     onCreateMermaid={createMermaidFile}
                     onCreateBoard={createBoardFile}
+                    onCreateExam={() => setNewExamOpen(true)}
+                    onCreatePractice={createPracticeFile}
                     onCreateFolder={createFolder}
                     onRenameFolder={renameFolder}
                     onDeleteFolder={deleteFolder}
@@ -4638,67 +4610,259 @@ flowchart LR
                     onClearStorage={clearAllStorage}
                     highlights={highlights}
                     onRemoveHighlight={removeHighlight}
-                    onOpenSettings={(tab) => {
-                      setDrawerOpen(false);
-                      openSettings(tab);
-                    }}
-                    onAskAi={
-                      aiEnabled
-                        ? () => {
-                            setDrawerOpen(false);
-                            openAskAi();
-                          }
-                        : undefined
-                    }
-                    workspaces={workspaces}
-                    currentWorkspaceId={workspaceId}
-                    onSwitchWorkspace={(id) => {
-                      setDrawerOpen(false);
-                      switchWorkspace(id);
-                    }}
+                    onOpenSettings={openSettings}
+                    onAddToSplit={openBeside}
+                    splitFileIds={splitFileIds}
+                    onAskAi={aiEnabled ? openAskAi : undefined}
                     onImportWorkspace={importWorkspace}
                     onExportWorkspace={exportWorkspace}
                     onShareWorkspace={shareWorkspace}
+                    workspaces={workspaces}
+                    currentWorkspaceId={workspaceId}
+                    onSwitchWorkspace={switchWorkspace}
+                    docked
+                    // Quiet while things are fine — an icon whose tooltip
+                    // explains it — and spelled out only when a save failed.
+                    saveIndicator={
+                      saveState ? (
+                        <SaveIndicator state={saveState} compact={saveState !== "error"} />
+                      ) : null
+                    }
+                    onOpenSearch={() => setSearchOpen(true)}
+                    onToggleSidebar={toggleSidebar}
                     search={searchPanelState}
                   />
                 </div>
-              </SheetContent>
-            </Sheet>
 
-            {/* One boundary for the whole content column: the settings page and the
+                <div
+                  // Same padding and button class as the expanded sidebar's
+                  // top row, so the toggle, and every icon, is the same size in
+                  // the same place in both states.
+                  className="absolute inset-y-0 left-0 z-20 flex w-14 flex-col items-center gap-0.5 border-r border-border bg-background py-2.5 transition-opacity duration-200"
+                  inert={!sidebarCollapsed}
+                  style={{
+                    opacity: sidebarCollapsed ? 1 : 0,
+                    visibility: sidebarCollapsed ? "visible" : "hidden",
+                    pointerEvents: sidebarCollapsed ? "auto" : "none",
+                  }}
+                >
+                  {/* The panel glyph, not a hamburger: it is the same control as
+                  the expanded sidebar's collapse button, in the same spot. */}
+                  <button
+                    onClick={() => setSidebarCollapsed(false)}
+                    className={CHROME_BUTTON}
+                    aria-label="Expand sidebar"
+                    title="Expand sidebar"
+                  >
+                    <PanelLeft className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSidebarCollapsed(false);
+                      setSearchOpen(true);
+                    }}
+                    className={CHROME_BUTTON}
+                    aria-label="Search docs"
+                    title={`Search docs (${modKeyLabel}K)`}
+                  >
+                    <Search className="h-4 w-4" />
+                  </button>
+                  {/* The same ways to add as the expanded sidebar offers —
+                  the rail used to jump straight to the file picker, which was
+                  the one option of the three you could not undo by closing a
+                  menu. Opens rightwards, since there is nothing to its left. */}
+                  <AddMenu
+                    align="left"
+                    onCreateFile={() => createFile(null)}
+                    onCreateMermaid={() => createMermaidFile(null)}
+                    onCreateBoard={() => createBoardFile(null)}
+                    onCreateFolder={promptNewFolderFromRail}
+                    onCreateExam={() => setNewExamOpen(true)}
+                    onCreatePractice={() => createPracticeFile(null)}
+                    onUpload={() => inputRef.current?.click()}
+                    buttonClassName={CHROME_BUTTON}
+                  />
+                  <div className="flex-1" />
+                  {/* Status sits with the workspace it describes, as it does in
+                  the expanded footer — not among the actions, where a lone
+                  check mark read as one more button. */}
+                  {saveState && (
+                    <span
+                      // The rail stays mounted behind the expanded sidebar;
+                      // only the visible copy of the status is read out.
+                      aria-hidden={!sidebarCollapsed}
+                      className="flex h-8 w-8 items-center justify-center"
+                    >
+                      <SaveIndicator state={saveState} compact />
+                    </span>
+                  )}
+                  <button
+                    onClick={() => openSettings()}
+                    className={CHROME_BUTTON}
+                    aria-label="Settings"
+                    title="Settings"
+                  >
+                    <Settings className="h-4 w-4" />
+                  </button>
+                  {/* The workspace monogram opens the same avatar-strip switcher
+                  the expanded sidebar's footer shows inline. */}
+                  <WorkspaceMenu
+                    variant="icon"
+                    workspaces={workspaces}
+                    currentId={workspaceId}
+                    onSwitch={(id) => void switchWorkspace(id)}
+                  />
+                </div>
+              </div>
+
+              <Sheet open={drawerOpen && mobileNavigation} onOpenChange={setDrawerOpen}>
+                <SheetContent
+                  ref={drawerContentRef}
+                  side="left"
+                  aria-describedby={undefined}
+                  showCloseButton={false}
+                  className="flex w-80 max-w-[85vw] flex-col gap-0 p-0 pl-[env(safe-area-inset-left)] pb-[env(safe-area-inset-bottom)]"
+                  onCloseAutoFocus={(event) => {
+                    // There are multiple openers (menu, search, keyboard shortcut),
+                    // so a single SheetTrigger cannot restore the right one.
+                    event.preventDefault();
+                    const opener = drawerOpenerRef.current;
+                    if (opener?.isConnected && opener.getClientRects().length) opener.focus();
+                  }}
+                  onEscapeKeyDown={(event) => {
+                    // Sidebar menus and search own their Escape handlers. Let
+                    // those close first without also dismissing their parent.
+                    if (
+                      searchOpen ||
+                      drawerContentRef.current?.querySelector("[data-sidebar-menu-panel]")
+                    ) {
+                      event.preventDefault();
+                    }
+                  }}
+                >
+                  <SheetTitle className="sr-only">Workspace navigation</SheetTitle>
+                  <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
+                    <span className="text-sm font-semibold truncate px-1">
+                      {workspaceNameRef.current || "Workspace"}
+                    </span>
+                    <SheetClose
+                      aria-label="Close"
+                      className="-mr-2 inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:h-11 coarse:w-11"
+                    >
+                      <X className="h-4 w-4" />
+                    </SheetClose>
+                  </div>
+                  <div className="min-h-0 flex-1">
+                    <Sidebar
+                      showEmbedMedia={showEmbedMedia}
+                      files={files}
+                      activeFileId={activeFileId}
+                      activeHeadingId={activeHeadingId}
+                      expanded={expanded}
+                      onToggleFile={toggleFile}
+                      onSelect={handleSelect}
+                      onAddFiles={() => inputRef.current?.click()}
+                      onRemoveFile={moveToBin}
+                      onRemoveSelection={removeSelection}
+                      onDownloadFile={downloadFile}
+                      onDownloadFiles={downloadFiles}
+                      onMoveToWorkspace={workspaces.length > 1 ? setPendingMove : undefined}
+                      onShareFile={shareFile}
+                      onShareFiles={(ids) => void shareFiles(ids)}
+                      onRenameFile={renameFile}
+                      onEditFile={editFile}
+                      onConvertFile={conversion.start}
+                      convertingFileId={conversion.runningId}
+                      folders={folders}
+                      onCreateFile={createFile}
+                      onCreateMermaid={createMermaidFile}
+                      onCreateBoard={createBoardFile}
+                      onCreateExam={() => setNewExamOpen(true)}
+                      onCreatePractice={createPracticeFile}
+                      onCreateFolder={createFolder}
+                      onRenameFolder={renameFolder}
+                      onDeleteFolder={deleteFolder}
+                      onMoveFileToFolder={moveFileToFolder}
+                      onMoveFolderToFolder={moveFolderToFolder}
+                      onReorderFile={reorderFile}
+                      onReorderFolder={reorderFolder}
+                      onSortByName={sortFilesByName}
+                      view={sidebarView}
+                      onView={setSidebarView}
+                      theme={theme}
+                      onCycleTheme={cycleTheme}
+                      currentWorkspaceName={workspaceNameRef.current}
+                      canDeleteWorkspace={workspaces.length > 1}
+                      onRenameCurrentWorkspace={(name) =>
+                        workspaceIdRef.current && void renameWorkspace(workspaceIdRef.current, name)
+                      }
+                      onDeleteCurrentWorkspace={() =>
+                        workspaceIdRef.current && void deleteWorkspace(workspaceIdRef.current)
+                      }
+                      onClearStorage={clearAllStorage}
+                      highlights={highlights}
+                      onRemoveHighlight={removeHighlight}
+                      onOpenSettings={(tab) => {
+                        setDrawerOpen(false);
+                        openSettings(tab);
+                      }}
+                      onAskAi={
+                        aiEnabled
+                          ? () => {
+                              setDrawerOpen(false);
+                              openAskAi();
+                            }
+                          : undefined
+                      }
+                      workspaces={workspaces}
+                      currentWorkspaceId={workspaceId}
+                      onSwitchWorkspace={(id) => {
+                        setDrawerOpen(false);
+                        switchWorkspace(id);
+                      }}
+                      onImportWorkspace={importWorkspace}
+                      onExportWorkspace={exportWorkspace}
+                      onShareWorkspace={shareWorkspace}
+                      search={searchPanelState}
+                    />
+                  </div>
+                </SheetContent>
+              </Sheet>
+
+              {/* One boundary for the whole content column: the settings page and the
             binary-document viewers suspend here. The Markdown reader has its own
             placeholder (MarkdownViewerLazy), so a first open keeps the column's
             layout; a failed download of any of them lands here. */}
-            <EditFileContext.Provider value={editFile}>
-              <ConversionContext.Provider
-                value={{
-                  files,
-                  runningId: conversion.runningId,
-                  onConvert: conversion.start,
-                  onCancel: conversion.cancel,
-                  onOpen: handleSelect,
-                }}
-              >
-                <LazyBoundary
-                  loading={<main className="min-w-0 flex-1" aria-busy />}
-                  failed={<ChunkFailedNotice />}
-                  resetKey={activeFileId}
+              <EditFileContext.Provider value={editFile}>
+                <ConversionContext.Provider
+                  value={{
+                    files,
+                    runningId: conversion.runningId,
+                    onConvert: conversion.start,
+                    onCancel: conversion.cancel,
+                    onOpen: handleSelect,
+                  }}
                 >
-                  {/* In split view the column is pinned to the viewport and each pane
+                  <LazyBoundary
+                    loading={<main className="min-w-0 flex-1" aria-busy />}
+                    failed={<ChunkFailedNotice />}
+                    resetKey={activeFileId}
+                  >
+                    {/* In split view the column is pinned to the viewport and each pane
                 scrolls itself. Without a real height here the group resolves
                 `h-full` against an auto-height parent, every pane grows to its
                 content, and the *window* ends up doing the scrolling — which is
                 why the panes used to move together. */}
-                  <main
-                    className={
-                      paneLayout.panes.length > 1
-                        ? "flex min-h-0 w-0 min-w-0 flex-1 flex-col overflow-hidden h-[calc(100dvh-var(--header-h,3.5rem))]"
-                        : "min-w-0 flex-1 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:pb-0"
-                    }
-                  >
-                    {paneLayout.panes.length === 1 && activeFile && conversionActions(activeFile)}
-                    {paneLayout.panes.length > 1 ? (
-                      /* Split view. Each pane carries its own tab strip and its own
+                    <main
+                      className={
+                        paneLayout.panes.length > 1
+                          ? "flex min-h-0 w-0 min-w-0 flex-1 flex-col overflow-hidden h-[calc(100dvh-var(--header-h,3.5rem))]"
+                          : "min-w-0 flex-1 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:pb-0"
+                      }
+                    >
+                      {paneLayout.panes.length === 1 && activeFile && conversionActions(activeFile)}
+                      {paneLayout.panes.length > 1 ? (
+                        /* Split view. Each pane carries its own tab strip and its own
                    document; the focused pane is what the rest of the app means
                    by "the active file", so nothing outside here has to know
                    panes exist.
@@ -4710,218 +4874,248 @@ flowchart LR
                    window narrowed with a split already open used to land
                    exactly there. Below the width where two columns still read,
                    the panes stack instead. */
-                      <ResizablePanelGroup
-                        orientation={splitStacks ? "vertical" : "horizontal"}
-                        className="h-full"
-                      >
-                        {paneLayout.panes.map((pane, index) => {
-                          const paneFile = files.find((f) => f.id === pane.activeTabId) ?? null;
-                          const paneKind = paneFile
-                            ? (paneFile.kind ?? getDocumentKind(paneFile.name, paneFile.mimeType))
-                            : null;
-                          const paneIsBoard = paneKind === "board";
-                          return (
-                            <Fragment key={pane.id}>
-                              {index > 0 && <ResizableHandle withHandle />}
-                              <ResizablePanel
-                                defaultSize={`${Math.floor(100 / paneLayout.panes.length)}%`}
-                                minSize="20%"
-                              >
-                                <div
-                                  onMouseDown={() => focusPane(pane.id)}
-                                  className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+                        <ResizablePanelGroup
+                          orientation={splitStacks ? "vertical" : "horizontal"}
+                          className="h-full"
+                        >
+                          {paneLayout.panes.map((pane, index) => {
+                            const paneFile = files.find((f) => f.id === pane.activeTabId) ?? null;
+                            const paneKind = paneFile
+                              ? (paneFile.kind ?? getDocumentKind(paneFile.name, paneFile.mimeType))
+                              : null;
+                            const paneIsBoard = paneKind === "board";
+                            return (
+                              <Fragment key={pane.id}>
+                                {index > 0 && <ResizableHandle withHandle />}
+                                <ResizablePanel
+                                  defaultSize={`${Math.floor(100 / paneLayout.panes.length)}%`}
+                                  minSize="20%"
                                 >
-                                  {/* No tab strip. The open documents live in the
+                                  <div
+                                    onMouseDown={() => focusPane(pane.id)}
+                                    className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+                                  >
+                                    {/* No tab strip. The open documents live in the
                                 sidebar; a pane is just a column of reading, and
                                 the only chrome it carries is a thin header
                                 saying which document it holds and how to close
                                 it. */}
-                                  <div
-                                    className={`flex h-9 shrink-0 items-center gap-2 border-b px-3 ${
-                                      pane.id === paneLayout.focusedPaneId
-                                        ? "border-border bg-background"
-                                        : "border-border/60 bg-muted/20"
-                                    }`}
-                                  >
-                                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
-                                      {paneFile ? paneFile.name.replace(/\.[^.]+$/, "") : "Empty"}
-                                    </span>
-                                    <button
-                                      onClick={() => closePane(pane.id)}
-                                      aria-label="Close this pane"
-                                      title="Close this pane"
-                                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                    <div
+                                      className={`flex h-9 shrink-0 items-center gap-2 border-b px-3 ${
+                                        pane.id === paneLayout.focusedPaneId
+                                          ? "border-border bg-background"
+                                          : "border-border/60 bg-muted/20"
+                                      }`}
                                     >
-                                      <X className="h-3.5 w-3.5" />
-                                    </button>
+                                      <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
+                                        {paneFile ? paneFile.name.replace(/\.[^.]+$/, "") : "Empty"}
+                                      </span>
+                                      <button
+                                        onClick={() => closePane(pane.id)}
+                                        aria-label="Close this pane"
+                                        title="Close this pane"
+                                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                      >
+                                        <X className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                    <div
+                                      className={
+                                        paneIsBoard
+                                          ? "min-h-0 min-w-0 flex-1 overflow-hidden"
+                                          : "min-h-0 min-w-0 flex-1 overflow-y-auto px-4"
+                                      }
+                                    >
+                                      {paneFile && conversionActions(paneFile)}
+                                      {paneFile ? (
+                                        <PaneDocument
+                                          file={paneFile}
+                                          files={files}
+                                          highlights={highlights}
+                                          workspaceFolders={folders}
+                                          onImportAttachments={importAttachments}
+                                          workspaceId={workspaceId}
+                                          workspaceRevision={workspaceRevision}
+                                          workspaceName={workspaceNameRef.current}
+                                          onContentChange={handleContentChange}
+                                          onDocumentSave={handleDocumentSave}
+                                          onEditorDirtyChange={(dirty) => {
+                                            if (dirty) officeDirtyPanes.current.add(pane.id);
+                                            else officeDirtyPanes.current.delete(pane.id);
+                                            syncEditorDirty();
+                                          }}
+                                          onRenameFile={renameFile}
+                                          onAddHighlight={addHighlight}
+                                          onUpdateHighlight={updateHighlight}
+                                          onRemoveHighlight={removeHighlight}
+                                          onRepairHighlights={repairHighlights}
+                                          onOpenArtifact={openEmbeddedArtifact}
+                                          readingMode={readingMode}
+                                          contentWidth={contentWidth}
+                                          // An edit request belongs to the column the
+                                          // reader is working in, not to every column
+                                          // showing that document. `revealInPane` has
+                                          // already moved focus to the pane holding the
+                                          // file, so this is that pane — and the same
+                                          // document deliberately opened side by side
+                                          // with itself no longer drops both copies
+                                          // into the editor at once.
+                                          startInEditFileId={
+                                            pane.id === paneLayout.focusedPaneId
+                                              ? autoEditFileId
+                                              : null
+                                          }
+                                          mathPreferences={mathPreferences}
+                                          onStartInEditConsumed={consumeStartInEdit}
+                                          // Only the pane showing the document a jump
+                                          // names is told about it.
+                                          activeSubtopicId={
+                                            paneFile.id === activeFileId ? activeHeadingId : null
+                                          }
+                                          highlightQuery={
+                                            paneFile.id === activeFileId ? markerQuery : null
+                                          }
+                                          pendingSearch={
+                                            pendingSearch?.fileId === paneFile.id
+                                              ? pendingSearch
+                                              : null
+                                          }
+                                          onSearchShown={clearPendingSearch}
+                                          // Only the focused pane takes a jump, so
+                                          // the same document open twice scrolls once.
+                                          pendingSaved={
+                                            pendingSaved?.fileId === paneFile.id &&
+                                            pane.id === paneLayout.focusedPaneId
+                                              ? pendingSaved
+                                              : null
+                                          }
+                                          onSavedShown={clearPendingSaved}
+                                          onCopyToNotes={addNote}
+                                          onToggleNotes={toggleNotes}
+                                          notesOpen={notesOpen}
+                                        />
+                                      ) : (
+                                        <NothingHere compact />
+                                      )}
+                                    </div>
                                   </div>
-                                  <div
-                                    className={
-                                      paneIsBoard
-                                        ? "min-h-0 min-w-0 flex-1 overflow-hidden"
-                                        : "min-h-0 min-w-0 flex-1 overflow-y-auto px-4"
-                                    }
-                                  >
-                                    {paneFile && conversionActions(paneFile)}
-                                    {paneFile ? (
-                                      <PaneDocument
-                                        file={paneFile}
-                                        files={files}
-                                        highlights={highlights}
-                                        workspaceFolders={folders}
-                                        onImportAttachments={importAttachments}
-                                        workspaceId={workspaceId}
-                                        workspaceRevision={workspaceRevision}
-                                        workspaceName={workspaceNameRef.current}
-                                        onContentChange={handleContentChange}
-                                        onDocumentSave={handleDocumentSave}
-                                        onEditorDirtyChange={(dirty) => {
-                                          if (dirty) officeDirtyPanes.current.add(pane.id);
-                                          else officeDirtyPanes.current.delete(pane.id);
-                                          syncEditorDirty();
-                                        }}
-                                        onRenameFile={renameFile}
-                                        onAddHighlight={addHighlight}
-                                        onUpdateHighlight={updateHighlight}
-                                        onRemoveHighlight={removeHighlight}
-                                        onRepairHighlights={repairHighlights}
-                                        onOpenArtifact={openEmbeddedArtifact}
-                                        readingMode={readingMode}
-                                        contentWidth={contentWidth}
-                                        // An edit request belongs to the column the
-                                        // reader is working in, not to every column
-                                        // showing that document. `revealInPane` has
-                                        // already moved focus to the pane holding the
-                                        // file, so this is that pane — and the same
-                                        // document deliberately opened side by side
-                                        // with itself no longer drops both copies
-                                        // into the editor at once.
-                                        startInEditFileId={
-                                          pane.id === paneLayout.focusedPaneId
-                                            ? autoEditFileId
-                                            : null
-                                        }
-                                        mathPreferences={mathPreferences}
-                                        onStartInEditConsumed={consumeStartInEdit}
-                                        // Only the pane showing the document a jump
-                                        // names is told about it.
-                                        activeSubtopicId={
-                                          paneFile.id === activeFileId ? activeHeadingId : null
-                                        }
-                                        highlightQuery={
-                                          paneFile.id === activeFileId ? markerQuery : null
-                                        }
-                                        pendingSearch={
-                                          pendingSearch?.fileId === paneFile.id
-                                            ? pendingSearch
-                                            : null
-                                        }
-                                        onSearchShown={clearPendingSearch}
-                                        // Only the focused pane takes a jump, so
-                                        // the same document open twice scrolls once.
-                                        pendingSaved={
-                                          pendingSaved?.fileId === paneFile.id &&
-                                          pane.id === paneLayout.focusedPaneId
-                                            ? pendingSaved
-                                            : null
-                                        }
-                                        onSavedShown={clearPendingSaved}
-                                        onCopyToNotes={addNote}
-                                        onToggleNotes={toggleNotes}
-                                        notesOpen={notesOpen}
-                                      />
-                                    ) : (
-                                      <NothingHere compact />
-                                    )}
-                                  </div>
-                                </div>
-                              </ResizablePanel>
-                            </Fragment>
-                          );
-                        })}
-                      </ResizablePanelGroup>
-                    ) : activeFile &&
-                      (activeFile.kind === "markdown" ||
-                        activeFile.kind === "text" ||
-                        !activeFile.kind) ? (
-                      <MarkdownViewer
-                        file={activeFile}
-                        prevFile={prevFile}
-                        nextFile={nextFile}
-                        onNav={navFromViewer}
-                        activeSubtopicId={activeHeadingId}
-                        highlightQuery={markerQuery}
-                        onContentChange={handleContentChange}
-                        onEditorDirtyChange={(dirty) => {
-                          editorDirtyRef.current = dirty;
-                          syncEditorDirty();
-                        }}
-                        startInEditFileId={autoEditFileId}
-                        onStartInEditConsumed={consumeStartInEdit}
-                        nextReadingMin={nextReadingMinutes}
-                        highlights={activeFileHighlights}
-                        onAddHighlight={addHighlightToActive}
-                        onUpdateHighlight={updateHighlight}
-                        onRemoveHighlight={removeHighlight}
-                        onRepairHighlights={repairHighlights}
-                        pendingSaved={pendingSaved?.fileId === activeFile.id ? pendingSaved : null}
-                        onSavedShown={clearPendingSaved}
-                        pendingSearch={
-                          pendingSearch?.fileId === activeFile.id ? pendingSearch : null
-                        }
-                        onSearchShown={clearPendingSearch}
-                        onHome={kind === "exam" ? () => showExamMaterials(false) : goHome}
-                        onRenameFile={renameActiveFile}
-                        onShareFile={shareActiveFile}
-                        onAskAi={aiEnabled ? askAiFromSelection : undefined}
-                        onCopyToNotes={copyToNotesFromActive}
-                        onToggleNotes={toggleNotes}
-                        notesOpen={notesOpen}
-                        readingMode={readingMode}
-                        contentWidth={contentWidth}
-                        mathPreferences={mathPreferences}
-                        workspaceId={workspaceId}
-                        workspaceRevision={workspaceRevision}
-                        workspaceFiles={files}
-                        workspaceFolders={folders}
-                        onImportAttachments={importAttachments}
-                        workspaceName={workspaceNameRef.current}
-                        onOpenArtifact={openEmbeddedArtifact}
-                      />
-                    ) : activeFile ? (
-                      <DocumentViewer
-                        key={activeFile.id}
-                        onDocumentSave={handleDocumentSave}
-                        onEditorDirtyChange={(dirty) => {
-                          editorDirtyRef.current = dirty;
-                          if (dirty) officeDirtyPanes.current.add("main");
-                          else officeDirtyPanes.current.delete("main");
-                          syncEditorDirty();
-                        }}
-                        file={activeFile}
-                        prevFile={prevFile}
-                        nextFile={nextFile}
-                        onNavFile={navToFile}
-                        onContentChange={handleContentChange}
-                        onRenameFile={renameFile}
-                        startInEditFileId={autoEditFileId}
-                        onStartInEditConsumed={consumeStartInEdit}
-                      />
-                    ) : (
-                      <NothingHere />
-                    )}
-                  </main>
-                </LazyBoundary>
-              </ConversionContext.Provider>
-            </EditFileContext.Provider>
+                                </ResizablePanel>
+                              </Fragment>
+                            );
+                          })}
+                        </ResizablePanelGroup>
+                      ) : activeFile &&
+                        (activeFile.kind === "markdown" ||
+                          activeFile.kind === "text" ||
+                          !activeFile.kind) ? (
+                        <MarkdownViewer
+                          file={activeFile}
+                          prevFile={prevFile}
+                          nextFile={nextFile}
+                          onNav={navFromViewer}
+                          activeSubtopicId={activeHeadingId}
+                          highlightQuery={markerQuery}
+                          onContentChange={handleContentChange}
+                          onEditorDirtyChange={(dirty) => {
+                            editorDirtyRef.current = dirty;
+                            syncEditorDirty();
+                          }}
+                          startInEditFileId={autoEditFileId}
+                          onStartInEditConsumed={consumeStartInEdit}
+                          nextReadingMin={nextReadingMinutes}
+                          highlights={activeFileHighlights}
+                          onAddHighlight={addHighlightToActive}
+                          onUpdateHighlight={updateHighlight}
+                          onRemoveHighlight={removeHighlight}
+                          onRepairHighlights={repairHighlights}
+                          pendingSaved={
+                            pendingSaved?.fileId === activeFile.id ? pendingSaved : null
+                          }
+                          onSavedShown={clearPendingSaved}
+                          pendingSearch={
+                            pendingSearch?.fileId === activeFile.id ? pendingSearch : null
+                          }
+                          onSearchShown={clearPendingSearch}
+                          onHome={goHome}
+                          onRenameFile={renameActiveFile}
+                          onShareFile={shareActiveFile}
+                          onAskAi={aiEnabled ? askAiFromSelection : undefined}
+                          onCopyToNotes={copyToNotesFromActive}
+                          onToggleNotes={toggleNotes}
+                          notesOpen={notesOpen}
+                          readingMode={readingMode}
+                          contentWidth={contentWidth}
+                          mathPreferences={mathPreferences}
+                          workspaceId={workspaceId}
+                          workspaceRevision={workspaceRevision}
+                          workspaceFiles={files}
+                          workspaceFolders={folders}
+                          onImportAttachments={importAttachments}
+                          workspaceName={workspaceNameRef.current}
+                          onOpenArtifact={openEmbeddedArtifact}
+                        />
+                      ) : activeFile ? (
+                        <DocumentViewer
+                          key={activeFile.id}
+                          onDocumentSave={handleDocumentSave}
+                          onEditorDirtyChange={(dirty) => {
+                            editorDirtyRef.current = dirty;
+                            if (dirty) officeDirtyPanes.current.add("main");
+                            else officeDirtyPanes.current.delete("main");
+                            syncEditorDirty();
+                          }}
+                          file={activeFile}
+                          prevFile={prevFile}
+                          nextFile={nextFile}
+                          onNavFile={navToFile}
+                          onContentChange={handleContentChange}
+                          onRenameFile={renameFile}
+                          startInEditFileId={autoEditFileId}
+                          onStartInEditConsumed={consumeStartInEdit}
+                        />
+                      ) : (
+                        <NothingHere />
+                      )}
+                    </main>
+                  </LazyBoundary>
+                </ConversionContext.Provider>
+              </EditFileContext.Provider>
 
-            {/* Notes, docked beside the reading column on a wide screen so they
+              {/* Notes, docked beside the reading column on a wide screen so they
                 stay in view while reading. Narrower screens get a sheet below. */}
-            {notesOpen && !mobileNavigation && (
-              <aside className="sticky top-0 h-dvh w-80 shrink-0 border-l border-border bg-background xl:w-88">
+              {notesOpen && !mobileNavigation && (
+                <aside className="sticky top-0 h-dvh w-80 shrink-0 border-l border-border bg-background xl:w-88">
+                  <LazyBoundary>
+                    <NotesPanel
+                      variant="docked"
+                      notes={sortedNotes}
+                      fileName={noteFileName}
+                      sourceState={noteSourceState}
+                      onOpenSource={openNoteSource}
+                      onUpdate={updateNote}
+                      onRemove={removeNote}
+                      highlights={highlights}
+                      highlightSection={highlightSection}
+                      onOpenHighlight={openHighlight}
+                      onRemoveHighlight={removeHighlightFromNotes}
+                      onClose={closeNotes}
+                      freshId={freshNoteId}
+                      mathRenderer={mathPreferences.renderer}
+                      tab={notesTab}
+                      onTabChange={setNotesTab}
+                      roughWork={roughWork}
+                      compute={compute}
+                    />
+                  </LazyBoundary>
+                </aside>
+              )}
+            </div>
+
+            {mobileNavigation && (
+              <BottomSheet open={notesOpen} onOpenChange={setNotesOpen} title="Notes">
                 <LazyBoundary>
                   <NotesPanel
-                    variant="docked"
+                    variant="sheet"
                     notes={sortedNotes}
                     fileName={noteFileName}
                     sourceState={noteSourceState}
@@ -4941,77 +5135,51 @@ flowchart LR
                     compute={compute}
                   />
                 </LazyBoundary>
-              </aside>
+              </BottomSheet>
             )}
-          </div>
 
-          {mobileNavigation && (
-            <BottomSheet open={notesOpen} onOpenChange={setNotesOpen} title="Notes">
-              <LazyBoundary>
-                <NotesPanel
-                  variant="sheet"
-                  notes={sortedNotes}
-                  fileName={noteFileName}
-                  sourceState={noteSourceState}
-                  onOpenSource={openNoteSource}
-                  onUpdate={updateNote}
-                  onRemove={removeNote}
-                  highlights={highlights}
-                  highlightSection={highlightSection}
-                  onOpenHighlight={openHighlight}
-                  onRemoveHighlight={removeHighlightFromNotes}
-                  onClose={closeNotes}
-                  freshId={freshNoteId}
-                  mathRenderer={mathPreferences.renderer}
-                  tab={notesTab}
-                  onTabChange={setNotesTab}
-                  roughWork={roughWork}
-                  compute={compute}
-                />
-              </LazyBoundary>
-            </BottomSheet>
-          )}
+            <input
+              ref={inputRef}
+              type="file"
+              multiple
+              accept={SUPPORTED_ACCEPT}
+              className="hidden"
+              onChange={(e) => {
+                handleFileInput(e.target.files);
+                e.target.value = "";
+              }}
+            />
 
-          <input
-            ref={inputRef}
-            type="file"
-            multiple
-            accept={SUPPORTED_ACCEPT}
-            className="hidden"
-            onChange={(e) => {
-              handleFileInput(e.target.files);
-              e.target.value = "";
-            }}
-          />
-
-          {/* Mounted only once opened. The panel is a large component whose props
+            {/* Mounted only once opened. The panel is a large component whose props
           are derived from every document in the workspace; keeping it out of
           the tree until it is asked for saves that work on every render. */}
-          {aiOpen && aiEnabled && (
-            <LazyBoundary>
-              <AskAiPanel
-                open
-                onClose={closeAskAi}
-                prefill={aiPrefill}
-                initialSelection={null}
-                activeFile={aiActiveFile}
-                activeSection={aiActiveSection}
-                files={aiFiles}
-                onInsert={insertAiOutput}
-                onCreateDoc={createAiDoc}
-              />
-            </LazyBoundary>
-          )}
+            {aiOpen && aiEnabled && (
+              <LazyBoundary>
+                <AskAiPanel
+                  open
+                  onClose={closeAskAi}
+                  prefill={aiPrefill}
+                  initialSelection={null}
+                  activeFile={aiActiveFile}
+                  activeSection={aiActiveSection}
+                  files={aiFiles}
+                  onInsert={insertAiOutput}
+                  onCreateDoc={createAiDoc}
+                />
+              </LazyBoundary>
+            )}
 
-          {settingsDialog}
-          {moveDialog}
-          {binDialog}
+            {settingsDialog}
+            {moveDialog}
+            {binDialog}
+            {newExamDialog}
 
-          {dragOverlay}
-          {shareDialog}
-          {statusBanner}
-        </div>
-      </DraftJournalContext.Provider>
+            {dragOverlay}
+            {shareDialog}
+            {statusBanner}
+          </div>
+        </DraftJournalContext.Provider>
+      </ExamWorkspaceContext.Provider>
     </NavHistoryContext.Provider>
   );
 }

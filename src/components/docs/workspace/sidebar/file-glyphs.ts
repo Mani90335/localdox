@@ -3,6 +3,9 @@ import {
   FileType,
   FileSpreadsheet,
   FileJson,
+  FileQuestion,
+  FileCog,
+  FileCheck,
   FileImage,
   FileVideo,
   FileAudio,
@@ -46,6 +49,9 @@ const KIND_ICON: Partial<Record<DocumentKind, LucideIcon>> = {
   image: FileImage,
   video: FileVideo,
   audio: FileAudio,
+  exam: FileQuestion,
+  "exam-rules": FileCog,
+  practice: FileCheck,
 };
 
 export function kindIcon(kind: DocumentKind): LucideIcon {
@@ -82,6 +88,10 @@ const KIND_META: Partial<Record<DocumentKind, { tone: string; label: string }>> 
   image: { tone: "text-violet-500 dark:text-violet-400", label: "IMAGE" },
   video: { tone: "text-pink-500 dark:text-pink-400", label: "VIDEO" },
   audio: { tone: "text-teal-500 dark:text-teal-400", label: "AUDIO" },
+  // One hue for the exam family, as sheets and CSV share one.
+  exam: { tone: "text-lime-600 dark:text-lime-400", label: "XAM" },
+  "exam-rules": { tone: "text-lime-600 dark:text-lime-400", label: "XRULE" },
+  practice: { tone: "text-lime-600 dark:text-lime-400", label: "XP" },
 };
 
 export function kindMeta(kind: DocumentKind) {

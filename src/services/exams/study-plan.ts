@@ -3,14 +3,6 @@ import { idSchema, parseJson, ExamImportError, type Ruleset } from "./schema.ts"
 import type { Question } from "./parser.ts";
 import type { AttemptRecord, ExamRecord } from "./storage.ts";
 import { createSession, showInstructions } from "./session.ts";
-import { isAnswered, type Response } from "./scoring.ts";
-import {
-  checkPractice,
-  practiceKey,
-  practiceProgress,
-  type PracticeAnswer,
-  type PracticeSet,
-} from "./practice.ts";
 import type { ExamFileContent, ExamSetup } from "./exam-setup.ts";
 
 export const studyPlanSchema = z
@@ -41,8 +33,6 @@ export const studyPlanSchema = z
               .array(z.object({ id: idSchema, label: z.string().min(1).max(500) }).strict())
               .max(50)
               .default([]),
-            /** IDs of `*.practice.md` files imported with the plan. */
-            practice: z.array(idSchema).max(20).default([]),
           })
           .strict(),
       )
@@ -64,18 +54,7 @@ export interface DayRecord {
   note: string;
   /** Empty only while a configured exam waits for its file (`hasExamFile`). */
   cycles: PaperCycle[];
-  /** Step 1: the learner said they finished studying. */
-  learnedAt?: number;
-  /** Step 2: practice questions and the learner's checked answers. */
-  practice?: { sets: PracticeSet[]; answers: Record<string, PracticeAnswer> };
-  /** Step 4: the learner went through the passed exam's answers. */
-  reviewedAt?: number;
 }
-/**
- * The four steps of a topic (a plan entry), unlocked strictly in this order.
- * Topics are independent: learners decide the order themselves.
- */
-export type DayStep = "learn" | "practice" | "exam" | "review" | "done";
 export interface StudyPlanRecord {
   id: string;
   plan: StudyPlan;
@@ -85,6 +64,8 @@ export interface StudyPlanRecord {
   /** Rules configured in the app; the exam file arrives later. Absent on
    * plans imported whole (plan JSON with its exams). */
   setup?: ExamSetup;
+  /** The `.xam` file this plan studies, and the version of it (with its rules) last read. */
+  source?: { fileId: string; fingerprint: string };
 }
 export type DayStatus = "ready" | "in_progress" | "failed" | "revision_required" | "passed";
 export interface DayProgress {
@@ -101,12 +82,6 @@ export interface DayProgress {
   cycle: PaperCycle;
   attempts: AttemptRecord[];
   activeAttempt?: AttemptRecord;
-  /** Which steps are finished. A passed exam implies the steps before it. */
-  steps: { learn: boolean; practice: boolean; exam: boolean; review: boolean };
-  /** The step the learner should do now ("done" when all four are finished). */
-  step: DayStep;
-  practiceTotal: number;
-  practiceAttempted: number;
 }
 export function progressionPolicy(rules: Ruleset) {
   return (
@@ -149,7 +124,7 @@ export async function paperFingerprint(paper: Question[]): Promise<string> {
 function planError(location: string, message: string): never {
   throw new ExamImportError([{ severity: "error", location, message }]);
 }
-function validateStudyExam(exam: ExamRecord, location: string) {
+export function validateStudyExam(exam: ExamRecord, location: string) {
   const r = exam.exam.rules,
     policy = progressionPolicy(r);
   if (r.attempts.max === null)
@@ -163,14 +138,6 @@ function validateStudyExam(exam: ExamRecord, location: string) {
     planError(
       location,
       `The rewrite difficulty label ${policy.difficultyLabel} is not in this exam taxonomy.`,
-    );
-}
-/** Practice reveals answers, so it may not contain the exam's questions. */
-function assertNoRepeats(sets: PracticeSet[], exam: ExamRecord, location: string) {
-  if (sets.some((set) => set.questions.some((q) => exam.exam.paper.some((p) => p.body === q.body))))
-    planError(
-      location,
-      "A practice question repeats a question from this topic's exam. Practice shows answers, so use different questions.",
     );
 }
 /** False while a configured exam still waits for its file. */
@@ -208,17 +175,11 @@ export async function attachExamFile(
   if (record.days[day.id].cycles.length) throw new Error("This exam already has its file.");
   if (content.exam.id !== day.examId) throw new Error("This file was read for a different exam.");
   validateStudyExam(content.exam, "exam.md");
-  const sets = content.practice ? [content.practice] : [];
-  assertNoRepeats(sets, content.exam, "exam.md");
   const fingerprint = await paperFingerprint(content.exam.exam.paper);
   return withDay(
     record,
     day.id,
-    (d) => ({
-      ...d,
-      ...(sets.length ? { practice: { sets, answers: {} } } : {}),
-      cycles: [{ index: 0, exam: content.exam, fingerprint, assignedAt: now }],
-    }),
+    (d) => ({ ...d, cycles: [{ index: 0, exam: content.exam, fingerprint, assignedAt: now }] }),
     now,
   );
 }
@@ -226,7 +187,6 @@ export async function importStudyPlan(
   source: string,
   library: ExamRecord[],
   now = Date.now(),
-  practiceSets: PracticeSet[] = [],
 ): Promise<StudyPlanRecord> {
   const plan = parseJson(source, studyPlanSchema, "plan.json"),
     days: Record<string, DayRecord> = {},
@@ -240,17 +200,9 @@ export async function importStudyPlan(
     if (!exam)
       planError(`days.${day.id}.examId`, `Import exam ${day.examId} before importing this plan.`);
     validateStudyExam(exam, `days.${day.id}.examId`);
-    const sets = day.practice.map((id) => {
-      const set = practiceSets.find((p) => p.id === id);
-      if (!set)
-        planError(`days.${day.id}.practice`, `Add ${id}.practice.md to the files you import.`);
-      return structuredClone(set);
-    });
-    assertNoRepeats(sets, exam, `days.${day.id}.practice`);
     days[day.id] = {
       tasks: {},
       note: "",
-      ...(sets.length ? { practice: { sets, answers: {} } } : {}),
       cycles: [
         {
           index: 0,
@@ -291,7 +243,6 @@ export function studyProgress(record: StudyPlanRecord, attempts: AttemptRecord[]
         meetsPassingScore(a.analysis!.score, a.analysis!.totalMarks, policy.passPercentage),
       ),
       percentages = graded.map((a) => scorePercentage(a.analysis!.score, a.analysis!.totalMarks));
-    const practice = practiceProgress(saved.practice?.sets ?? [], saved.practice?.answers ?? {});
     const status: DayStatus = passed
       ? "passed"
       : activeAttempt && activeAttempt.session.phase !== "instructions"
@@ -301,28 +252,7 @@ export function studyProgress(record: StudyPlanRecord, attempts: AttemptRecord[]
           : started.some((a) => a.analysis)
             ? "failed"
             : "ready";
-    // Steps unlock in order, so a passed exam already implies learn and
-    // practice (questions added afterwards never relock a finished day).
-    const steps = {
-      learn: passed || saved.learnedAt !== undefined,
-      practice: passed || practice.attempted >= practice.total,
-      exam: passed,
-      review: passed && saved.reviewedAt !== undefined,
-    };
-    const step: DayStep = !steps.learn
-      ? "learn"
-      : !steps.practice
-        ? "practice"
-        : !steps.exam
-          ? "exam"
-          : !steps.review
-            ? "review"
-            : "done";
     return {
-      steps,
-      step,
-      practiceTotal: practice.total,
-      practiceAttempted: practice.attempted,
       id: day.id,
       status,
       attemptsUsed: started.length,
@@ -389,8 +319,7 @@ export function prepareStudyAttempt(
   now = Date.now(),
 ): AttemptRecord {
   const progress = editableDay(record, dayId, attempts);
-  if (progress.status === "passed") throw new Error("This topic's exam is already passed.");
-  if (!progress.activeAttempt) assertExamUnlocked(progress);
+  if (progress.status === "passed") throw new Error("This exam is already passed.");
   if (progress.status === "revision_required")
     throw new Error("Attempt limit reached. Revise and attach a new qualifying paper.");
   if (progress.activeAttempt) return progress.activeAttempt;
@@ -427,11 +356,6 @@ export function assertStudyStart(
     throw new Error("This paper has been replaced. Start from the study plan.");
   if (p.activeAttempt && p.activeAttempt.id !== attempt.id)
     throw new Error("Finish the current attempt first.");
-  assertExamUnlocked(p);
-}
-function assertExamUnlocked(p: DayProgress) {
-  if (!p.steps.learn) throw new Error("Finish Step 1 (Learn) before the exam.");
-  if (!p.steps.practice) throw new Error("Answer every practice question before the exam.");
 }
 function withDay(
   record: StudyPlanRecord,
@@ -444,78 +368,6 @@ function withDay(
     updatedAt: now,
     days: { ...record.days, [dayId]: change(record.days[dayId]) },
   };
-}
-/** Step 1. Learning happens outside the app; the learner confirms it here. */
-export function markLearned(
-  record: StudyPlanRecord,
-  dayId: string,
-  attempts: AttemptRecord[],
-  now = Date.now(),
-): StudyPlanRecord {
-  editableDay(record, dayId, attempts);
-  return withDay(record, dayId, (d) => ({ ...d, learnedAt: d.learnedAt ?? now }), now);
-}
-/** Step 2. Record a checked answer. Each question is answered once. */
-export function answerPractice(
-  record: StudyPlanRecord,
-  dayId: string,
-  setId: string,
-  questionId: string,
-  response: Response,
-  attempts: AttemptRecord[],
-  now = Date.now(),
-): StudyPlanRecord {
-  const p = editableDay(record, dayId, attempts);
-  if (!p.steps.learn) throw new Error("Finish Step 1 (Learn) before practising.");
-  const practice = record.days[dayId].practice,
-    set = practice?.sets.find((s) => s.id === setId),
-    q = set?.questions.find((q) => q.id === questionId),
-    solution = set?.solutions.find((s) => s.id === questionId);
-  if (!practice || !set || !q || !solution) throw new Error("Unknown practice question");
-  if (!isAnswered(response)) throw new Error("Choose an answer first");
-  const key = practiceKey(setId, questionId);
-  if (practice.answers[key]) throw new Error("This question is already checked");
-  const answer: PracticeAnswer = {
-    response,
-    outcome: checkPractice(q, solution, response),
-    at: now,
-  };
-  return withDay(
-    record,
-    dayId,
-    (d) => ({ ...d, practice: { ...practice, answers: { ...practice.answers, [key]: answer } } }),
-    now,
-  );
-}
-/** Learners can add their own practice files to any unlocked day. */
-export function addPractice(
-  record: StudyPlanRecord,
-  dayId: string,
-  set: PracticeSet,
-  attempts: AttemptRecord[],
-  now = Date.now(),
-): StudyPlanRecord {
-  editableDay(record, dayId, attempts);
-  const practice = record.days[dayId].practice ?? { sets: [], answers: {} };
-  if (practice.sets.some((s) => s.id === set.id))
-    throw new Error(`This day already has practice named ${set.id}. Rename the file and retry.`);
-  return withDay(
-    record,
-    dayId,
-    (d) => ({ ...d, practice: { ...practice, sets: [...practice.sets, set] } }),
-    now,
-  );
-}
-/** Step 4. Available once the exam is passed; completes the day. */
-export function markReviewed(
-  record: StudyPlanRecord,
-  dayId: string,
-  attempts: AttemptRecord[],
-  now = Date.now(),
-): StudyPlanRecord {
-  const p = editableDay(record, dayId, attempts);
-  if (p.status !== "passed") throw new Error("Pass the exam before finishing the review.");
-  return withDay(record, dayId, (d) => ({ ...d, reviewedAt: d.reviewedAt ?? now }), now);
 }
 export function completeRevision(
   record: StudyPlanRecord,

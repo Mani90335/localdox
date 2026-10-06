@@ -2,7 +2,17 @@ import { type WorkspaceKind } from "@/lib/workspace/kinds";
 import { useState, useEffect, useRef } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Tabs from "@radix-ui/react-tabs";
-import { BookOpen, Database, Folder, GitBranch, Palette, Sigma, Sparkles, X } from "lucide-react";
+import {
+  BookOpen,
+  Database,
+  FileCog,
+  Folder,
+  GitBranch,
+  Palette,
+  Sigma,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { AiSettings } from "@/services/ai";
 import { AppearanceSettings } from "./settings/AppearanceTab";
@@ -12,6 +22,7 @@ import { MathSettings } from "./settings/MathTab";
 import { WorkspaceSettings } from "./settings/WorkspaceTab";
 import { BinSettings } from "./settings/SavedTab";
 import { StorageSettings } from "./settings/StorageTab";
+import { ExamRulesSettings } from "./settings/ExamRulesTab";
 import "./settings/settings.css";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { ThemePref, ReadingMode, ReadingFont } from "@/lib/workspace/persistence";
@@ -69,13 +80,22 @@ export interface SettingsPageProps {
   onImportWorkspace: (file: File) => void;
   onExportWorkspace: () => void;
   onShareWorkspace: () => void;
+  /** Save a ruleset edited in Exam rules. */
+  onSaveFile: (fileId: string, content: string) => void;
+  /** A new ruleset with the default rules; returns its id and file name. */
+  onCreateRules: (name: string) => { id: string; name: string };
+  /** Move files to the Bin (a ruleset, from Exam rules). */
+  onBinFile: (fileIds: string[]) => void;
   /** Section to open on. Defaults to appearance. */
   initialTab?: TabId;
+  /** With the exams tab: the ruleset to open for editing. */
+  initialRulesId?: string;
   /** Dismiss the dialog. */
   onClose: () => void;
 }
 
-type TabId = "appearance" | "reading" | "diagrams" | "math" | "ai" | "workspace" | "storage";
+type TabId =
+  "appearance" | "reading" | "diagrams" | "math" | "ai" | "workspace" | "exams" | "storage";
 
 const SECTIONS = [
   {
@@ -118,6 +138,13 @@ const SECTIONS = [
     label: "Workspace",
     description: "Organize your spaces and take your work with you.",
     icon: Folder,
+    group: "Your library",
+  },
+  {
+    id: "exams",
+    label: "Exam rules",
+    description: "Set how your exams run, once, for every paper that uses them.",
+    icon: FileCog,
     group: "Your library",
   },
   {
@@ -285,6 +312,15 @@ export function SettingsPage(props: SettingsPageProps) {
                         onImport={props.onImportWorkspace}
                         onExport={props.onExportWorkspace}
                         onShare={props.onShareWorkspace}
+                      />
+                    )}
+                    {section.id === "exams" && (
+                      <ExamRulesSettings
+                        files={props.files}
+                        initialRulesId={props.initialRulesId}
+                        onSave={props.onSaveFile}
+                        onCreate={props.onCreateRules}
+                        onBin={props.onBinFile}
                       />
                     )}
                     {section.id === "storage" && (

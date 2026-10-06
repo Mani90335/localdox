@@ -1,28 +1,16 @@
 /**
- * Practice sets: untimed questions with their key shown right after each
- * answer. One `*.practice.md` file holds `:::question` and `:::solution`
- * blocks together. Practice is for learning, so solutions are not sealed;
- * that is also why a practice file can never be a day's exam.
+ * Practice files (`.xp`): untimed questions whose key is shown the moment
+ * each is answered. Same Markdown as an exam paper, but with no ruleset and
+ * nothing sealed: practice is for learning, so solutions sit beside their
+ * questions and are revealed by answering. That is also why practice and
+ * exams are separate files: an exam's keys must stay hidden until it is
+ * submitted, and a practice file never hides its own.
  */
 import { ExamImportError, defaultTaxonomy, rulesetSchema, type Issue } from "./schema.ts";
-import { parsePracticeFile, type Question, type Solution } from "./parser.ts";
-import { scoreQuestion, isAnswered, type Outcome, type Response } from "./scoring.ts";
+import { parsePracticeFile, type PracticeFile, type Question, type Solution } from "./parser.ts";
+import { scoreQuestion, type Outcome, type Response } from "./scoring.ts";
 import { validateSolutions } from "./validation.ts";
 
-export interface PracticeSet {
-  id: string;
-  name: string;
-  questions: Question[];
-  solutions: Solution[];
-  addedAt: number;
-  /** Images shipped with the file, by name. */
-  assets?: Record<string, Blob>;
-}
-export interface PracticeAnswer {
-  response: Response;
-  outcome: Outcome;
-  at: number;
-}
 /** Correct-or-not only: practice never applies negative marks. */
 const PRACTICE_RULES = rulesetSchema.parse({
   schemaVersion: 2,
@@ -32,71 +20,53 @@ const PRACTICE_RULES = rulesetSchema.parse({
   questionTypes: { mcq: {}, msq: {}, nat: { inputMode: "keyboard" } },
   diagnostics: { enabled: false },
 });
-export const practiceKey = (setId: string, questionId: string) => `${setId}/${questionId}`;
-/** "probability-basics.practice.md" → id "probability-basics". */
-export const practiceIdFromFile = (fileName: string) =>
-  fileName.replace(/^.*[\\/]/, "").replace(/\.practice\.md$/i, "");
 
-export function importPracticeSet(
-  id: string,
-  name: string,
-  source: string,
-  now = Date.now(),
-  assets?: Record<string, Blob>,
-): PracticeSet {
-  const file = `${id}.practice.md`,
-    { questions, solutions } = parsePracticeFile(source, file);
-  return practiceSet(id, name, questions, solutions, file, now, assets);
+export interface PracticeSheet extends PracticeFile {
+  questions: Question[];
+  /** Each question's solution, by question id. Every question has one. */
+  solutionFor: Record<string, Solution>;
 }
-/** Validates parsed practice questions and their solutions into a set. */
-export function practiceSet(
-  id: string,
-  name: string,
-  questions: Question[],
-  raw: Solution[],
-  file: string,
-  now = Date.now(),
-  assets?: Record<string, Blob>,
-): PracticeSet {
-  const issues: Issue[] = [],
-    seen = new Set<string>();
+
+/**
+ * Parse and check an `.xp` file. Everything a question needs to be checked is
+ * verified here (option counts, a solution per question, valid keys), so a
+ * file that reads cleanly can be answered without surprises.
+ */
+export function readPracticeFile(source: string, file = "practice.xp"): PracticeSheet {
+  const parsed = parsePracticeFile(source, file),
+    questions = parsed.groups.flatMap((g) => g.questions),
+    issues: Issue[] = [];
   if (!questions.length)
-    issues.push({ severity: "error", location: file, message: "No questions found" });
-  for (const q of questions) {
-    if (seen.has(q.id))
-      issues.push({ severity: "error", location: q.location, message: `Duplicate id: ${q.id}` });
-    seen.add(q.id);
+    issues.push({
+      severity: "error",
+      location: file,
+      message: "No questions yet. Add a :::question block and its :::solution.",
+    });
+  for (const q of questions)
     if (q.type !== "nat" && (q.options.length < 2 || q.options.length > 26))
-      issues.push({ severity: "error", location: q.location, message: "Wrong option count" });
-  }
+      issues.push({
+        severity: "error",
+        location: q.location,
+        message: `${q.id} needs 2 to 26 options, listed with - at the end of the question`,
+      });
   // Trap tags belong to exam analytics; practice keeps only the explanation.
-  const solutions = raw.map((s) => ({ ...s, distractors: [] }));
+  const solutions = parsed.solutions.map((s) => ({ ...s, distractors: [] }));
   issues.push(
     ...validateSolutions(
       { rules: PRACTICE_RULES, taxonomy: defaultTaxonomy, paper: questions, issues: [] },
       solutions,
     ).map((i) => ({ ...i, location: i.location.replace("solutions.md", file) })),
   );
-  if (issues.some((i) => i.severity === "error")) throw new ExamImportError(issues);
-  return { id, name, questions, solutions, addedAt: now, ...(assets ? { assets } : {}) };
+  const errors = issues.filter((i) => i.severity === "error");
+  if (errors.length) throw new ExamImportError(errors);
+  return {
+    ...parsed,
+    solutions,
+    questions,
+    solutionFor: Object.fromEntries(solutions.map((s) => [s.id, s])),
+  };
 }
 
 export function checkPractice(q: Question, s: Solution, response: Response): Outcome {
   return scoreQuestion(PRACTICE_RULES, { ...q, section: "practice" }, s, response).outcome;
-}
-export function practiceProgress(
-  sets: PracticeSet[],
-  answers: Record<string, PracticeAnswer>,
-): { total: number; attempted: number; correct: number } {
-  let total = 0,
-    attempted = 0,
-    correct = 0;
-  for (const set of sets)
-    for (const q of set.questions) {
-      total++;
-      const a = answers[practiceKey(set.id, q.id)];
-      if (a && isAnswered(a.response)) attempted++;
-      if (a?.outcome === "correct") correct++;
-    }
-  return { total, attempted, correct };
 }

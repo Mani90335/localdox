@@ -4,6 +4,7 @@ import remarkDirective from "remark-directive";
 import remarkMath from "remark-math";
 import { z } from "zod";
 import { ExamImportError, idSchema, type Issue } from "./schema.ts";
+import { blankHeader, paperHeader } from "./rules-tag.ts";
 
 export type QuestionType = "mcq" | "msq" | "nat";
 export interface Question {
@@ -78,16 +79,16 @@ const processor = unified().use(remarkParse).use(remarkMath).use(remarkDirective
 function sourceOf(source: string, node: Node) {
   return source.slice(node.position?.start.offset, node.position?.end.offset);
 }
-function containers(source: string, kind: string, also: string[] = []): Node[] {
+function containers(source: string, kind: string): Node[] {
   const root = processor.parse(source) as Node;
   const errors: Issue[] = [];
   const nodes: Node[] = [];
   for (const n of root.children ?? []) {
-    if (n.type !== "containerDirective" || (n.name !== kind && !also.includes(n.name ?? ""))) {
+    if (n.type !== "containerDirective" || n.name !== kind) {
       errors.push({
         severity: "error",
         location: `${kind}.md:${n.position?.start.line}`,
-        message: `Expected a :::${[kind, ...also].join(" or :::")} container (put headings inside it)`,
+        message: `Expected a :::${kind} container (put headings inside it)`,
       });
       continue;
     }
@@ -170,98 +171,69 @@ function toSolution(source: string, n: Node, file: string): Solution {
 export function parseSolutions(source: string): Solution[] {
   return containers(source, "solution").map((n) => toSolution(source, n, "solutions.md"));
 }
+/** A heading's text, without its `#` marks. */
+const headingText = (source: string, n: Node) =>
+  sourceOf(source, n)
+    .split("\n")[0]
+    .replace(/^#+\s*|\s*#*\s*$/g, "");
 /**
- * A practice file holds questions and their solutions together, in any order.
- * `section` is optional there: practice has no sections.
+ * The top-level blocks of a question file, in order. Only headings and
+ * `:::question` / `:::solution` containers are allowed: a stray paragraph
+ * would otherwise vanish from what the reader is asked.
  */
-export function parsePracticeFile(
+function questionFileBlocks(
   source: string,
-  file = "practice.md",
-): { questions: Question[]; solutions: Solution[] } {
-  const nodes = containers(source, "question", ["solution"]);
-  return {
-    questions: nodes
-      .filter((n) => n.name === "question")
-      .map((n) => toQuestion(source, n, file, { section: "practice" })),
-    solutions: nodes.filter((n) => n.name === "solution").map((n) => toSolution(source, n, file)),
-  };
-}
-export interface ExamFile {
-  practice: { questions: Question[]; solutions: Solution[] };
-  exam: { questions: Question[]; solutions: Solution[] };
-}
-type Part = "practice" | "exam" | "solutions";
-/** "Practice questions" → practice; "Keys and solutions" → solutions. */
-function partOf(heading: string): Part | undefined {
-  const text = heading.trim().toLowerCase();
-  if (/^practi[cs]e\b/.test(text)) return "practice";
-  if (/^exam\b/.test(text)) return "exam";
-  if (/^(answer keys?|answers|keys?|solutions?)\b/.test(text)) return "solutions";
-}
-/**
- * One study-plan exam file: `# Practice` and `# Exam` headings split the
- * questions; `:::solution` blocks (key + explanation) may sit anywhere,
- * including under a `# Solutions` heading, and are matched by id. Ids are
- * unique across the whole file for that reason. `section` is optional.
- */
-export function parseExamFile(source: string, file = "exam.md"): ExamFile {
+  file: string,
+  errors: Issue[],
+): ({ heading: string; node: Node } | { heading?: undefined; node: Node })[] {
   const root = processor.parse(source) as Node,
-    errors: Issue[] = [],
-    at = (n: Node) => `${file}:${n.position?.start.line}`,
-    questions: { part: "practice" | "exam"; node: Node }[] = [],
-    solutionNodes: Node[] = [];
-  let part: Part | undefined;
+    blocks: ({ heading: string; node: Node } | { heading?: undefined; node: Node })[] = [];
   for (const n of root.children ?? []) {
+    const location = `${file}:${n.position?.start.line}`;
     if (n.type === "heading") {
-      const text = sourceOf(source, n)
-        .split("\n")[0]
-        .replace(/^#+\s*|\s*#*\s*$/g, "");
-      part = partOf(text);
-      if (!part)
-        errors.push({
-          severity: "error",
-          location: at(n),
-          message: `Unknown heading "${text}". Use # Practice, # Exam or # Solutions`,
-        });
+      blocks.push({ heading: headingText(source, n), node: n });
       continue;
     }
     if (n.type === "thematicBreak") continue;
     if (n.type !== "containerDirective" || (n.name !== "question" && n.name !== "solution")) {
       errors.push({
         severity: "error",
-        location: at(n),
+        location,
         message: "Expected a heading or a :::question or :::solution block (put text inside it)",
       });
       continue;
     }
     if (!/^:{3,}\s*$/.test(sourceOf(source, n).trimEnd().split("\n").at(-1) ?? ""))
-      errors.push({ severity: "error", location: at(n), message: "Unclosed directive" });
-    if (n.name === "solution") solutionNodes.push(n);
-    else if (part === "practice" || part === "exam") questions.push({ part, node: n });
-    else
-      errors.push({
-        severity: "error",
-        location: at(n),
-        message: "Put this question under a # Practice or # Exam heading",
-      });
+      errors.push({ severity: "error", location, message: "Unclosed directive" });
+    blocks.push({ node: n });
   }
-  if (errors.length) throw new ExamImportError(errors);
-  const result: ExamFile = {
-      practice: { questions: [], solutions: [] },
-      exam: { questions: [], solutions: [] },
-    },
-    owner = new Map<string, "practice" | "exam">();
-  for (const { part, node } of questions) {
-    const q = toQuestion(source, node, file, { section: part });
-    if (owner.has(q.id))
+  return blocks;
+}
+/**
+ * Questions and the solutions matched to them by id. Ids are unique across
+ * the file, because a solution may sit anywhere in it.
+ */
+function pairUp(
+  source: string,
+  file: string,
+  questionNodes: Node[],
+  solutionNodes: Node[],
+  defaults: Record<string, string>,
+  errors: Issue[],
+): { questions: Question[]; solutions: Solution[] } {
+  const questions: Question[] = [],
+    solutions: Solution[] = [],
+    ids = new Set<string>();
+  for (const node of questionNodes) {
+    const q = toQuestion(source, node, file, defaults);
+    if (ids.has(q.id))
       errors.push({ severity: "error", location: q.location, message: `Duplicate id: ${q.id}` });
-    owner.set(q.id, part);
-    result[part].questions.push(q);
+    ids.add(q.id);
+    questions.push(q);
   }
   for (const node of solutionNodes) {
-    const s = toSolution(source, node, file),
-      part = owner.get(s.id);
-    if (part) result[part].solutions.push(s);
+    const s = toSolution(source, node, file);
+    if (ids.has(s.id)) solutions.push(s);
     else
       errors.push({
         severity: "error",
@@ -269,8 +241,114 @@ export function parseExamFile(source: string, file = "exam.md"): ExamFile {
         message: `No question for solution ${s.id}`,
       });
   }
+  return { questions, solutions };
+}
+
+/** An `.xam` paper: its exam questions and their keys. */
+export interface ExamFile {
+  questions: Question[];
+  solutions: Solution[];
+}
+/**
+ * One exam paper. `:::question` blocks are the exam, in order; `:::solution`
+ * blocks (key + explanation) may sit anywhere, including under a
+ * `# Solutions` heading, and are matched by id. Headings are optional:
+ * `# Exam` (or `# Questions`) and `# Solutions` only organise the file.
+ * Practice belongs in an `.xp` file, which shows keys as soon as a question
+ * is answered; a paper's keys stay sealed until it is submitted.
+ */
+export function parseExamFile(raw: string, file = "exam.xam"): ExamFile {
+  const errors: Issue[] = [];
+  // The optional `---` header names the paper's ruleset (rules-tag.ts). It is
+  // checked here, then blanked so line numbers below still match the file.
+  for (const field of paperHeader(raw)?.fields ?? []) {
+    if (field.key !== "rules")
+      errors.push({
+        severity: "error",
+        location: `${file}:${field.line}`,
+        message: `Unknown header field "${field.key}". The header only names the ruleset: rules: name.xrule`,
+      });
+    else if (!/\.xrule$/i.test(field.value))
+      errors.push({
+        severity: "error",
+        location: `${file}:${field.line}`,
+        message: "rules must name an .xrule file, like rules: mock.xrule",
+      });
+  }
+  const source = blankHeader(raw),
+    questionNodes: Node[] = [],
+    solutionNodes: Node[] = [];
+  let inSolutions = false;
+  for (const block of questionFileBlocks(source, file, errors)) {
+    const location = `${file}:${block.node.position?.start.line}`;
+    if (block.heading !== undefined) {
+      const text = block.heading.trim().toLowerCase();
+      if (/^(exam|questions?)\b/.test(text)) inSolutions = false;
+      else if (/^(answer keys?|answers|keys?|solutions?)\b/.test(text)) inSolutions = true;
+      else
+        errors.push({
+          severity: "error",
+          location,
+          message: /^practi[cs]e\b/.test(text)
+            ? "Practice questions go in their own .xp file, where each answer is checked at once. An exam paper holds only its exam."
+            : `Unknown heading "${block.heading}". Use # Exam or # Solutions, or no heading`,
+        });
+    } else if (block.node.name === "solution") solutionNodes.push(block.node);
+    else if (inSolutions)
+      errors.push({
+        severity: "error",
+        location,
+        message: "Put this question before the # Solutions heading",
+      });
+    else questionNodes.push(block.node);
+  }
   if (errors.length) throw new ExamImportError(errors);
-  return result;
+  const paper = pairUp(source, file, questionNodes, solutionNodes, { section: "exam" }, errors);
+  if (errors.length) throw new ExamImportError(errors);
+  return paper;
+}
+
+/** An `.xp` file: practice questions, grouped under the headings above them. */
+export interface PracticeFile {
+  groups: { title: string | null; questions: Question[] }[];
+  solutions: Solution[];
+}
+/**
+ * Practice questions in the paper's grammar, with no rules file: every
+ * heading starts a group, `marks` is optional, and each question's solution
+ * may sit anywhere. Practice has no sections, timer or penalty.
+ */
+export function parsePracticeFile(source: string, file = "practice.xp"): PracticeFile {
+  const errors: Issue[] = [],
+    questionNodes: Node[] = [],
+    solutionNodes: Node[] = [],
+    titles: (string | null)[] = [];
+  let title: string | null = null;
+  for (const block of questionFileBlocks(source, file, errors)) {
+    if (block.heading !== undefined) title = block.heading.trim() || null;
+    else if (block.node.name === "solution") solutionNodes.push(block.node);
+    else {
+      questionNodes.push(block.node);
+      titles.push(title);
+    }
+  }
+  if (errors.length) throw new ExamImportError(errors);
+  const { questions, solutions } = pairUp(
+    source,
+    file,
+    questionNodes,
+    solutionNodes,
+    { section: "practice", marks: "1" },
+    errors,
+  );
+  if (errors.length) throw new ExamImportError(errors);
+  const groups: PracticeFile["groups"] = [];
+  questions.forEach((q, i) => {
+    const last = groups.at(-1);
+    if (last && last.title === titles[i]) last.questions.push(q);
+    else groups.push({ title: titles[i], questions: [q] });
+  });
+  return { groups, solutions };
 }
 export const optionLabel = (index: number) => String.fromCharCode(65 + index);
 export const numeric = (s: string) =>

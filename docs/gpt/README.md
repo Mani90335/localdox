@@ -1,5 +1,7 @@
 # Localdox Builder: a GPT that writes files Localdox imports
 
+> **Out of date for exams.** Localdox now runs exams from two files, a `.xam` paper and its `.xrule` rules, kept in an Exam Workspace's folders, and practice from `.xp` files (see [Exam and practice files](../../documentation/exam-files.md)). The practice, exam and study-plan outputs below use the earlier upload formats, which the app no longer imports. Lessons are unaffected.
+
 One GPT for every kind of Localdox content:
 
 | Ask for                                         | You get                                                          | Where it goes in Localdox                       |

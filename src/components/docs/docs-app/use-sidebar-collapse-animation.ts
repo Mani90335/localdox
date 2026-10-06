@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /**
  * One sidebar width for everyone. It used to be drag-resizable and persisted
@@ -18,22 +18,29 @@ export const SIDEBAR_WIDTH = 288;
  * fades/slides), matching how `DocsApp` wires them into JSX.
  */
 export function useSidebarCollapseAnimation(sidebarCollapsed: boolean) {
-  const sidebarWrapRef = useRef<HTMLDivElement>(null);
+  // A callback ref also tracks remounts when leaving/returning to materials.
+  const [wrap, sidebarWrapRef] = useState<HTMLDivElement | null>(null);
   const sidebarInnerRef = useRef<HTMLDivElement>(null);
-  const firstCollapseRun = useRef(true);
+  const previousWrap = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    const wrap = sidebarWrapRef.current;
+  useLayoutEffect(() => {
     if (!wrap) return;
     const inner = sidebarInnerRef.current;
+    const rail = wrap.lastElementChild as HTMLElement | null;
+    const retiring = sidebarCollapsed ? inner : rail;
+    if (!sidebarCollapsed && inner) inner.style.visibility = "visible";
+    if (retiring?.contains(document.activeElement)) {
+      const entering = sidebarCollapsed ? rail : inner;
+      entering?.querySelector<HTMLButtonElement>("button")?.focus();
+    }
     const width = sidebarCollapsed ? 56 : SIDEBAR_WIDTH;
     const opacity = sidebarCollapsed ? 0 : 1;
     const shift = sidebarCollapsed ? -16 : 0;
 
     // First run positions without animating: the restored state shouldn't play
     // an entrance every time the app boots.
-    if (firstCollapseRun.current) {
-      firstCollapseRun.current = false;
+    if (previousWrap.current !== wrap) {
+      previousWrap.current = wrap;
       wrap.style.width = `${width}px`;
       if (inner) {
         inner.style.opacity = String(opacity);
@@ -48,9 +55,8 @@ export function useSidebarCollapseAnimation(sidebarCollapsed: boolean) {
 
     if (inner) {
       // Expanding: become visible up front so the fade-in is actually seen.
-      // Collapsing: stay visible until the fade finishes, then drop out of
-      // hit-testing — a transparent-but-visible sidebar would swallow clicks
-      // meant for the collapsed icon rail underneath it.
+      // The shell hides and inerts the retiring panel immediately so duplicate
+      // navigation controls cannot take focus while the rail appears.
       if (!sidebarCollapsed) inner.style.visibility = "visible";
 
       const fade = inner.animate?.(
@@ -87,7 +93,39 @@ export function useSidebarCollapseAnimation(sidebarCollapsed: boolean) {
     }
 
     return () => animations.forEach((a) => a.cancel());
-  }, [sidebarCollapsed]);
+  }, [sidebarCollapsed, wrap]);
+
+  useEffect(() => {
+    if (!wrap) return;
+    // Exam materials have extra chrome above the reader. Size to the remaining
+    // viewport, then grow as that chrome scrolls away and the sidebar sticks.
+    const measure = () => {
+      const top = Math.max(0, wrap.getBoundingClientRect().top);
+      wrap.style.height = `max(0px, calc(100dvh - ${top}px))`;
+    };
+    let frame = 0;
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    const observer = new ResizeObserver(schedule);
+    for (
+      let sibling = wrap.parentElement?.previousElementSibling;
+      sibling;
+      sibling = sibling.previousElementSibling
+    ) {
+      observer.observe(sibling);
+    }
+    measure();
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+    };
+  }, [wrap]);
 
   return { sidebarWrapRef, sidebarInnerRef };
 }

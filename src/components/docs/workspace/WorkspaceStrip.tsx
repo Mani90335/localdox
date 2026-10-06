@@ -49,6 +49,8 @@ export function WorkspaceStrip({
             type="button"
             onClick={() => onSelect(ws.id)}
             title={ws.name}
+            aria-label={ws.name}
+            aria-current={isCurrent ? "page" : undefined}
             // Scaling from the bottom edge keeps the top of the avatar fixed on
             // hover, so it never grows up into whatever sits just above the row.
             className={`flex shrink-0 origin-bottom snap-start flex-col items-center gap-1.5 rounded-lg px-0.5 transition-transform duration-150 ease-out hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-95 ${

@@ -4,7 +4,7 @@
  * One token layer (below), one level of surface, hairlines for grouping, colour
  * only where it carries meaning. Components are prefixed `ex-`; screens use
  * `xr-` (runner), `xi-` (instructions), `xs-` (result), `xl-` (library),
- * `xp-` (study plans and practice).
+ * `xp-` and `xe-` (a paper's panel and verdicts), `xf-` (exam files in the reader).
  */
 
 /* ── Tokens ──────────────────────────────────────────────────────────────── */
@@ -64,7 +64,7 @@
   -webkit-font-smoothing: antialiased;
 }
 .exam-app {
-  min-height: calc(100dvh - 144px);
+  min-height: 100dvh;
   background: var(--ex-page);
 }
 .dark .exam-app,
@@ -140,6 +140,11 @@
 :where(.exam-app, .ex-portal) :focus-visible {
   outline: 2px solid var(--ex-accent);
   outline-offset: 2px;
+}
+/* Focus the app moves onto a region (tabindex="-1"), such as a practice
+   verdict, keeps the reader's place; the region isn't a control, so no ring. */
+:where(.exam-app, .ex-portal) [tabindex="-1"]:focus-visible {
+  outline: none;
 }
 .exam-app .tabular {
   font-variant-numeric: tabular-nums;
@@ -1669,267 +1674,6 @@ fieldset:disabled .xr-option {
   min-width: 0;
 }
 
-/* ── Library ─────────────────────────────────────────────────────────────── */
-.xl-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 24px;
-}
-.xl-search {
-  position: relative;
-  flex: 1 1 260px;
-  max-width: 360px;
-}
-.xl-search svg {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--ex-text-2);
-  pointer-events: none;
-}
-.xl-search .ex-input {
-  padding-left: 36px;
-}
-.xl-continue {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  flex-wrap: wrap;
-  margin-bottom: 32px;
-  border-color: color-mix(in srgb, var(--ex-accent) 35%, var(--ex-hairline));
-}
-.xl-continue > div {
-  flex: 1;
-  min-width: 220px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.xl-continue small {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ex-accent);
-}
-.xl-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
-  margin-bottom: 48px;
-}
-.xl-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 20px;
-}
-.xl-card h2 {
-  font-size: 17px;
-  line-height: 1.35;
-}
-.xl-card-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: auto;
-  padding-top: 12px;
-}
-.xl-card .ex-select {
-  min-height: 36px;
-  font-size: 13px;
-}
-.xl-score {
-  display: flex;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.xl-score strong {
-  font-size: var(--ex-fs-16);
-  font-weight: 600;
-}
-.xl-score small {
-  font-size: var(--ex-fs-12);
-  color: var(--ex-text-2);
-}
-.xl-show-sm {
-  display: none;
-}
-.xl-row-title {
-  border: 0;
-  padding: 0;
-  background: none;
-  font-weight: 500;
-  text-align: left;
-  color: var(--ex-text);
-}
-
-/* ── Workspace: one tab, sidebar + detail ─────────────────────────────────── */
-.exw {
-  display: grid;
-  grid-template-columns: 288px minmax(0, 1fr);
-  align-items: start;
-  width: 100%;
-  min-height: calc(100dvh - 144px);
-}
-.exw-side {
-  position: sticky;
-  top: 0;
-  min-height: calc(100dvh - 144px);
-  background: var(--sidebar);
-  align-self: start;
-  max-height: 100dvh;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 20px 12px 24px;
-  border-right: 1px solid var(--ex-hairline);
-}
-.exw-main {
-  min-width: 0;
-  padding: 32px 32px 112px;
-}
-/* Uppercase section label ("Your exams", "Browse"). */
-.exw-group {
-  margin: 16px 8px 4px;
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0;
-  color: var(--ex-text-2);
-}
-.exw-group:first-child {
-  margin-top: 2px;
-}
-/* A plan's name, above its topics. */
-.exw-plan {
-  margin: 10px 10px 2px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ex-text-2);
-}
-.exw-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 40px;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: var(--ex-r-control);
-  background: none;
-  text-align: left;
-  color: var(--ex-text);
-  font-size: var(--ex-fs-14);
-  cursor: pointer;
-  transition: background-color var(--ex-fast) var(--ex-ease);
-}
-.exw-row:hover {
-  background: var(--sidebar-accent);
-}
-.exw-row[aria-current="page"] {
-  background: var(--ex-accent-tint);
-  color: var(--ex-accent);
-  font-weight: 600;
-}
-.exw-row:focus-visible {
-  outline: 2px solid var(--ex-accent);
-  outline-offset: 1px;
-}
-.exw-row-icon {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  color: var(--ex-text-2);
-}
-.exw-row[aria-current="page"] .exw-row-icon {
-  color: inherit;
-}
-.exw-row-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* The topic's step status, as a small dot. */
-.exw-status {
-  flex: none;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  border: 1.5px solid var(--ex-border-strong);
-  background: transparent;
-}
-.exw-status.is-done {
-  background: var(--ex-success);
-  border-color: var(--ex-success);
-}
-.exw-status.is-current {
-  background: var(--ex-accent);
-  border-color: var(--ex-accent);
-}
-.exw-status.is-attention {
-  background: var(--ex-warning);
-  border-color: var(--ex-warning);
-}
-.exw-status.is-locked {
-  border-color: var(--ex-hairline);
-}
-.exw-div {
-  height: 1px;
-  background: var(--ex-hairline);
-  margin: 14px 10px;
-}
-.exw-actions {
-  margin-bottom: 12px;
-  padding: 0 0 12px;
-  border-bottom: 1px solid var(--sidebar-border);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.exw-actions .ex-btn:first-child {
-  flex: 1;
-}
-/* Phones only: a back arrow returns from detail to the list. */
-.exw-back {
-  display: none;
-  margin-bottom: 16px;
-}
-.xp-dot {
-  position: relative;
-  z-index: 1;
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 2px solid var(--ex-hairline);
-  background: var(--ex-page);
-  color: var(--ex-text-2);
-  font-size: var(--ex-fs-12);
-  font-weight: 650;
-}
-.is-done .xp-dot {
-  border-color: var(--ex-success);
-  background: var(--ex-success);
-  color: #fff;
-}
-.is-current .xp-dot {
-  border-color: var(--ex-accent);
-  color: var(--ex-accent);
-  background: var(--ex-surface);
-}
-.is-attention .xp-dot {
-  border-color: var(--ex-warning);
-  color: var(--ex-warning);
-  background: var(--ex-surface);
-}
 .xp-cta {
   display: flex;
   align-items: center;
@@ -1945,63 +1689,7 @@ fieldset:disabled .xr-option {
 .xp-panel.is-warning {
   border-color: color-mix(in srgb, var(--ex-warning) 45%, var(--ex-hairline));
 }
-.xp-steps {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.xp-steps > li {
-  display: flex;
-  gap: 12px;
-}
-.xp-steps > li > div {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.xp-steps .xp-dot {
-  width: 24px;
-  height: 24px;
-}
-.xp-tasks {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.xp-task {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 48px;
-  padding: 8px 16px;
-  cursor: pointer;
-  font-size: var(--ex-fs-14);
-}
-.xp-task:hover {
-  background: var(--ex-subtle);
-}
-.xp-task.is-done span {
-  color: var(--ex-text-2);
-  text-decoration: line-through;
-  text-decoration-color: color-mix(in srgb, var(--ex-text-2) 50%, transparent);
-}
-.xp-notes {
-  min-height: 112px;
-}
-.xp-saved {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--ex-fs-12);
-  color: var(--ex-text-2);
-}
-
-/* ── Day steps (study plan) ──────────────────────────────────────────────── */
+/* ── An .xam paper: its panel, verdicts and attempts (ExamPanel) ───────────── */
 .xp-verdict {
   display: inline-flex;
   align-items: center;
@@ -2027,92 +1715,23 @@ fieldset:disabled .xr-option {
   color: var(--ex-warning);
 }
 
-/* ── Topic: horizontal steps ──────────────────────────────────────────────── */
-.xp-hsteps {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin: 0 0 16px;
+.xe-attempts {
+  margin: 0;
   padding: 0;
   list-style: none;
-  counter-reset: step;
 }
-.xp-hstep {
-  position: relative;
-  min-width: 0;
-}
-/* The connector runs from this step's dot to the next one. */
-.xp-hstep:not(:last-child)::after {
-  content: "";
-  position: absolute;
-  top: 27px;
-  left: 52px;
-  right: 4px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--ex-hairline);
-}
-.xp-hstep.is-done:not(:last-child)::after {
-  background: var(--ex-success);
-}
-.xp-hstep button {
-  position: relative;
-  z-index: 1;
+.xe-attempts > li {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  width: 100%;
-  min-height: 44px;
-  padding: 12px 8px 12px 12px;
-  border: 0;
-  border-radius: var(--ex-r-control);
-  background: none;
-  text-align: left;
-  transition: background-color var(--ex-fast) var(--ex-ease);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  min-height: 48px;
+  padding: 8px 16px;
+  font-size: var(--ex-fs-14);
 }
-.xp-hstep button:hover:not(:disabled) {
-  background: var(--ex-subtle);
-}
-.xp-hstep button:disabled {
-  cursor: default;
-}
-/* The step on screen reads as current from its accent dot and label; no
-   underline bar is drawn under it. */
-.xp-hstep button[aria-current="step"] .xp-hstep-copy strong {
-  color: var(--ex-accent);
-}
-.xp-hstep .xp-dot {
-  width: 32px;
-  height: 32px;
-}
-.xp-hstep.is-done .xp-dot {
-  border-color: var(--ex-success);
-  background: var(--ex-success);
-  color: #fff;
-}
-.xp-hstep.is-current .xp-dot {
-  border-color: var(--ex-accent);
-  background: var(--ex-surface);
-  color: var(--ex-accent);
-}
-.xp-hstep-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.xe-attempts > li > :first-child {
+  flex: 1;
   min-width: 0;
-}
-.xp-hstep-copy strong {
-  font-size: var(--ex-fs-16);
-  font-weight: 600;
-}
-.xp-hstep-copy > span {
-  font-size: 13px;
-  color: var(--ex-text-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.xp-hstep.is-locked .xp-hstep-copy strong {
   color: var(--ex-text-2);
 }
 .xp-step-panel {
@@ -2125,19 +1744,6 @@ fieldset:disabled .xr-option {
 }
 .xp-step-panel .exam-markdown :is(p, ul, ol) {
   margin: 0 0 8px;
-}
-.xp-complete {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--ex-hairline);
-  color: var(--ex-success);
-  font-weight: 600;
-}
-.xp-complete .ex-btn {
-  margin-left: auto;
 }
 /* New exam: rules first, the file after. */
 .xp-setup-grid {
@@ -2157,6 +1763,20 @@ fieldset:disabled .xr-option {
 .xp-setup-error {
   color: var(--ex-danger);
   font-size: var(--ex-fs-14);
+  /* Import problems arrive as one line each. */
+  white-space: pre-line;
+}
+/* The form is the .xrule's editor; the file round-trips through it. */
+.xp-rules-file {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--ex-hairline);
+}
+.xp-rules-file code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.92em;
 }
 .xp-upload {
   display: flex;
@@ -2177,6 +1797,79 @@ fieldset:disabled .xr-option {
   margin-inline: 0;
   font-family: var(--font-ui);
   overflow-wrap: anywhere;
+}
+/* ── A paper studied in the reader ───────────────────────────────────────── */
+/* The steps sit in the reader's column, under its header; nothing here is a
+   page of its own. */
+.exam-app--embedded {
+  min-height: 0;
+  background: transparent;
+}
+.exam-app--embedded .exam-root-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+/* A session, practice or review covers the reader, above its chrome and below
+   exam dialogs (--z-modal), which portal into it or into fullscreen. */
+.exam-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay, 100);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.xf-facts .ex-link {
+  font-weight: 500;
+}
+.xf-pinned {
+  padding: 10px 12px;
+  border-radius: var(--ex-r-control);
+  background: var(--ex-warning-tint);
+  color: var(--ex-text);
+}
+.xf-problems {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.xf-problems-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ex-danger);
+  font-weight: 600;
+}
+.xf-problems-list {
+  white-space: pre-line;
+  font-size: var(--ex-fs-14);
+}
+
+/* An .xam opened in the reader (ExamFileViewer). The reader's prose centres on
+   a reading measure; inside a question card it fills the card, as it does here. */
+.xf-preview .exam-markdown {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  margin-inline: 0;
+  overflow-wrap: anywhere;
+}
+.xf-preview .exam-markdown > :first-child {
+  margin-top: 0;
+}
+.xf-preview .exam-markdown > :last-child {
+  margin-bottom: 0;
+}
+/* A practice option's button stretches over its row (PracticeFileViewer) and
+   draws its focus ring there; its own outline would ring just the letter. */
+.xf-choice:focus-visible {
+  outline: none;
+}
+.xf-option .exam-markdown {
+  font-size: var(--ex-fs-16);
+}
+.xf-option .exam-markdown p {
+  margin: 0;
 }
 .exam-markdown .katex-display {
   overflow-x: auto;
@@ -2248,6 +1941,13 @@ label .ex-zoom,
 }
 .ex-diagram.is-loading {
   min-height: 160px;
+  margin: 16px 0;
+  border-radius: var(--ex-r-control);
+  background: var(--ex-subtle);
+}
+.ex-media-pending {
+  display: block;
+  min-height: 64px;
   margin: 16px 0;
   border-radius: var(--ex-r-control);
   background: var(--ex-subtle);
@@ -2362,62 +2062,7 @@ label .ex-zoom,
     width: auto;
   }
 }
-/* Below this, the two panes stack and the list/detail swap like a phone app. */
-@media (max-width: 820px) {
-  .exw {
-    grid-template-columns: 1fr;
-    min-height: 0;
-  }
-  .exw-side {
-    min-height: 0;
-    position: static;
-    max-height: none;
-    overflow: visible;
-    border-right: 0;
-    border-bottom: 1px solid var(--ex-hairline);
-  }
-  .exw[data-pane="detail"] .exw-side {
-    display: none;
-  }
-  .exw[data-pane="list"] .exw-main {
-    display: none;
-  }
-  .exw[data-empty="true"][data-pane="list"] .exw-main {
-    display: block;
-  }
-  .exw[data-empty="true"][data-pane="list"] .exw-back {
-    display: none;
-  }
-  .exw-back {
-    display: inline-flex;
-  }
-  .exw-main {
-    padding: 20px 16px 112px;
-  }
-}
 @media (max-width: 640px) {
-  .xp-hstep:not(:last-child)::after {
-    left: 44px;
-  }
-  .xp-hstep button {
-    padding: 10px 4px;
-    align-items: center;
-    text-align: center;
-  }
-  .xp-hstep-copy {
-    align-items: center;
-  }
-  .xp-hstep-copy strong {
-    font-size: 13px;
-  }
-  .xp-hstep-copy > span {
-    display: none;
-  }
-  .xp-hstep:not(:last-child)::after {
-    top: 25px;
-    left: calc(50% + 20px);
-    right: calc(-50% + 20px);
-  }
   /* A wrapped "·" would start the next line; use spacing instead. */
   .ex-meta {
     column-gap: 14px;
@@ -2530,19 +2175,6 @@ label .ex-zoom,
     grid-column: span 2;
     order: 3;
   }
-  .xl-search {
-    max-width: none;
-  }
-  .xl-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .xl-hide-sm {
-    display: none;
-  }
-  .xl-show-sm {
-    display: block;
-    margin-top: 2px;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .exam-app *,
@@ -2565,9 +2197,6 @@ label .ex-zoom,
   .exam-app,
   .ex-portal {
     --ex-control: 44px;
-  }
-  .exw-row {
-    min-height: 44px;
   }
 }
 .xp-structure {

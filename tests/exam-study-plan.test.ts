@@ -13,12 +13,7 @@ import {
   attachRewrite,
   meetsPassingScore,
   paperFingerprint,
-  markLearned,
-  markReviewed,
-  answerPractice,
-  addPractice,
 } from "../src/services/exams/study-plan.ts";
-import { importPracticeSet } from "../src/services/exams/practice.ts";
 import type { StudyPlanRecord } from "../src/services/exams/study-plan.ts";
 import type { AttemptRecord, ExamRecord } from "../src/services/exams/storage.ts";
 import { savePlan, listPlans } from "../src/services/exams/storage.ts";
@@ -49,9 +44,7 @@ function record(): ExamRecord {
   };
   return { id: "test", exam: e, solutionFile: new Blob([key]) };
 }
-// Step 1 (Learn) is self-reported; most tests start after it.
-const create = async () =>
-  markLearned(await importStudyPlan(JSON.stringify(definition), [record()], 0), "day1", [], 1);
+const create = () => importStudyPlan(JSON.stringify(definition), [record()], 0);
 function take(
   plan: StudyPlanRecord,
   attempts: AttemptRecord[],
@@ -87,20 +80,16 @@ test("study plan strict import validates dates, references, IDs and finite exam 
 });
 test("topics are independent; checklists never pass an exam; raw score at threshold passes", async () => {
   let p = await create();
-  // Learners order topics themselves: the second is open, at its own Step 1.
+  // Learners order topics themselves, and an exam is open from the start.
   assert.equal(studyProgress(p, [])[1].status, "ready");
-  assert.equal(studyProgress(p, [])[1].step, "learn");
-  assert.throws(() => prepareStudyAttempt(p, "day2", []), /Learn/);
+  assert.equal(prepareStudyAttempt(p, "day2", []).session.phase, "instructions");
   p = updateStudyTask(p, "day1", "read", true, []);
   assert.equal(studyProgress(p, [])[0].completedTasks, 1);
-  assert.equal(studyProgress(p, [])[0].steps.exam, false);
+  assert.equal(studyProgress(p, [])[0].status, "ready");
   const a = take(p, [], "A");
   assert.equal(studyProgress(p, [a])[0].status, "passed");
-  // Passing is Step 3 of 4; the topic finishes with the review.
-  assert.equal(studyProgress(p, [a])[0].step, "review");
-  p = markReviewed(p, "day1", [a]);
-  assert.equal(studyProgress(p, [a])[0].step, "done");
-  assert.equal(studyProgress(p, [a])[1].step, "learn", "other topics are unaffected");
+  assert.throws(() => prepareStudyAttempt(p, "day1", [a]), /already passed/);
+  assert.equal(studyProgress(p, [a])[1].status, "ready", "other topics are unaffected");
   assert.equal(meetsPassingScore(4, 5, 80), true);
   assert.equal(meetsPassingScore(3.999, 5, 80), false);
   assert.equal(meetsPassingScore(4, 5, 90), false);
@@ -171,77 +160,4 @@ test("plans and manual progress survive IndexedDB roundtrip", async () => {
   await savePlan(p);
   const loaded = (await listPlans()).find((r) => r.id === p.id)!;
   assert.equal(loaded.days.day1.tasks.read, true);
-  // Learned, and no practice questions in this plan: the exam is next.
-  assert.equal(studyProgress(loaded, [])[0].step, "exam");
-});
-
-const practiceSource = `:::question{#p1 type=mcq marks=1}
-Which is even?
-
-- 2
-- 3
-:::
-
-:::solution{#p1 answer=A}
-Two is divisible by two.
-
-::distractor{option=B trap=sign}
-:::
-
-:::question{#p2 type=nat marks=1}
-What is 2 + 2?
-:::
-
-:::solution{#p2 answer=4}
-Four.
-:::`;
-
-test("practice files hold questions and solutions together and validate the key", () => {
-  const set = importPracticeSet("basics", "Basics", practiceSource, 5);
-  assert.equal(set.questions.length, 2);
-  assert.equal(set.questions[0].section, "practice");
-  assert.deepEqual(set.solutions[0].distractors, [], "trap analytics are dropped");
-  assert.throws(
-    () => importPracticeSet("bad", "Bad", ":::question{#q type=mcq marks=1}\nQ?\n\n- a\n- b\n:::"),
-    /Missing solution/,
-  );
-});
-
-test("four steps unlock in order: learn, practice, exam, review", async () => {
-  const set = importPracticeSet("basics", "Basics", practiceSource, 0);
-  let p = await importStudyPlan(
-    JSON.stringify({
-      ...definition,
-      days: [{ ...definition.days[0], practice: ["basics"] }, definition.days[1]],
-    }),
-    [record()],
-    0,
-    [set],
-  );
-  await assert.rejects(
-    importStudyPlan(
-      JSON.stringify({ ...definition, days: [{ ...definition.days[0], practice: ["missing"] }] }),
-      [record()],
-    ),
-    /missing.practice.md/,
-  );
-  assert.equal(studyProgress(p, [])[0].step, "learn");
-  assert.throws(() => answerPractice(p, "day1", "basics", "p1", "A", []), /Learn/);
-  assert.throws(() => prepareStudyAttempt(p, "day1", []), /Learn/);
-  p = markLearned(p, "day1", []);
-  assert.equal(studyProgress(p, [])[0].step, "practice");
-  assert.throws(() => prepareStudyAttempt(p, "day1", []), /practice/);
-  p = answerPractice(p, "day1", "basics", "p1", "B", []);
-  assert.equal(p.days.day1.practice!.answers["basics/p1"].outcome, "wrong");
-  assert.throws(() => answerPractice(p, "day1", "basics", "p1", "A", []), /already checked/);
-  p = answerPractice(p, "day1", "basics", "p2", "4", []);
-  assert.equal(studyProgress(p, [])[0].step, "exam");
-  assert.throws(() => markReviewed(p, "day1", []), /Pass the exam/);
-  const a = take(p, [], "A");
-  assert.equal(studyProgress(p, [a])[0].step, "review");
-  // Extra practice added after passing never relocks the day.
-  p = addPractice(p, "day1", importPracticeSet("extra", "Extra", practiceSource, 9), [a]);
-  assert.throws(() => addPractice(p, "day1", set, [a]), /already has practice/);
-  p = markReviewed(p, "day1", [a]);
-  assert.equal(studyProgress(p, [a])[0].step, "done");
 });

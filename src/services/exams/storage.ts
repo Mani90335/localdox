@@ -2,6 +2,7 @@ import type { Exam } from "./validation.ts";
 import type { Session } from "./session.ts";
 import type { AttemptAnalysis } from "./diagnostics.ts";
 import type { StudyPlanRecord } from "./study-plan.ts";
+import type { ExamSetup } from "./exam-setup.ts";
 export interface ExamRecord {
   id: string;
   exam: Exam;
@@ -24,9 +25,9 @@ export const examWriterLock = (workspaceId?: string) =>
 const DB = "localdox-exams-v2";
 function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB, 3);
+    const req = indexedDB.open(DB, 4);
     req.onupgradeneeded = () => {
-      for (const store of ["exams", "attempts", "plans"]) {
+      for (const store of ["exams", "attempts", "plans", "types"]) {
         if (!req.result.objectStoreNames.contains(`workspace-${store}`))
           req.result.createObjectStore(`workspace-${store}`, { keyPath: ["workspaceId", "id"] });
         if (!req.result.objectStoreNames.contains(store))
@@ -82,6 +83,19 @@ export const saveAttempt = (record: AttemptRecord, workspaceId?: string) =>
   putScoped("attempts", record, workspaceId);
 export const savePlan = (record: StudyPlanRecord, workspaceId?: string) =>
   putScoped("plans", record, workspaceId);
+/**
+ * An exam type saved by the earlier exam-type screens. Folders and `.xrule`
+ * files replace them; the records are kept so existing data stays listed and
+ * deletable in Settings.
+ */
+export interface ExamTypeRecord {
+  id: string;
+  name: string;
+  defaults: ExamSetup;
+}
+export const listTypes = (workspaceId?: string) => listScoped<ExamTypeRecord>("types", workspaceId);
+export const saveType = (record: ExamTypeRecord, workspaceId?: string) =>
+  putScoped("types", record, workspaceId);
 /**
  * Delete study plans and library exams with the attempts that belong to them,
  * in one transaction: a failure leaves everything as it was. Plans hold their
@@ -157,7 +171,7 @@ export async function loadSolutions(record: ExamRecord, session: Session) {
 
 export async function storedExamWorkspaceIds(): Promise<string[]> {
   const keys = await Promise.all(
-    ["exams", "plans", "attempts"].map((store) =>
+    ["exams", "plans", "attempts", "types"].map((store) =>
       transaction(`workspace-${store}`, "readonly", (s) => s.getAllKeys()),
     ),
   );
@@ -167,7 +181,7 @@ export async function storedExamWorkspaceIds(): Promise<string[]> {
 /** Removes all feature data owned by one workspace, including orphan attempts. */
 export async function clearExamWorkspace(workspaceId?: string): Promise<void> {
   const db = await database();
-  const names = ["exams", "plans", "attempts"].map((name) =>
+  const names = ["exams", "plans", "attempts", "types"].map((name) =>
     workspaceId ? `workspace-${name}` : name,
   );
   await new Promise<void>((resolve, reject) => {

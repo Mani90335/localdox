@@ -1,18 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { CircleAlert, FileCog } from "lucide-react";
 import { LEGACY_EXAM_WORKSPACE } from "@/lib/workspace/kinds";
 import * as examStorage from "./storage";
 import { workspaceRecoveryStore } from "./recovery";
-import { bundledExams } from "./library";
-import { readBundle } from "./bundle";
-import { EXAMPLE_SETUP, exampleExamFile } from "./examples";
-import {
-  examUpload,
-  readExamFile,
-  readPracticeFile,
-  type ExamFileContent,
-  type ExamSetup,
-} from "./exam-setup";
-import { loadSolutions, type ExamRecord, type AttemptRecord } from "./storage";
+import { readExamFile } from "./exam-setup";
+import { loadSolutions, type AttemptRecord } from "./storage";
 import { analyzeAttempt } from "./diagnostics";
 import {
   createSession,
@@ -39,30 +32,20 @@ import {
 } from "./session";
 import { ExamImportError } from "./schema";
 import type { Solution } from "./parser";
-import type { Response } from "./scoring";
 import { ExamScreen, type SaveState } from "./ExamScreen";
 import { ResultScreen, ReviewScreen } from "./Reports";
-import { PracticeScreen } from "./PracticeScreen";
-import { ExamWorkspace } from "./ExamWorkspace";
 import { InstructionsScreen } from "./Instructions";
-import { type ContinueItem } from "./LibraryScreen";
-import { Button, Skeleton, Toast, ToastRegion } from "./ui/kit";
-import { describeImportIssues, formatDateTime, formatDuration } from "./ui/display";
+import { ExamPanel } from "./ExamPanel";
+import { topicList } from "./topics";
+import { Button, EmptyState, LinkButton, Skeleton, Toast, ToastRegion } from "./ui/kit";
+import { describeImportIssues, setupFacts } from "./ui/display";
+import { paperPlanId, sourceFingerprint, syncPaperPlan, type RulesLookup } from "./paper-plan";
 import {
-  importStudyPlan,
   prepareStudyAttempt,
   assertStudyStart,
-  updateStudyTask,
-  updateStudyNote,
   completeRevision,
   attachRewrite,
   studyProgress,
-  markLearned,
-  answerPractice,
-  addPractice,
-  markReviewed,
-  createExamPlan,
-  attachExamFile,
   type StudyPlanRecord,
 } from "./study-plan";
 import { checkpointAttempt, checkpointPlan, clearCheckpoint, recoverPending } from "./recovery";
@@ -73,32 +56,61 @@ const errorText = (error: unknown) =>
     : error instanceof Error
       ? error.message
       : String(error);
+interface TextFile {
+  id: string;
+  name: string;
+  content: string;
+}
+/**
+ * Sitting one `.xam` file, inside the reader. The reader shows this in the
+ * paper's place; a timed exam, its result or its review takes over the
+ * screen. Keys are read only after submission. What used to be chosen from a
+ * list (which exam, which rules) comes from the files.
+ */
 export default function ExamApp({
   workspaceId,
-  onImmersive,
+  paper,
+  rules,
+  rulesets,
+  images,
+  onOpenRules,
+  onUseRules,
+  onCreateRules,
 }: {
-  onImmersive: (active: boolean) => void;
   workspaceId: string;
+  paper: TextFile;
+  rules: RulesLookup<TextFile>;
+  /** Every ruleset in the workspace, for a paper that needs one chosen. */
+  rulesets: { name: string; title: string }[];
+  /** Images in the workspace, by file name, for papers that show them. */
+  images?: Record<string, Blob>;
+  /** Show a ruleset where it is edited (Settings ▸ Exam rules). */
+  onOpenRules: (fileId: string) => void;
+  /** Name `rulesName` in the paper's header. */
+  onUseRules: (rulesName: string) => void;
+  /** Make a ruleset with the default rules and name it in the paper. */
+  onCreateRules: () => void;
 }) {
   const scope = workspaceId === LEGACY_EXAM_WORKSPACE ? undefined : workspaceId;
   const journal = useMemo(() => workspaceRecoveryStore(scope), [scope]);
-  const { listExams, listAttempts, listPlans, saveExam, saveAttempt, savePlan } = useMemo(
+  const { listAttempts, listPlans, saveAttempt, savePlan } = useMemo(
     () => ({
-      listExams: () => examStorage.listExams(scope),
       listAttempts: () => examStorage.listAttempts(scope),
       listPlans: () => examStorage.listPlans(scope),
-      saveExam: (record: ExamRecord) => examStorage.saveExam(record, scope),
       saveAttempt: (record: AttemptRecord) => examStorage.saveAttempt(record, scope),
       savePlan: (record: StudyPlanRecord) => examStorage.savePlan(record, scope),
     }),
     [scope],
   );
-  const [library, setLibrary] = useState<ExamRecord[]>([]),
-    [attempts, setAttempts] = useState<AttemptRecord[]>([]),
+  const planId = paperPlanId(paper.id);
+  const [attempts, setAttempts] = useState<AttemptRecord[]>([]),
     [current, setCurrent] = useState<AttemptRecord | null>(null),
     [solutions, setSolutions] = useState<Solution[]>([]),
-    [practicing, setPracticing] = useState<{ planId: string; dayId: string } | null>(null),
     [plans, setPlans] = useState<StudyPlanRecord[]>([]),
+    /** How the paper's plan relates to its files; null until first read. */
+    [sync, setSync] = useState<
+      { kind: "ok" | "pinned" } | { kind: "error"; message: string } | null
+    >(null),
     [error, setError] = useState(""),
     [ready, setReady] = useState(false),
     [ack, setAck] = useState(false),
@@ -120,8 +132,9 @@ export default function ExamApp({
     solutionsRef = useRef<Solution[]>([]),
     grading = useRef<string | null>(null),
     saveQueue = useRef(Promise.resolve()),
-    input = useRef<HTMLInputElement>(null),
+    imagesRef = useRef(images),
     hasLock = useRef(false);
+  imagesRef.current = images;
   const display = useCallback((record: AttemptRecord | null) => {
     currentRef.current = record;
     setCurrent(record);
@@ -190,12 +203,7 @@ export default function ExamApp({
     const lockAbort = new AbortController();
     async function initialize() {
       try {
-        const [bundled, saved, storedHistory, storedPlans] = await Promise.all([
-          bundledExams(),
-          listExams(),
-          listAttempts(),
-          listPlans(),
-        ]);
+        const [storedHistory, storedPlans] = await Promise.all([listAttempts(), listPlans()]);
         if (!alive) return;
         const recovered = recoverPending(storedHistory, storedPlans, journal);
         const history = recovered.attempts,
@@ -204,21 +212,16 @@ export default function ExamApp({
           await Promise.all([...history.map(saveAttempt), ...savedPlans.map(savePlan)]);
           recovered.tokens.forEach((token) => clearCheckpoint(token, journal));
         }
-        const merged = new Map(bundled.exams.map((e) => [e.id, e]));
-        saved.forEach((e) => merged.set(e.id, e));
-        setLibrary([...merged.values()]);
         attemptsRef.current = history;
         setAttempts(history);
         plansRef.current = savedPlans;
         setPlans(savedPlans);
-        // Broken bundled files are an author problem, not a learner one.
-        if (bundled.errors.length) {
-          console.warn("Exam Workspaces: bundled exams failed to load", bundled.errors);
-          if (dev) setError(bundled.errors.join("\n"));
-        }
+        // An unfinished attempt on this paper resumes when the paper opens.
         const active = history
-          .filter((a) =>
-            ["instructions", "in_progress", "submitting", "reflection"].includes(a.session.phase),
+          .filter(
+            (a) =>
+              a.study?.planId === planId &&
+              ["instructions", "in_progress", "submitting", "reflection"].includes(a.session.phase),
           )
           .sort((a, b) => b.session.createdAt - a.session.createdAt)[0];
         if (active) {
@@ -261,7 +264,7 @@ export default function ExamApp({
       lockAbort.abort();
       void saveQueue.current.finally(release);
     };
-  }, [persist, dev, scope, journal, listExams, listAttempts, listPlans, saveAttempt, savePlan]);
+  }, [persist, planId, scope, journal, listAttempts, listPlans, saveAttempt, savePlan]);
   useEffect(() => {
     let previousTick = Date.now();
     const interval = window.setInterval(() => {
@@ -369,6 +372,36 @@ export default function ExamApp({
       );
     };
   }, [update]);
+  // Keep this paper's plan in step with its files. Runs once storage is open
+  // and again whenever the paper or its rules are saved.
+  const rulesFile = rules.kind === "found" ? rules.file : null;
+  useEffect(() => {
+    if (!ready || !rulesFile) return;
+    let alive = true;
+    syncPaperPlan(
+      plansRef.current.find((p) => p.id === planId),
+      {
+        fileId: paper.id,
+        paper: { name: paper.name, text: paper.content },
+        rules: { name: rulesFile.name, text: rulesFile.content },
+        images: imagesRef.current,
+      },
+      attemptsRef.current,
+    )
+      .then(async (result) => {
+        if (!alive) return;
+        if (result.kind === "built") await persistPlan(result.plan);
+        if (alive) setSync({ kind: result.kind === "pinned" ? "pinned" : "ok" });
+      })
+      .catch((e) => {
+        if (alive) setSync({ kind: "error", message: errorText(e) });
+      });
+    return () => {
+      alive = false;
+    };
+    // persistPlan reads refs only; the files are the inputs that matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, planId, paper.id, paper.name, paper.content, rulesFile?.name, rulesFile?.content]);
   function clearCurrent() {
     display(null);
     solutionsRef.current = [];
@@ -376,29 +409,6 @@ export default function ExamApp({
     setError("");
     setAck(false);
     setSaveState("idle");
-  }
-  async function choose(exam: ExamRecord) {
-    try {
-      const count = attempts.filter(
-        (a) =>
-          a.session.examId === exam.id &&
-          a.session.startedAt !== undefined &&
-          !a.session.demo &&
-          !a.study,
-      ).length;
-      if (exam.exam.rules.attempts.max !== null && count >= exam.exam.rules.attempts.max)
-        throw new Error("The attempt limit for this exam has been reached.");
-      setAck(false);
-      solutionsRef.current = [];
-      setSolutions([]);
-      setError("");
-      const session = showInstructions(
-        createSession(exam.exam.rules, exam.exam.paper, exam.exam.taxonomy.id),
-      );
-      await persist({ id: session.id, exam, session });
-    } catch (e) {
-      setError(errorText(e));
-    }
   }
   async function start(scale = 1) {
     const record = currentRef.current;
@@ -434,116 +444,6 @@ export default function ExamApp({
       setBusy(false);
     }
   }
-  /** One import for everything: a zip or loose plan, exam and practice files. */
-  async function importAll(files: File[]) {
-    if (!files.length) return;
-    setBusy(true);
-    try {
-      const bundle = await readBundle(files);
-      if (bundle.practice.length && !bundle.plan)
-        throw new Error(
-          "Practice files belong to a day. Open the day and use Practice → Add questions.",
-        );
-      for (const record of bundle.exams) await saveExam(record);
-      const merged = new Map(library.map((e) => [e.id, e]));
-      bundle.exams.forEach((e) => merged.set(e.id, e));
-      setLibrary([...merged.values()]);
-      if (bundle.plan) {
-        const plan = await importStudyPlan(
-          bundle.plan,
-          [...merged.values()],
-          Date.now(),
-          bundle.practice,
-        );
-        if (plansRef.current.some((p) => p.id === plan.id))
-          throw new Error(
-            "This plan is already imported. Keep its progress, or give the new plan a different id.",
-          );
-        await persistPlan(plan);
-      }
-      setError("");
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  /** Step one of a study-plan exam: its rules. Resolves to the plan id. */
-  async function createExam(
-    setup: ExamSetup,
-    content?: (plan: StudyPlanRecord) => Promise<ExamFileContent>,
-  ) {
-    setBusy(true);
-    try {
-      let plan = createExamPlan(setup);
-      if (content) plan = await attachExamFile(plan, await content(plan));
-      await persistPlan(plan);
-      setError("");
-      return plan.id;
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  /** Step two: the one file with practice, exam, keys and solutions. */
-  async function uploadExamFile(planId: string, files: File[]) {
-    if (!files.length) return;
-    setBusy(true);
-    try {
-      const plan = plansRef.current.find((p) => p.id === planId);
-      if (!plan?.setup) throw new Error("Study plan not found");
-      const { name, text, images } = await examUpload(files);
-      const content = readExamFile(plan.setup, plan.plan.days[0].examId, text, name, images);
-      await persistPlan(await attachExamFile(plan, content));
-      setError("");
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function importExample() {
-    const file = await exampleExamFile();
-    return createExam(EXAMPLE_SETUP, async (plan) =>
-      readExamFile(EXAMPLE_SETUP, plan.plan.days[0].examId, await file.text(), file.name),
-    );
-  }
-  async function downloadExample() {
-    try {
-      const url = URL.createObjectURL(await exampleExamFile()),
-        link = document.createElement("a");
-      link.href = url;
-      link.download = "example-exam.md";
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (e) {
-      setError(errorText(e));
-    }
-  }
-  async function addPracticeFiles(planId: string, dayId: string, files: File[]) {
-    if (!files.length) return;
-    setBusy(true);
-    try {
-      let sets;
-      if (files.some((f) => f.name.endsWith(".practice.md"))) {
-        const bundle = await readBundle(files);
-        if (!bundle.practice.length || bundle.exams.length || bundle.plan)
-          throw new Error("Choose .practice.md files (and any images they use).");
-        sets = bundle.practice;
-      } else {
-        const { name, text, images } = await examUpload(files);
-        sets = [readPracticeFile(name.replace(/\.(md|markdown)$/i, ""), text, name, images)];
-      }
-      planAction(planId, (plan) =>
-        sets.reduce((p, set) => addPractice(p, dayId, set, attemptsRef.current), plan),
-      );
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
   function persistPlan(record: StudyPlanRecord) {
     let checkpoint;
     try {
@@ -573,15 +473,6 @@ export default function ExamApp({
       });
     return operation;
   }
-  function planAction(planId: string, change: (plan: StudyPlanRecord) => StudyPlanRecord) {
-    try {
-      const plan = plansRef.current.find((p) => p.id === planId);
-      if (!plan) throw new Error("Study plan not found");
-      void persistPlan(change(plan)).catch(() => {});
-    } catch (error) {
-      setError(errorText(error));
-    }
-  }
   function openAttempt(attempt: AttemptRecord) {
     solutionsRef.current = [];
     setSolutions([]);
@@ -592,10 +483,11 @@ export default function ExamApp({
       session = recordIntegrity(session, attempt.exam.exam.rules, "tab_visible");
     void persist({ ...attempt, session }).catch(() => {});
   }
-  async function startStudy(planId: string, dayId: string) {
+  async function startExam(dayId: string) {
     setBusy(true);
     try {
-      const plan = plansRef.current.find((p) => p.id === planId)!;
+      const plan = plansRef.current.find((p) => p.id === planId);
+      if (!plan) throw new Error("This paper's plan is unavailable.");
       const attempt = prepareStudyAttempt(plan, dayId, attemptsRef.current);
       openAttempt(attempt);
       await saveQueue.current;
@@ -605,28 +497,33 @@ export default function ExamApp({
       setBusy(false);
     }
   }
-  async function rewriteStudy(planId: string, dayId: string, exam?: ExamRecord, files?: File[]) {
+  /**
+   * A new paper after the attempts ran out: the file's current questions,
+   * under the rules the first paper was given (rules never change mid-plan).
+   * It must still pass the rewrite rules (new questions, enough hard ones).
+   */
+  async function takeEditedPaper(dayId: string) {
     setBusy(true);
     try {
-      const plan = plansRef.current.find((p) => p.id === planId)!;
-      let imported: ExamRecord[] | undefined;
-      if (files && plan.setup) {
-        // Same rules as the first paper; only the file's # Exam part is used.
-        const { name, text, images } = await examUpload(files),
-          id = `${plan.plan.days[0].examId}-${plan.days[dayId].cycles.length + 1}`;
-        imported = [readExamFile(plan.setup, id, text, name, images).exam];
-      } else if (files) imported = (await readBundle(files)).exams;
-      if (imported && imported.length !== 1)
-        throw new Error("Select exactly one replacement exam with its companion files.");
-      const replacement = exam ?? imported?.[0];
-      if (!replacement) throw new Error("Choose a replacement paper");
-      const next = await attachRewrite(plan, dayId, replacement, attemptsRef.current);
-      // A configured exam's paper lives in its plan, not in the exam library.
-      if (imported && !plan.setup) {
-        await saveExam(replacement);
-        setLibrary((old) => [...old.filter((e) => e.id !== replacement.id), replacement]);
-      }
-      await persistPlan(next);
+      const plan = plansRef.current.find((p) => p.id === planId);
+      if (!plan?.setup) throw new Error("This paper's plan is unavailable.");
+      const id = `${plan.plan.days[0].examId}-${plan.days[dayId].cycles.length + 1}`,
+        replacement = readExamFile(
+          plan.setup,
+          id,
+          paper.content,
+          paper.name,
+          imagesRef.current,
+        ).exam,
+        revised =
+          plan.days[dayId].cycles.at(-1)?.revisionCompletedAt !== undefined
+            ? plan
+            : completeRevision(plan, dayId, attemptsRef.current),
+        next = await attachRewrite(revised, dayId, replacement, attemptsRef.current);
+      const fingerprint =
+        rules.kind === "found" ? sourceFingerprint(rules.file.content, paper.content) : "";
+      await persistPlan({ ...next, source: { fileId: paper.id, fingerprint } });
+      setSync({ kind: "ok" });
       setError("");
     } catch (error) {
       setError(errorText(error));
@@ -634,7 +531,7 @@ export default function ExamApp({
       setBusy(false);
     }
   }
-  /** Open an attempt straight at its answer review (Step 4, or a failed try). */
+  /** Open a submitted attempt straight at its answer review. */
   function reviewAttempt(attempt: AttemptRecord) {
     try {
       openAttempt({
@@ -645,56 +542,17 @@ export default function ExamApp({
       setError(errorText(e));
     }
   }
-  async function loadDemo() {
-    setBusy(true);
-    try {
-      const fixture = (await import("../../../exams/gate-2027-da/demo-session.json"))
-          .default as Session,
-        exam = library.find((e) => e.id === fixture.examId);
-      if (!exam) throw new Error("Demo exam is unavailable");
-      const session = { ...fixture, id: crypto.randomUUID(), demo: true };
-      solutionsRef.current = [];
-      setSolutions([]);
-      await persist({ id: session.id, exam, session });
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
   const session = current?.session,
     active = session?.phase === "in_progress",
-    immersive = active || session?.phase === "instructions" || !!practicing;
+    immersive = active || session?.phase === "instructions";
   const studyRecord = current?.study
     ? plans.find((p) => p.id === current.study!.planId)
     : undefined;
   const studyDays = studyRecord ? studyProgress(studyRecord, attempts) : [],
     studyIndex = current?.study ? studyDays.findIndex((d) => d.id === current.study!.dayId) : -1,
     studyDay = studyIndex >= 0 ? studyDays[studyIndex] : undefined;
-  // Leaving a session, practice or report returns to the one workspace, which
-  // re-selects the current topic on its own.
-  const go = (_target?: "study" | "library") => {
-    clearCurrent();
-    setPracticing(null);
-  };
-  const practicePlan = practicing && plans.find((p) => p.id === practicing.planId),
-    practiceDay = practicePlan?.days[practicing!.dayId],
-    practiceTitle = practicePlan?.plan.days.find((d) => d.id === practicing!.dayId)?.title ?? "";
-
-  // The one "Continue" banner resumes an unfinished exam. The current topic is
-  // already highlighted and selected in the workspace, so it needs no card.
-  let continueItem: ContinueItem | undefined;
-  const unfinished = attempts
-    .filter((a) => a.session.phase === "in_progress" && !a.session.demo)
-    .sort((a, b) => b.session.createdAt - a.session.createdAt)[0];
-  if (unfinished)
-    continueItem = {
-      label: "In progress",
-      title: unfinished.exam.exam.rules.meta.name,
-      meta: `Started ${formatDateTime(unfinished.session.startedAt ?? unfinished.session.createdAt)}`,
-      cta: "Resume exam",
-      run: () => openAttempt(unfinished),
-    };
+  // Leaving a session or report returns to the paper.
+  const backToPaper = clearCurrent;
 
   const retryAction =
     current || storageFailed ? (
@@ -720,240 +578,307 @@ export default function ExamApp({
       </Button>
     ) : null;
 
-  useEffect(() => {
-    onImmersive(immersive);
-    return () => onImmersive(false);
-  }, [immersive, onImmersive]);
-  return (
-    <div className="exam-app" data-immersive={immersive}>
-      {!ready ? (
-        <div className="ex-page" role="status" aria-busy="true">
-          <div className="ex-loading">
-            <Skeleton height={32} width={220} />
-            <p className="ex-small">
-              Opening exam storage… If this takes a while, close any other Exam Workspaces tab.
-            </p>
-            <Skeleton height={120} />
-            <Skeleton height={120} />
-          </div>
-        </div>
-      ) : (
-        <fieldset disabled={busy || storageFailed} className="exam-root-fieldset">
-          {practicing && practicePlan && practiceDay ? (
-            <PracticeScreen
-              title={practiceTitle}
-              sets={practiceDay.practice?.sets ?? []}
-              answers={practiceDay.practice?.answers ?? {}}
-              onAnswer={(setId, questionId, response: Response) =>
-                planAction(practicing.planId, (plan) =>
-                  answerPractice(
-                    plan,
-                    practicing.dayId,
-                    setId,
-                    questionId,
-                    response,
-                    attemptsRef.current,
-                  ),
-                )
-              }
-              onExit={() => go("study")}
-            />
-          ) : !current ? (
-            <ExamWorkspace
-              plans={plans}
-              attempts={attempts}
-              library={library}
-              continueItem={continueItem}
-              dev={dev}
-              onCreateExam={createExam}
-              onUploadExamFile={(planId, files) => void uploadExamFile(planId, files)}
-              onImportExample={importExample}
-              onDownloadExample={() => void downloadExample()}
-              onTask={(planId, dayId, taskId, checked) =>
-                planAction(planId, (plan) =>
-                  updateStudyTask(plan, dayId, taskId, checked, attemptsRef.current),
-                )
-              }
-              onNote={(planId, dayId, note) =>
-                planAction(planId, (plan) =>
-                  updateStudyNote(plan, dayId, note, attemptsRef.current),
-                )
-              }
-              onLearned={(planId, dayId) =>
-                planAction(planId, (plan) => markLearned(plan, dayId, attemptsRef.current))
-              }
-              onPractice={(planId, dayId) => setPracticing({ planId, dayId })}
-              onAddPractice={(planId, dayId, files) => void addPracticeFiles(planId, dayId, files)}
-              onRevision={(planId, dayId) =>
-                planAction(planId, (plan) => completeRevision(plan, dayId, attemptsRef.current))
-              }
-              onStart={(planId, dayId) => void startStudy(planId, dayId)}
-              onRewrite={(planId, dayId, exam) => void rewriteStudy(planId, dayId, exam)}
-              onRewriteFiles={(planId, dayId, files) =>
-                void rewriteStudy(planId, dayId, undefined, files)
-              }
-              onOpenAttempt={openAttempt}
-              onReview={reviewAttempt}
-              onStartExam={(exam) => void choose(exam)}
-              onImportFiles={(files) => void importAll(files)}
-              onLoadDemo={() => void loadDemo()}
-            />
-          ) : session!.phase === "instructions" ? (
-            <InstructionsScreen
-              record={current.exam}
-              ack={ack}
-              busy={busy}
-              dev={dev}
-              exitLabel={current.study ? "Back to study plan" : "Back to library"}
-              onAck={setAck}
-              onStart={(scale) => void start(scale)}
-              onExit={() => go(current.study ? "study" : "library")}
-            />
-          ) : active ? (
-            <ExamScreen
-              exam={current.exam.exam}
-              assets={current.exam}
-              session={session!}
-              now={now}
-              saveState={saveState}
-              onAnswer={(v) =>
-                update((s, a) =>
-                  setAnswer(
-                    s,
-                    a.exam.exam.rules,
-                    a.exam.exam.paper.find((q) => q.id === s.currentId)!,
-                    v,
-                  ),
-                )
-              }
-              onNavigate={(id) =>
-                update((s, a) => navigate(s, a.exam.exam.rules, a.exam.exam.paper, id))
-              }
-              onMark={() =>
-                update((s, a) => {
-                  const marked = markQuestion(
-                      s,
-                      a.exam.exam.rules,
-                      !questionState(s, s.currentId).marked,
-                    ),
-                    id = s.order[s.order.indexOf(s.currentId) + 1];
-                  if (!id) return marked;
-                  try {
-                    return navigate(marked, a.exam.exam.rules, a.exam.exam.paper, id);
-                  } catch {
-                    return marked;
-                  }
-                })
-              }
-              onClear={() =>
-                update((s, a) =>
-                  setAnswer(
-                    s,
-                    a.exam.exam.rules,
-                    a.exam.exam.paper.find((q) => q.id === s.currentId)!,
-                    null,
-                  ),
-                )
-              }
-              onSubmit={() => update((s) => submitSession(s))}
-              onFinishSection={() =>
-                update((s, a) => finishSection(s, a.exam.exam.rules, a.exam.exam.paper))
-              }
-              onPause={() =>
-                update((s, a) =>
-                  s.pausedAt === undefined
-                    ? pauseSession(s, a.exam.exam.rules)
-                    : unpauseSession(s, a.exam.exam.rules),
-                )
-              }
-              onConfidence={(c) =>
-                update((s, a) => setConfidence(s, a.exam.exam.rules, s.currentId, c))
-              }
-            />
-          ) : session!.phase === "review" && current.analysis && solutions.length ? (
-            <ReviewScreen
-              attempt={current}
-              solutions={solutions}
-              dev={dev}
-              onBack={() => update((s) => ({ ...s, phase: "submitted" }))}
-              onFinish={
-                studyDay?.status === "passed" && !studyDay.steps.review
-                  ? () => {
-                      const { planId, dayId } = current.study!;
-                      planAction(planId, (plan) => markReviewed(plan, dayId, attemptsRef.current));
-                      go("study");
-                    }
-                  : undefined
-              }
-            />
-          ) : session!.phase === "submitted" && current.analysis ? (
-            <ResultScreen
-              attempt={current}
-              studyDay={studyDay}
-              dev={dev}
-              onStudyPlan={() => go("study")}
-              onReview={() => update((s, a) => openReview(s, a.exam.exam.rules))}
-            />
-          ) : (
-            <div className="ex-page" role="status">
-              <div className="ex-stack" style={{ gap: 16, maxWidth: 560 }}>
-                <h1>Submission saved</h1>
-                <p className="ex-muted">
-                  {error
-                    ? "Grading couldn't finish. Your answers are safe."
-                    : "Checking your answers…"}
-                </p>
-                {!error && <Skeleton height={8} width={240} />}
-                <div className="ex-row">
-                  <Button onClick={() => setRetry((n) => n + 1)}>Retry grading</Button>
-                </div>
-                {error && (
-                  <label className="ex-field" style={{ fontWeight: 500 }}>
-                    Replace a malformed solutions file
-                    <input
-                      className="ex-input"
-                      style={{ paddingTop: 10 }}
-                      type="file"
-                      accept=".md"
-                      aria-label="Replace solutions file"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0],
-                          record = currentRef.current;
-                        if (!file || !record || record.session.phase !== "submitting") return;
-                        solutionsRef.current = [];
-                        setSolutions([]);
-                        setError("");
-                        void persist({
-                          ...record,
-                          exam: { ...record.exam, solutionFile: file, solutionUrl: undefined },
-                        }).catch(() => {});
-                      }}
-                    />
-                  </label>
-                )}
-              </div>
-            </div>
-          )}
-        </fieldset>
-      )}
-      <ToastRegion raised={active}>
-        {error && (
-          <Toast
-            actions={
-              <>
-                {retryAction}
-                {!storageFailed && (
-                  <Button variant="ghost" onClick={() => setError("")}>
-                    Dismiss
-                  </Button>
-                )}
-              </>
-            }
-          >
-            {error}
-          </Toast>
+  const paperRecord = plans.find((p) => p.id === planId);
+  const item = paperRecord ? topicList([paperRecord], attempts)[0] : undefined;
+  const immersiveView = !!current;
+
+  let panel: ReactNode;
+  if (rules.kind === "missing" || rules.kind === "ambiguous")
+    panel = (
+      <EmptyState
+        icon={<FileCog size={24} />}
+        title={
+          rules.kind === "ambiguous"
+            ? "Choose this paper's rules"
+            : rules.tagged
+              ? "This paper's rules are missing"
+              : "This paper needs rules"
+        }
+        actions={<RulesPicker rulesets={rulesets} onUse={onUseRules} onCreate={onCreateRules} />}
+      >
+        {rules.kind === "ambiguous" ? (
+          <>
+            {rules.files.map((f) => f.name).join(", ")} could all apply. Pick one and the paper will
+            name it.
+          </>
+        ) : rules.tagged ? (
+          <>
+            It uses <code>{rules.tagged}</code>, which isn't in this workspace. Restore it from the
+            Bin, or pick other rules.
+          </>
+        ) : (
+          <>
+            Time, pass mark, attempts and marking come from a ruleset. Pick one, or start a new one
+            and adjust it in Settings ▸ Exam rules.
+          </>
         )}
-      </ToastRegion>
+      </EmptyState>
+    );
+  else if (sync?.kind === "error")
+    panel = (
+      <section className="ex-surface xp-step-panel xf-problems" role="alert">
+        <p className="xf-problems-title">
+          <CircleAlert size={16} aria-hidden="true" /> This exam can't open yet
+        </p>
+        <p className="xf-problems-list">{sync.message}</p>
+        <div className="ex-row">
+          <Button onClick={() => onOpenRules(rules.file.id)}>Edit {rules.file.name}</Button>
+        </div>
+      </section>
+    );
+  else if (!item || !sync)
+    panel = (
+      <div className="ex-stack" role="status" aria-busy="true" style={{ gap: 16 }}>
+        <Skeleton height={56} />
+        <Skeleton height={160} />
+      </div>
+    );
+  else
+    panel = (
+      <>
+        <p className="ex-meta tabular xf-facts">
+          {paperRecord?.setup &&
+            setupFacts(paperRecord.setup).map((fact) => <span key={fact}>{fact}</span>)}
+          <span>
+            Rules:{" "}
+            <LinkButton onClick={() => onOpenRules(rules.file.id)}>{rules.file.name}</LinkButton>
+          </span>
+        </p>
+        {sync.kind === "pinned" && (
+          <p className="ex-small xf-pinned" role="note">
+            Edited since your first attempt. Scores and attempt limits keep the version you started
+            with; to start over with these files, duplicate the paper.
+          </p>
+        )}
+        <ExamPanel
+          item={item}
+          paperName={paper.name}
+          onStart={() => void startExam(item.topic.id)}
+          onUseEditedPaper={() => void takeEditedPaper(item.topic.id)}
+          onOpenAttempt={openAttempt}
+          onReview={reviewAttempt}
+        />
+      </>
+    );
+
+  const immersiveContent = !current ? null : session!.phase === "instructions" ? (
+    <InstructionsScreen
+      record={current.exam}
+      ack={ack}
+      busy={busy}
+      dev={dev}
+      exitLabel="Back to paper"
+      onAck={setAck}
+      onStart={(scale) => void start(scale)}
+      onExit={backToPaper}
+    />
+  ) : active ? (
+    <ExamScreen
+      exam={current.exam.exam}
+      assets={current.exam}
+      session={session!}
+      now={now}
+      saveState={saveState}
+      onAnswer={(v) =>
+        update((s, a) =>
+          setAnswer(
+            s,
+            a.exam.exam.rules,
+            a.exam.exam.paper.find((q) => q.id === s.currentId)!,
+            v,
+          ),
+        )
+      }
+      onNavigate={(id) => update((s, a) => navigate(s, a.exam.exam.rules, a.exam.exam.paper, id))}
+      onMark={() =>
+        update((s, a) => {
+          const marked = markQuestion(s, a.exam.exam.rules, !questionState(s, s.currentId).marked),
+            id = s.order[s.order.indexOf(s.currentId) + 1];
+          if (!id) return marked;
+          try {
+            return navigate(marked, a.exam.exam.rules, a.exam.exam.paper, id);
+          } catch {
+            return marked;
+          }
+        })
+      }
+      onClear={() =>
+        update((s, a) =>
+          setAnswer(
+            s,
+            a.exam.exam.rules,
+            a.exam.exam.paper.find((q) => q.id === s.currentId)!,
+            null,
+          ),
+        )
+      }
+      onSubmit={() => update((s) => submitSession(s))}
+      onFinishSection={() =>
+        update((s, a) => finishSection(s, a.exam.exam.rules, a.exam.exam.paper))
+      }
+      onPause={() =>
+        update((s, a) =>
+          s.pausedAt === undefined
+            ? pauseSession(s, a.exam.exam.rules)
+            : unpauseSession(s, a.exam.exam.rules),
+        )
+      }
+      onConfidence={(c) => update((s, a) => setConfidence(s, a.exam.exam.rules, s.currentId, c))}
+    />
+  ) : session!.phase === "review" && current.analysis && solutions.length ? (
+    <ReviewScreen
+      attempt={current}
+      solutions={solutions}
+      dev={dev}
+      onBack={() => update((s) => ({ ...s, phase: "submitted" }))}
+    />
+  ) : session!.phase === "submitted" && current.analysis ? (
+    <ResultScreen
+      attempt={current}
+      studyDay={studyDay}
+      dev={dev}
+      onStudyPlan={backToPaper}
+      onReview={() => update((s, a) => openReview(s, a.exam.exam.rules))}
+    />
+  ) : (
+    <div className="ex-page" role="status">
+      <div className="ex-stack" style={{ gap: 16, maxWidth: 560 }}>
+        <h1>Submission saved</h1>
+        <p className="ex-muted">
+          {error ? "Grading couldn't finish. Your answers are safe." : "Checking your answers…"}
+        </p>
+        {!error && <Skeleton height={8} width={240} />}
+        <div className="ex-row">
+          <Button onClick={() => setRetry((n) => n + 1)}>Retry grading</Button>
+        </div>
+        {error && (
+          <label className="ex-field" style={{ fontWeight: 500 }}>
+            Replace a malformed solutions file
+            <input
+              className="ex-input"
+              style={{ paddingTop: 10 }}
+              type="file"
+              accept=".md"
+              aria-label="Replace solutions file"
+              onChange={(event) => {
+                const file = event.target.files?.[0],
+                  record = currentRef.current;
+                if (!file || !record || record.session.phase !== "submitting") return;
+                solutionsRef.current = [];
+                setSolutions([]);
+                setError("");
+                void persist({
+                  ...record,
+                  exam: { ...record.exam, solutionFile: file, solutionUrl: undefined },
+                }).catch(() => {});
+              }}
+            />
+          </label>
+        )}
+      </div>
     </div>
+  );
+
+  const toasts = (
+    <ToastRegion raised={active}>
+      {error && (
+        <Toast
+          actions={
+            <>
+              {retryAction}
+              {!storageFailed && (
+                <Button variant="ghost" onClick={() => setError("")}>
+                  Dismiss
+                </Button>
+              )}
+            </>
+          }
+        >
+          {error}
+        </Toast>
+      )}
+    </ToastRegion>
+  );
+
+  if (!ready)
+    return (
+      <div className="exam-app exam-app--embedded" role="status" aria-busy="true">
+        <div className="ex-loading">
+          <Skeleton height={56} />
+          <p className="ex-small">
+            Opening exam storage… If this takes a while, close this workspace in other tabs or
+            panes.
+          </p>
+          <Skeleton height={160} />
+        </div>
+        {toasts}
+      </div>
+    );
+  // A session, result or review takes the whole screen, above the reader,
+  // the way the exam hall does; the paper's panel stays underneath.
+  return (
+    <>
+      <div className="exam-app exam-app--embedded">
+        <fieldset disabled={busy || storageFailed || immersiveView} className="exam-root-fieldset">
+          {panel}
+        </fieldset>
+        {!immersiveView && toasts}
+      </div>
+      {immersiveView &&
+        createPortal(
+          <div className="exam-app exam-overlay" data-immersive={immersive}>
+            <fieldset disabled={busy || storageFailed} className="exam-root-fieldset">
+              {immersiveContent}
+            </fieldset>
+            {toasts}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+/**
+ * Choose the ruleset a paper runs under. Choosing writes its name into the
+ * paper's header, the same link the New exam dialog makes.
+ */
+function RulesPicker({
+  rulesets,
+  onUse,
+  onCreate,
+}: {
+  rulesets: { name: string; title: string }[];
+  onUse: (rulesName: string) => void;
+  onCreate: () => void;
+}) {
+  const [chosen, setChosen] = useState(rulesets[0]?.name ?? "");
+  const value = rulesets.some((r) => r.name === chosen) ? chosen : (rulesets[0]?.name ?? "");
+  if (!rulesets.length)
+    return (
+      <Button variant="primary" onClick={onCreate}>
+        New ruleset
+      </Button>
+    );
+  return (
+    <>
+      <select
+        className="ex-select"
+        aria-label="Ruleset"
+        value={value}
+        onChange={(e) => setChosen(e.target.value)}
+      >
+        {rulesets.map((r) => (
+          <option key={r.name} value={r.name}>
+            {r.title === r.name.replace(/\.xrule$/i, "") ? r.name : `${r.title} (${r.name})`}
+          </option>
+        ))}
+      </select>
+      <Button variant="primary" onClick={() => onUse(value)}>
+        Use these rules
+      </Button>
+      <Button variant="ghost" onClick={onCreate}>
+        New ruleset
+      </Button>
+    </>
   );
 }

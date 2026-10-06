@@ -6,6 +6,7 @@
  * those facts are worded and when they are worth showing.
  */
 import type { Ruleset } from "../schema.ts";
+import type { ExamSetup } from "../exam-setup.ts";
 import type { Question, QuestionType } from "../parser.ts";
 import { questionState, type Session } from "../session.ts";
 
@@ -44,6 +45,24 @@ export function formatDuration(totalSeconds: number): string {
   const h = Math.floor(s / 3600),
     m = Math.round((s % 3600) / 60);
   return m === 60 ? `${h + 1}h` : m ? `${h}h ${m}m` : `${h}h`;
+}
+/**
+ * A variation's rules as short facts: "10m", "4 questions", "70% to pass",
+ * "3 attempts", marking. Shared by the upload step and the `.xrule` preview.
+ */
+export function setupFacts(setup: ExamSetup): string[] {
+  const n = setup.maxAttempts;
+  return [
+    formatDuration(setup.durationMinutes * 60),
+    ...(setup.questionCount ? [`${setup.questionCount} questions`] : []),
+    `${setup.passPercentage}% to pass`,
+    `${n} attempt${n === 1 ? "" : "s"}`,
+    setup.rootRules
+      ? "Marking from exam structure"
+      : setup.mcqPenalty === "none"
+        ? "No negative marking"
+        : `−${setup.mcqPenalty === "third" ? "1/3" : "1/4"} for a wrong MCQ`,
+  ];
 }
 /** "03:59:12" for the exam clock (tabular digits, fixed width). */
 export function formatClock(totalSeconds: number): string {
@@ -404,7 +423,9 @@ const quote = (field: string) => `“${field}”`;
 /** "plan.json.days.0.title" → { file: "plan.json", field: "days[0].title" }. */
 function splitLocation(location: string): { file?: string; line?: string; field?: string } {
   // A root-level schema issue arrives as "file.json." (empty path).
-  const m = /^(.*?\.(?:json|md))(?::(\d+))?(?:\.(.+))?$/.exec(location.replace(/\.$/, ""));
+  const m = /^(.*?\.(?:json|md|xam|xrule))(?::(\d+))?(?:\.(.+))?$/.exec(
+    location.replace(/\.$/, ""),
+  );
   const field = (m ? m[3] : location)?.replace(/\.(\d+)(?=\.|$)/g, "[$1]");
   return m ? { file: m[1], line: m[2], field: field || undefined } : { field };
 }

@@ -21,6 +21,10 @@ const kindByExtension: Record<string, DocumentKind> = {
   xls: "spreadsheet",
   csv: "csv",
   json: "json",
+  // The exam formats; see documentation/exam-files.md.
+  xam: "exam",
+  xrule: "exam-rules",
+  xp: "practice",
   ppt: "presentation",
   pptx: "presentation",
   gdoc: "google-doc",
@@ -91,14 +95,27 @@ export function isTextKind(kind: DocumentKind) {
     "google-doc",
     "google-slide",
     "html",
+    "exam",
+    "exam-rules",
+    "practice",
   ].includes(kind);
 }
 
 /** Kinds with a native editor; boards are edited directly on their canvas. */
 export function isEditableKind(kind: DocumentKind) {
-  return ["markdown", "mermaid", "text", "json", "html", "csv", "spreadsheet", "docx"].includes(
-    kind,
-  );
+  return [
+    "markdown",
+    "mermaid",
+    "text",
+    "json",
+    "html",
+    "csv",
+    "spreadsheet",
+    "docx",
+    "exam",
+    "exam-rules",
+    "practice",
+  ].includes(kind);
 }
 
 /**
@@ -185,6 +202,9 @@ export function fileLabel(kind: DocumentKind) {
       video: "Video",
       audio: "Audio",
       html: "HTML",
+      exam: "Exam questions",
+      "exam-rules": "Exam rules",
+      practice: "Practice questions",
       unknown: "File",
     } as const
   )[kind];

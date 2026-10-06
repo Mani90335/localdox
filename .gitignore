@@ -20,6 +20,9 @@ dist-ssr
 coverage/
 graphify-out/
 .firebase/
+# Keep these root data folders out of Git without excluding src/**/docs or exams.
+/exams/
+/docs/
 
 # Wrangler / Cloudflare
 .wrangler/

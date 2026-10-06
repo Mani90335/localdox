@@ -1,10 +1,10 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ListTree, Network } from "lucide-react";
 import { DISCARD_PROMPT } from "@/lib/markdown/document-utils";
 import { ESCAPE_DEPTH, useNavEscape } from "@/hooks/use-nav-history";
 import { buildMindMap } from "@/services/mindmap";
 import { JsonTree } from "../JsonTree";
-import { Loading, ViewerFrame, ViewerMasthead } from "./shared";
+import { Loading, ViewerFrame, ViewerMasthead, stripExt } from "./shared";
 import type { Props } from "./shared";
 
 // Only readers who actually open a mind map pay for the layout engine and its
@@ -22,7 +22,14 @@ export function JsonViewer({
   onOpenPalette,
   startInEditFileId,
   onStartInEditConsumed,
-}: Props) {
+  kindLabel = "JSON",
+  summary,
+}: Props & {
+  /** For JSON-based formats (`.xrule`) that reuse this viewer. */
+  kindLabel?: string;
+  /** What the format's own reader makes of the content, shown above the tree. */
+  summary?: ReactNode;
+}) {
   const [mode, setMode] = useState<"tree" | "mindmap">("tree");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(file.content);
@@ -122,7 +129,7 @@ export function JsonViewer({
   // draw all return null, and the action is simply not offered — the viewer
   // below is unchanged in every one of those cases.
   const mindMap = useMemo(
-    () => buildMindMap(file.content, file.name.replace(/\.json$/i, "")),
+    () => buildMindMap(file.content, stripExt(file.name)),
     [file.content, file.name],
   );
 
@@ -215,13 +222,15 @@ export function JsonViewer({
         <div className="mx-auto max-w-6xl px-4 py-6 md:px-8">
           <ViewerMasthead
             file={file}
-            kindLabel="JSON"
+            kindLabel={kindLabel}
             meta={
               parsed && !editing
                 ? `${lines.length.toLocaleString()} ${lines.length === 1 ? "line" : "lines"}`
                 : undefined
             }
           />
+          {/* Describes the saved file, so it steps aside while a draft is open. */}
+          {!editing && summary}
           {editing ? (
             <div>
               <textarea

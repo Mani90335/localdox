@@ -86,19 +86,28 @@ export function WorkspaceMenu({ workspaces, currentId, onSwitch, variant = "pill
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
+    const onDown = (e: PointerEvent) => {
       const t = e.target as Node;
       if (rootRef.current?.contains(t) || menuRef.current?.contains(t)) return;
       setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onDown);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      rootRef.current?.querySelector("button")?.focus();
+    };
+    window.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  const positioned = pos !== null;
+  useEffect(() => {
+    if (open && positioned) menuRef.current?.querySelector("button")?.focus();
+  }, [open, positioned]);
 
   const current = workspaces.find((w) => w.id === currentId);
 
@@ -109,6 +118,7 @@ export function WorkspaceMenu({ workspaces, currentId, onSwitch, variant = "pill
           onClick={() => setOpen((o) => !o)}
           className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-xs font-semibold uppercase text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           aria-label="Workspaces"
+          aria-expanded={open}
           title={current?.name ?? "Workspace"}
         >
           {initials(current?.name ?? "Localdox")}
@@ -116,7 +126,8 @@ export function WorkspaceMenu({ workspaces, currentId, onSwitch, variant = "pill
       ) : (
         <button
           onClick={() => setOpen((o) => !o)}
-          className="inline-flex h-8 max-w-xs items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground coarse:min-h-11"
+          aria-expanded={open}
           title="Workspaces"
         >
           <FolderOpen className="h-4 w-4 shrink-0" />
@@ -131,8 +142,17 @@ export function WorkspaceMenu({ workspaces, currentId, onSwitch, variant = "pill
         createPortal(
           <div
             ref={menuRef}
-            style={{ position: "fixed", top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width }}
-            className="z-(--z-dropdown) rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-2xl"
+            role="group"
+            aria-label="Switch workspace"
+            data-sidebar-menu-panel
+            style={{
+              position: "fixed",
+              top: pos.top,
+              bottom: pos.bottom,
+              left: pos.left,
+              width: pos.width,
+            }}
+            className="z-(--z-menu) rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-2xl"
           >
             <WorkspaceStrip
               workspaces={workspaces}
@@ -143,7 +163,7 @@ export function WorkspaceMenu({ workspaces, currentId, onSwitch, variant = "pill
               }}
             />
           </div>,
-          document.body,
+          rootRef.current?.closest('[role="dialog"]') ?? document.body,
         )}
     </div>
   );

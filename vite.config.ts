@@ -44,9 +44,11 @@ export default defineConfig({
         "src/components/docs/editor/MarkdownEditor.tsx",
         "src/components/docs/viewer/DocumentViewer.tsx",
         "src/components/docs/pages/SettingsPage.tsx",
-        // Exam Workspaces are a core offline feature.
+        // Exam Workspaces are a core offline feature, and so are their files.
         "src/services/exams/ExamApp.tsx",
-        "plans/example-exam.md",
+        "src/components/docs/viewer/document-viewer/ExamFileViewer.tsx",
+        "src/components/docs/viewer/document-viewer/ExamRulesViewer.tsx",
+        "src/components/docs/viewer/document-viewer/PracticeFileViewer.tsx",
         // Split view's panes.
         "src/components/ui/resizable.tsx",
         // Search's main-thread fallback, for when the worker can't start.

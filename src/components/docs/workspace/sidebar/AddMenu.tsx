@@ -1,9 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { FilePlus, FolderPlus, PenTool, Plus, Upload, type LucideIcon } from "lucide-react";
+import {
+  FilePlus,
+  FileCheck,
+  FileQuestion,
+  FolderPlus,
+  PenTool,
+  Plus,
+  Upload,
+  type LucideIcon,
+} from "lucide-react";
 import { isOutsideMenu, MenuItem, MenuPanel } from "./menu-primitives";
 
 /**
- * The `+` menu: create a file, folder or board, or upload. Shared by the
+ * The `+` menu: create a file, folder, board, exam or practice, or upload. Shared by the
  * expanded sidebar's list header and the collapsed rail, so both offer the
  * same options.
  */
@@ -12,6 +21,8 @@ export function AddMenu({
   onCreateMermaid,
   onCreateBoard,
   onCreateFolder,
+  onCreateExam,
+  onCreatePractice,
   onUpload,
   align = "right",
   className,
@@ -21,6 +32,10 @@ export function AddMenu({
   onCreateMermaid?: () => void;
   onCreateBoard?: () => void;
   onCreateFolder?: () => void;
+  /** Opens the New exam dialog, where the paper is tagged with a ruleset. */
+  onCreateExam?: () => void;
+  /** A new `.xp` practice file: questions checked as they are answered. */
+  onCreatePractice?: () => void;
   onUpload: () => void;
   align?: "left" | "right";
   className?: string;
@@ -32,6 +47,10 @@ export function AddMenu({
     onCreateFile && { label: "File", icon: FilePlus, run: onCreateFile },
     onCreateFolder && { label: "Folder", icon: FolderPlus, run: onCreateFolder },
     onCreateBoard && { label: "Board", icon: PenTool, run: onCreateBoard },
+    // The same glyphs an `.xam` and an `.xp` carry in the list, so each tile
+    // and the file it makes are recognisably one thing.
+    onCreateExam && { label: "Exam", icon: FileQuestion, run: onCreateExam },
+    onCreatePractice && { label: "Practice", icon: FileCheck, run: onCreatePractice },
   ].filter((item): item is { label: string; icon: LucideIcon; run: () => void } => !!item);
 
   useEffect(() => {
@@ -66,15 +85,22 @@ export function AddMenu({
       {open && (
         <MenuPanel align={align}>
           {/* Two decisions, in the order a reader makes them: make something
-              new, or bring something in. The three things you can make are
-              peers, so they sit side by side as equal tiles rather than as a
-              list that implies an order of importance. */}
+              new, or bring something in. The things you can make are peers, so
+              they sit as equal tiles in a grid rather than as a list that
+              implies an order of importance. With all five, three columns put
+              the general kinds (file, folder, board) on one row and the study
+              pair (exam, practice) on the next; four across would crowd the
+              labels at the menu's width. */}
           {creates.length > 0 && (
             <>
               <p className="px-2 pb-2 pt-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Create
               </p>
-              <div className="grid grid-cols-3 gap-2" role="group" aria-label="Create">
+              <div
+                className={`grid gap-2 ${creates.length > 4 ? "grid-cols-3" : "grid-cols-2"}`}
+                role="group"
+                aria-label="Create"
+              >
                 {creates.map(({ label, icon: Icon, run }) => (
                   <button
                     key={label}
@@ -86,11 +112,7 @@ export function AddMenu({
                     aria-label={`New ${label.toLowerCase()}`}
                     className="flex flex-col items-center gap-2 rounded-lg border border-border/70 p-3 text-xs font-medium text-foreground transition-colors hover:border-border hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <Icon
-                      className="h-5 w-5 text-muted-foreground"
-                      strokeWidth={1.5}
-                      aria-hidden
-                    />
+                    <Icon className="h-5 w-5 text-muted-foreground" strokeWidth={1.5} aria-hidden />
                     {label}
                   </button>
                 ))}

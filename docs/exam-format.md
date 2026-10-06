@@ -1,12 +1,14 @@
 # Exam Session format (schema version 2)
 
-Open an **Exam Workspace** in Localdox, or use the compatibility link `/exams`. Create a GATE variation and upload one Markdown file, or import existing ruleset, paper, solutions and taxonomy files together through the Library. Data stays offline in the browser and is scoped to its owning workspace. See [Exam Workspaces](../documentation/exam-sessions.md) for workspace setup.
+> Exams are now two files in an Exam Workspace: a `.xam` paper and its `.xrule` rules. See [Exam files](../documentation/exam-files.md). The app no longer imports the multi-file format below (`.exam.json`, `.paper.md`, `.solutions.md`, `.taxonomy.json`). Its **ruleset reference still applies**: it is what an `.xrule`'s `rules` block contains.
+
+Data stays offline in the browser and is scoped to its owning workspace. See [Exam Workspaces](../documentation/exam-sessions.md) for workspace setup.
 
 For bundled content, add files to `exams/<exam-id>/` and rebuild. Vite discovers every `*.exam.json` automatically; no registry or engine code change is needed. Companion files must share a stem (`quiz.exam.json`, `quiz.paper.md`, `quiz.solutions.md`). Shared taxonomies live in `exams/taxonomies/`. Import also works without rebuilding. Taxonomy references resolve by their filename within the selected files; duplicate filenames are rejected. Reimporting an exam replaces its library entry; existing attempts retain their own immutable copy.
 
 The GATE sample follows the **recent GATE DA pattern**, not a verified 2027 specification. Its topic list is an approximation. **Verify both numbers and taxonomy against the official GATE 2027 brochure and syllabus**, and align the DA topics with the official syllabus before authoring a full paper. The 12-question sample uses `sampleMode: true`; composition warnings are expected.
 
-Study plans link exams into an ordered path where each day is learn → practice → exam → review. See [Study plans](study-plan-format.md) for the upload format, practice files and the revision workflow. Diagnostics (rules, reflection, weakness reports) still run in the engine for compatibility but are no longer shown; new exams can set `"diagnostics": { "enabled": false }`.
+A paper's attempts, pass and revision workflow are tracked per `.xam` file; practice is a separate `.xp` file (see [Exam and practice files](../documentation/exam-files.md)). Diagnostics (rules, reflection, weakness reports) still run in the engine for compatibility but are no longer shown; new exams can set `"diagnostics": { "enabled": false }`.
 
 ## Validation and sealed solutions
 

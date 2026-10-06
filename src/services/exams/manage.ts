@@ -106,7 +106,10 @@ export async function deleteExamFile(
       return true;
     },
   );
-  if (!done) throw new Error("Exam Workspaces is open in another tab. Close it, then try again.");
+  if (!done)
+    throw new Error(
+      "An exam paper is open in another tab. Close it or open another file, then try again.",
+    );
 }
 
 export async function removeExamWorkspace(workspaceId?: string): Promise<void> {
@@ -129,7 +132,9 @@ export async function removeExamWorkspace(workspaceId?: string): Promise<void> {
     },
   );
   if (!done)
-    throw new Error("This Exam Workspace is open in another tab. Close it, then try again.");
+    throw new Error(
+      "An exam paper in this workspace is open in another tab. Close it or open another file, then try again.",
+    );
 }
 
 /** Hold every known writer lock before clearing anything. */

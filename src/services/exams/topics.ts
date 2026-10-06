@@ -14,8 +14,7 @@ export interface TopicItem {
 
 /**
  * Every topic of every plan, newest plan first. A configured exam still waiting
- * for its file has no derived progress yet. Shared by the workspace sidebar and
- * the topic detail panel so both read the same list.
+ * for its file has no derived progress yet. A paper's plan has one topic.
  */
 export function topicList(plans: StudyPlanRecord[], attempts: AttemptRecord[]): TopicItem[] {
   return plans.flatMap((record) =>
@@ -33,14 +32,4 @@ export function topicList(plans: StudyPlanRecord[], attempts: AttemptRecord[]): 
           key: topicKey(record.id, topic.id),
         })),
   );
-}
-
-/** The step a topic sits on, as a sidebar status. */
-export function topicStatus(
-  p: DayProgress | undefined,
-): "done" | "current" | "attention" | "ready" {
-  if (!p) return "ready";
-  if (p.step === "done") return "done";
-  if (p.status === "revision_required") return "attention";
-  return "current";
 }

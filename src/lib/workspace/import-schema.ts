@@ -36,6 +36,9 @@ const DOCUMENT_KINDS = new Set<DocumentKind>([
   "video",
   "audio",
   "html",
+  "exam",
+  "exam-rules",
+  "practice",
   "unknown",
 ]);
 

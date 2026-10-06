@@ -1,10 +1,9 @@
 import gate from "./presets/gate.json" with { type: "json" };
 /**
- * A study-plan exam is set up in two steps. First its rules, from a short
- * form (`ExamSetup`); then one Markdown file holding its practice questions,
- * exam questions, keys and solutions. This module turns that pair into the
- * same `ExamRecord` and `PracticeSet` the engine already runs, so sessions,
- * scoring and the four-step plan need no second code path.
+ * An exam is two parts. First its rules, from a short form (`ExamSetup`, read
+ * from an `.xrule`); then one Markdown paper (`.xam`) holding its questions,
+ * keys and solutions. This module turns that pair into the `ExamRecord` the
+ * engine already runs, so sessions and scoring need no second code path.
  */
 import { z } from "zod";
 import {
@@ -16,18 +15,18 @@ import {
   type Ruleset,
 } from "./schema.ts";
 import { parseExamFile, type Question, type Solution } from "./parser.ts";
-import { practiceSet, type PracticeSet } from "./practice.ts";
 import { importSolutions, validateExam, validateSolutions } from "./validation.ts";
 import type { ExamRecord } from "./storage.ts";
 import { humanizeId } from "./ui/display.ts";
 
 export const examSetupSchema = z
   .object({
+    examTypeId: z.string().min(1).max(200).optional(),
     preset: z.literal("gate").optional(),
     rootRules: rulesetSchema.optional(),
     questionCount: z.number().int().min(1).max(500).optional(),
     name: z.string().trim().min(1, "Give the exam a name").max(160),
-    /** Shown in Step 1 (Learn): what to study before the exam. */
+    /** Shown on the paper above its Start button: what the exam covers. */
     summaryMd: z.string().max(20000).default(""),
     durationMinutes: z.number().int().min(1).max(600),
     passPercentage: z.number().min(0).max(100),
@@ -71,8 +70,8 @@ function fail(location: string, message: string): never {
 export function buildRuleset(setup: ExamSetup, id: string, paper: Question[]): Ruleset {
   if (setup.questionCount !== undefined && paper.length !== setup.questionCount)
     fail(
-      "exam.md",
-      `Expected ${setup.questionCount} exam questions, found ${paper.length}. Upload a paper matching this variation.`,
+      "exam.xam",
+      `Expected ${setup.questionCount} exam questions, found ${paper.length}. Make the paper and its rules' questionCount agree.`,
     );
   const root = setup.rootRules ?? (setup.preset === "gate" ? GATE_RULESET : undefined);
   if (root) {
@@ -129,8 +128,8 @@ export function buildRuleset(setup: ExamSetup, id: string, paper: Question[]): R
 
 /**
  * Exam solutions stay sealed until submission, so they are stored as their
- * own Markdown blob. Rebuilt from the parsed blocks: only this exam's keys,
- * without practice or trap tags. The fence outgrows any colons inside.
+ * own Markdown blob. Rebuilt from the parsed blocks: only the keys and
+ * explanations, without trap tags. The fence outgrows any colons inside.
  */
 function solutionsSource(solutions: Solution[]): string {
   return solutions
@@ -146,7 +145,6 @@ function solutionsSource(solutions: Solution[]): string {
 
 export interface ExamFileContent {
   exam: ExamRecord;
-  practice?: PracticeSet;
 }
 /** Images a text names, e.g. `![graph](graph.png)`. */
 const named = (texts: string[], images: Record<string, Blob>) => {
@@ -166,15 +164,15 @@ export function readExamFile(
   setup: ExamSetup,
   examId: string,
   source: string,
-  fileName = "exam.md",
+  fileName = "exam.xam",
   images: Record<string, Blob> = {},
-  now = Date.now(),
 ): ExamFileContent {
   const parsed = parseExamFile(source, fileName),
-    paper = parsed.exam.questions,
+    paper = parsed.questions,
     // Trap tags feed exam analytics, which configured exams do not run.
-    solutions = parsed.exam.solutions.map((s) => ({ ...s, distractors: [] }));
-  if (!paper.length) fail(fileName, "No exam questions. Add them under a # Exam heading.");
+    solutions = parsed.solutions.map((s) => ({ ...s, distractors: [] }));
+  if (!paper.length)
+    fail(fileName, "No exam questions. Add a :::question block and its :::solution.");
   const rules = buildRuleset(setup, examId, paper),
     issues: Issue[] = validateExam(rules, defaultTaxonomy, paper);
   const exam = { rules, taxonomy: defaultTaxonomy, paper, issues: [] as Issue[] };
@@ -191,63 +189,12 @@ export function readExamFile(
   // Grading re-reads this blob after submission; prove now that it parses.
   importSolutions(exam, sealed);
   const examAssets = named(textsOf(paper, solutions), images);
-  const record: ExamRecord = {
-    id: examId,
-    exam,
-    solutionFile: new Blob([sealed], { type: "text/markdown" }),
-    ...(examAssets ? { assets: examAssets } : {}),
-  };
-  const { questions: pq, solutions: ps } = parsed.practice;
-  if (!pq.length) return { exam: record };
-  const practice = practiceSet(
-    `${examId}-practice`,
-    "Practice",
-    pq,
-    ps,
-    fileName,
-    now,
-    named(textsOf(pq, ps), images),
-  );
-  return { exam: record, practice };
-}
-
-const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
-/** One `.md` file, plus any images it names. */
-export async function examUpload(files: File[]) {
-  const md = files.filter((f) => /\.(md|markdown)$/i.test(f.name)),
-    images = files.filter((f) => IMAGE.test(f.name)),
-    other = files.filter((f) => !md.includes(f) && !images.includes(f));
-  if (other.length)
-    throw new Error(
-      `Not sure what to do with ${other.map((f) => f.name).join(", ")}. Choose one .md file and any images it uses.`,
-    );
-  if (md.length !== 1) throw new Error("Choose one .md file (and any images it uses).");
   return {
-    name: md[0].name,
-    text: await md[0].text(),
-    images: Object.fromEntries(images.map((f) => [f.name, f as Blob])),
+    exam: {
+      id: examId,
+      exam,
+      solutionFile: new Blob([sealed], { type: "text/markdown" }),
+      ...(examAssets ? { assets: examAssets } : {}),
+    },
   };
-}
-
-/** "Add questions": the `# Practice` part of a file in the same format. */
-export function readPracticeFile(
-  id: string,
-  source: string,
-  fileName: string,
-  images: Record<string, Blob> = {},
-  now = Date.now(),
-): PracticeSet {
-  const { practice, exam } = parseExamFile(source, fileName);
-  if (exam.questions.length)
-    fail(fileName, "This file has exam questions. Add questions takes a # Practice part only.");
-  if (!practice.questions.length) fail(fileName, "No questions under a # Practice heading.");
-  return practiceSet(
-    id,
-    humanizeId(id),
-    practice.questions,
-    practice.solutions,
-    fileName,
-    now,
-    named(textsOf(practice.questions, practice.solutions), images),
-  );
 }

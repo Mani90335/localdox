@@ -76,7 +76,7 @@ export function ResultScreen({
               {studyDay!.passPercentage}% needed · {scoreText} marks
               {!passed &&
                 (studyDay!.status === "revision_required"
-                  ? " · No attempts left. Revise, then use a new paper."
+                  ? " · No attempts left. A new paper comes from the edited file."
                   : ` · ${plural(studyDay!.attemptsRemaining, "attempt")} left`)}
             </p>
           </div>
@@ -108,9 +108,8 @@ export function ResultScreen({
               Review answers &amp; solutions
             </Button>
           )}
-          {studyDay && <Button onClick={onStudyPlan}>Back to study plan</Button>}
+          {studyDay && <Button onClick={onStudyPlan}>Back to paper</Button>}
         </div>
-        {passed && <p className="ex-small">Step 4: go through the answers to finish this topic.</p>}
         {!solutionsReleased && (
           <p className="ex-small">
             {r.results.solutionsRelease === "never"
@@ -245,14 +244,11 @@ export function ReviewScreen({
   attempt,
   solutions,
   onBack,
-  onFinish,
   dev,
 }: {
   attempt: AttemptRecord;
   solutions: Solution[];
   onBack: () => void;
-  /** Step 4 of a study day: present when finishing the review completes the day. */
-  onFinish?: () => void;
   dev: boolean;
 }) {
   const { exam, session, analysis } = attempt,
@@ -356,13 +352,7 @@ export function ReviewScreen({
           })}
         </div>
         <div className="ex-row" style={{ marginTop: 32 }}>
-          {onFinish ? (
-            <Button variant="primary" onClick={onFinish}>
-              Finish review
-            </Button>
-          ) : (
-            <Button onClick={onBack}>Back to result</Button>
-          )}
+          <Button onClick={onBack}>Back to result</Button>
         </div>
       </div>
     </ExamAssets>

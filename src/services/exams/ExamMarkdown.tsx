@@ -41,7 +41,8 @@ export interface AssetSource {
   /** Bundled files, already served as URLs. */
   assetUrls?: Record<string, string>;
 }
-const AssetContext = createContext<(name: string) => string | undefined>(() => undefined);
+/** A file's URL; undefined when there is none, null while URLs are still being made. */
+const AssetContext = createContext<(name: string) => string | undefined | null>(() => undefined);
 const basename = (path: string) => decodeURIComponent(path.split(/[\\/]/).at(-1) ?? path);
 const IMAGE_TYPES: Record<string, string> = {
   png: "image/png",
@@ -59,7 +60,10 @@ function typed(name: string, blob: Blob): Blob {
 
 /** Makes a record's images resolvable by file name for everything inside. */
 export function ExamAssets({ source, children }: { source?: AssetSource; children: ReactNode }) {
-  const [urls, setUrls] = useState<Record<string, string>>({});
+  // Null until the first URLs exist: object URLs are made in an effect, and a
+  // first paint saying "not available" for an image that is about to appear
+  // reads as an error.
+  const [urls, setUrls] = useState<Record<string, string> | null>(null);
   useEffect(() => {
     const created = Object.fromEntries(
       Object.entries(source?.assets ?? {}).map(([name, blob]) => [
@@ -70,7 +74,7 @@ export function ExamAssets({ source, children }: { source?: AssetSource; childre
     setUrls({ ...(source?.assetUrls ?? {}), ...created });
     return () => Object.values(created).forEach((url) => URL.revokeObjectURL(url));
   }, [source]);
-  const resolve = useMemo(() => (name: string) => urls[basename(name)], [urls]);
+  const resolve = useMemo(() => (name: string) => (urls ? urls[basename(name)] : null), [urls]);
   return <AssetContext.Provider value={resolve}>{children}</AssetContext.Provider>;
 }
 
@@ -82,12 +86,14 @@ export function ExamAssets({ source, children }: { source?: AssetSource; childre
 function ExamImage({ src, alt }: { src?: string; alt?: string }) {
   const resolve = useContext(AssetContext),
     label = alt?.trim() || "image";
-  const url = !src
-    ? undefined
-    : (resolve(src) ??
-      (/^https:\/\//i.test(src) || /^data:image\/(png|jpe?g|gif|webp|svg\+xml);/i.test(src)
-        ? src
-        : undefined));
+  const shipped = src ? resolve(src) : undefined;
+  const url =
+    shipped ??
+    (src && (/^https:\/\//i.test(src) || /^data:image\/(png|jpe?g|gif|webp|svg\+xml);/i.test(src))
+      ? src
+      : undefined);
+  if (!url && shipped === null)
+    return <span className="ex-media-pending" role="img" aria-label={label} aria-busy="true" />;
   if (!url)
     return (
       <span className="ex-media-missing" role="img" aria-label={label}>

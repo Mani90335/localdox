@@ -3,19 +3,13 @@ import assert from "node:assert/strict";
 import "fake-indexeddb/auto";
 import { parseExamFile } from "../src/services/exams/parser.ts";
 import { ExamImportError } from "../src/services/exams/schema.ts";
-import {
-  DEFAULT_SETUP,
-  readExamFile,
-  readPracticeFile,
-  type ExamSetup,
-} from "../src/services/exams/exam-setup.ts";
+import { DEFAULT_SETUP, readExamFile, type ExamSetup } from "../src/services/exams/exam-setup.ts";
 import { importSolutions } from "../src/services/exams/validation.ts";
+import { parseXrule } from "../src/services/exams/xrule.ts";
 import {
   attachExamFile,
   createExamPlan,
   hasExamFile,
-  markLearned,
-  answerPractice,
   prepareStudyAttempt,
   studyProgress,
 } from "../src/services/exams/study-plan.ts";
@@ -37,20 +31,7 @@ const setup: ExamSetup = {
   mcqPenalty: "third",
   calculator: "basic",
 };
-const FILE = `# Practice
-
-:::question{#p1 type=mcq marks=1}
-Practice question?
-
-- Right
-- Wrong
-:::
-
-:::solution{#p1 answer=A}
-Practice explanation.
-:::
-
-# Exam
+const FILE = `# Exam
 
 :::question{#q1 type=mcq marks=3}
 Three options?
@@ -86,36 +67,34 @@ const issuesOf = (fn: () => unknown) => {
   assert.fail("expected an import error");
 };
 
-test("one file splits into practice and exam; solutions are matched by id", () => {
-  const { practice, exam } = parseExamFile(FILE, "prob.md");
+test("a paper's questions keep their order; solutions anywhere are matched by id", () => {
+  const paper = parseExamFile(FILE, "prob.md");
   assert.deepEqual(
-    practice.questions.map((q) => q.id),
-    ["p1"],
-  );
-  assert.deepEqual(
-    exam.questions.map((q) => [q.id, q.section]),
+    paper.questions.map((q) => [q.id, q.section]),
     [
       ["q1", "exam"],
       ["q2", "numbers"],
     ],
   );
   assert.deepEqual(
-    exam.solutions.map((s) => s.id),
+    paper.solutions.map((s) => s.id),
     ["q1", "q2"],
   );
+  // Headings are optional; without them the paper asks the same.
+  const asked = (source: string) => {
+    const p = parseExamFile(source);
+    return [...p.questions, ...p.solutions].map(({ location: _, ...rest }) => rest);
+  };
   assert.deepEqual(
-    practice.solutions.map((s) => s.id),
-    ["p1"],
+    asked(FILE.replace("# Exam\n", "").replace("## Keys and solutions\n", "")),
+    asked(FILE),
   );
 });
 
 test("structure errors name the file and line", () => {
   assert.deepEqual(
     issuesOf(() => parseExamFile("# Intro\n\n:::question{#a type=nat marks=1}\nQ\n:::\n", "x.md")),
-    [
-      'x.md:1: Unknown heading "Intro". Use # Practice, # Exam or # Solutions',
-      "x.md:3: Put this question under a # Practice or # Exam heading",
-    ],
+    ['x.md:1: Unknown heading "Intro". Use # Exam or # Solutions, or no heading'],
   );
   assert.deepEqual(
     issuesOf(() =>
@@ -129,16 +108,30 @@ test("structure errors name the file and line", () => {
   assert.deepEqual(
     issuesOf(() =>
       parseExamFile(
-        "# Practice\n\n:::question{#a type=nat marks=1}\nQ\n:::\n\n# Exam\n\n:::question{#a type=nat marks=1}\nQ2\n:::\n\n:::solution{#zzz answer=1}\n:::\n",
+        ":::question{#a type=nat marks=1}\nQ\n:::\n\n:::question{#a type=nat marks=1}\nQ2\n:::\n\n:::solution{#zzz answer=1}\n:::\n",
         "x.md",
       ),
     ),
-    ["x.md:9: Duplicate id: a", "x.md:13: No question for solution zzz"],
+    ["x.md:5: Duplicate id: a", "x.md:9: No question for solution zzz"],
+  );
+  assert.deepEqual(
+    issuesOf(() =>
+      parseExamFile("# Solutions\n\n:::question{#a type=nat marks=1}\nQ\n:::\n", "x.md"),
+    ),
+    ["x.md:3: Put this question before the # Solutions heading"],
   );
 });
 
+test("practice is not part of a paper: it belongs in an .xp file", () => {
+  const issues = issuesOf(() =>
+    parseExamFile("# Practice\n\n:::question{#a type=nat marks=1}\nQ\n:::\n", "x.xam"),
+  );
+  assert.equal(issues.length, 1);
+  assert.match(issues[0], /^x\.xam:1: Practice questions go in their own \.xp file/);
+});
+
 test("the setup becomes the ruleset; sections come from the questions", () => {
-  const { exam, practice } = readExamFile(setup, "prob-exam", FILE, "prob.md");
+  const { exam } = readExamFile(setup, "prob-exam", FILE, "prob.md");
   const r = exam.exam.rules;
   assert.equal(r.meta.name, "Probability");
   assert.equal(r.timing.durationMinutes, 20);
@@ -156,13 +149,12 @@ test("the setup becomes the ruleset; sections come from the questions", () => {
   );
   // A three-option MCQ is fine: option counts are the author's choice here.
   assert.equal(exam.exam.paper[0].options.length, 3);
-  assert.equal(practice?.questions.length, 1);
 });
 
-test("exam keys are sealed in their own blob, without practice keys or trap tags", async () => {
+test("exam keys are sealed in their own blob, without trap tags", async () => {
   const { exam } = readExamFile(setup, "prob-exam", FILE, "prob.md");
   const sealed = await exam.solutionFile!.text();
-  assert.doesNotMatch(sealed, /p1|Practice explanation|distractor/);
+  assert.doesNotMatch(sealed, /distractor/);
   const { solutions } = importSolutions(exam.exam, sealed);
   assert.deepEqual(
     solutions.map((s) => [s.id, s.answer, s.body]),
@@ -187,29 +179,21 @@ test("a broken or missing key is caught at upload, not after a timed attempt", (
     ),
   );
   assert.deepEqual(
-    issuesOf(() => readExamFile(setup, "e", "# Practice\n", "prob.md")),
-    ["prob.md: No exam questions. Add them under a # Exam heading."],
+    issuesOf(() => readExamFile(setup, "e", "# Exam\n", "prob.md")),
+    ["prob.md: No exam questions. Add a :::question block and its :::solution."],
   );
 });
 
-test("images go with the part that names them", () => {
-  const withImages = FILE.replace("Practice question?", "Practice ![a](a.svg)").replace(
-    "Seven thirds.",
-    "See ![b](b.png)",
-  );
-  const a = new Blob(["<svg/>"]),
-    b = new Blob(["png"]),
-    unused = new Blob(["x"]);
-  const { exam, practice } = readExamFile(setup, "e", withImages, "prob.md", {
-    "a.svg": a,
-    "b.png": b,
-    "c.png": unused,
+test("a paper takes only the images it names", () => {
+  const withImages = FILE.replace("Seven thirds.", "See ![b](b.png)");
+  const { exam } = readExamFile(setup, "e", withImages, "prob.md", {
+    "b.png": new Blob(["png"]),
+    "c.png": new Blob(["x"]),
   });
   assert.deepEqual(Object.keys(exam.assets ?? {}), ["b.png"]);
-  assert.deepEqual(Object.keys(practice?.assets ?? {}), ["a.svg"]);
 });
 
-test("a configured exam waits for its file, then runs the four steps", async () => {
+test("a configured exam waits for its file, then its exam is open at once", async () => {
   const plan = createExamPlan(setup, 1, "prob");
   assert.equal(hasExamFile(plan), false);
   const content = readExamFile(setup, plan.plan.days[0].examId, FILE, "prob.md");
@@ -220,32 +204,14 @@ test("a configured exam waits for its file, then runs the four steps", async () 
     attachExamFile(plan, readExamFile(setup, "other", FILE, "prob.md"), 3),
     /different exam/,
   );
-  let [p] = studyProgress(ready, []);
-  assert.equal(p.step, "learn");
+  const [p] = studyProgress(ready, []);
+  assert.equal(p.status, "ready");
   assert.equal(p.maxAttempts, 2);
   assert.equal(p.passPercentage, 60);
-  assert.equal(p.practiceTotal, 1);
-  let next = markLearned(ready, "exam", [], 4);
-  next = answerPractice(next, "exam", content.practice!.id, "p1", "A", [], 5);
-  [p] = studyProgress(next, []);
-  assert.equal(p.step, "exam");
-  const attempt = prepareStudyAttempt(next, "exam", [], 6);
+  // Nothing to learn or practise first: the exam starts straight away.
+  const attempt = prepareStudyAttempt(ready, "exam", [], 4);
   assert.equal(attempt.exam.id, "prob-exam");
-});
-
-test("practice may not repeat an exam question", async () => {
-  const repeated = FILE.replace("Practice question?", "Three options?");
-  const plan = createExamPlan(setup, 1, "prob");
-  await assert.rejects(
-    attachExamFile(plan, readExamFile(setup, "prob-exam", repeated, "prob.md")),
-    /repeats a question/,
-  );
-});
-
-test("Add questions takes a practice-only file", () => {
-  const set = readPracticeFile("extra", FILE.slice(0, FILE.indexOf("# Exam")), "extra.md");
-  assert.equal(set.questions.length, 1);
-  assert.throws(() => readPracticeFile("extra", FILE, "extra.md"), /exam questions/);
+  assert.equal(attempt.session.phase, "instructions");
 });
 
 test("deleting a plan removes its attempts and leaves everything else", async () => {
@@ -292,10 +258,13 @@ test("deleted plans and attempts leave no recovery journal behind", () => {
   assert.deepEqual([...data.keys()], ["localdox:exam-recovery:plan:keep"]);
 });
 
-test("the bundled example file is valid", async () => {
+test("the bundled example .xrule and .xam are valid together", async () => {
   const { readFile } = await import("node:fs/promises");
-  const source = await readFile(new URL("../plans/example-exam.md", import.meta.url), "utf8");
-  const { exam, practice } = readExamFile({ ...DEFAULT_SETUP, name: "Example" }, "x", source);
+  const read = (name: string) => readFile(new URL(`../plans/${name}`, import.meta.url), "utf8");
+  const setup = parseXrule(await read("example.xrule"), "example.xrule");
+  assert.equal(setup.preset, "gate");
+  assert.equal(setup.durationMinutes, 10);
+  const { exam } = readExamFile(setup, "x", await read("example.xam"), "example.xam");
   assert.equal(exam.exam.paper.length, 4);
-  assert.equal(practice?.questions.length, 3);
+  assert.equal(exam.exam.rules.progression.passPercentage, 70);
 });

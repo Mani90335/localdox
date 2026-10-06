@@ -38,6 +38,7 @@ import { isOutsideMenu, MenuItem, MenuPanel } from "./sidebar/menu-primitives";
 import { GroupActionMenu } from "./sidebar/GroupActionMenu";
 import { FileMenu } from "./sidebar/FileMenu";
 import { AddMenu } from "./sidebar/AddMenu";
+import { isRulesFile } from "@/services/exams/rules-tag";
 import { FolderMenu } from "./sidebar/FolderMenu";
 import type { SidebarFolder } from "./sidebar/types";
 import { SearchPanel, type SearchPanelState } from "./sidebar/SearchPanel";
@@ -139,6 +140,10 @@ interface Props {
   /** Create an animated standalone Mermaid source file. */
   onCreateMermaid?: (folderId?: string | null) => void;
   onCreateBoard?: (folderId?: string | null) => void;
+  /** Open the New exam dialog: an `.xam` paper tagged with a ruleset. */
+  onCreateExam?: () => void;
+  /** A new `.xp` practice file, named first like any new file. */
+  onCreatePractice?: (folderId?: string | null) => void;
   /** Create a folder, optionally nested inside an existing one. */
   onCreateFolder?: (name: string, parentId?: string | null) => void;
   /** Re-parent a folder. `null` puts it back at the top level. */
@@ -217,6 +222,8 @@ function SidebarImpl({
   onCreateFile,
   onCreateMermaid,
   onCreateBoard,
+  onCreateExam,
+  onCreatePractice,
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
@@ -263,11 +270,15 @@ function SidebarImpl({
     () => allFolders.filter((folder) => !hiddenFolders.has(folder.id)),
     [allFolders, hiddenFolders],
   );
+  // Rulesets (`.xrule`) are kept and edited in Settings ▸ Exam rules; a paper
+  // names the one it uses, so they would only be clutter among documents.
   const hiddenFiles = useMemo(
     () =>
       new Set(
         files
-          .filter((file) => file.folderId && hiddenFolders.has(file.folderId))
+          .filter(
+            (file) => (file.folderId && hiddenFolders.has(file.folderId)) || isRulesFile(file),
+          )
           .map((file) => file.id),
       ),
     [files, hiddenFolders],
@@ -847,7 +858,7 @@ function SidebarImpl({
     const isTextual = kind === "markdown" || kind === "text";
     const mins = readingMinutes(file.content);
     const title = file.name.replace(
-      /\.(md|markdown|mdx|mmd|mermaid|board|excalidraw|txt|docx|pdf|xlsx|xls|csv|json|html|htm|ppt|pptx|gdoc|gslides)$/i,
+      /\.(md|markdown|mdx|mmd|mermaid|board|excalidraw|txt|docx|pdf|xlsx|xls|csv|json|html|htm|ppt|pptx|gdoc|gslides|xam|xrule|xp)$/i,
       "",
     );
     const dragActive = reordering && !viewActive && realIndex >= 0 && !selecting;
@@ -1109,6 +1120,8 @@ function SidebarImpl({
             onCreateMermaid={onCreateMermaid ? () => onCreateMermaid(null) : undefined}
             onCreateBoard={onCreateBoard ? () => onCreateBoard(null) : undefined}
             onCreateFolder={onCreateFolder ? promptNewFolder : undefined}
+            onCreateExam={onCreateExam}
+            onCreatePractice={onCreatePractice ? () => onCreatePractice(null) : undefined}
             onUpload={onAddFiles}
           />
         </div>
@@ -1279,9 +1292,9 @@ function SidebarImpl({
           <div className="flex min-w-0 flex-1 items-center">{saveIndicator}</div>
         )}
         {/* The other workspaces stay one tap away — Arc-style instant
-            switching — but as small avatars in the same row rather than a
-            second band of labelled circles. Each keeps its name as its
-            accessible label and tooltip. */}
+          switching — but as small avatars in the same row rather than a
+          second band of labelled circles. Each keeps its name as its
+          accessible label and tooltip. */}
         {onSwitchWorkspace && otherWorkspaces.length > 0 && (
           <WorkspaceStrip
             size="sm"
