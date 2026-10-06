@@ -1,11 +1,4 @@
-/**
- * Practice files (`.xp`): untimed questions whose key is shown the moment
- * each is answered. Same Markdown as an exam paper, but with no ruleset and
- * nothing sealed: practice is for learning, so solutions sit beside their
- * questions and are revealed by answering. That is also why practice and
- * exams are separate files: an exam's keys must stay hidden until it is
- * submitted, and a practice file never hides its own.
- */
+/** Practice checks answers immediately; optional rules affect pacing, never scoring. */
 import { ExamImportError, defaultTaxonomy, rulesetSchema, type Issue } from "./schema.ts";
 import { parsePracticeFile, type PracticeFile, type Question, type Solution } from "./parser.ts";
 import { scoreQuestion, type Outcome, type Response } from "./scoring.ts";

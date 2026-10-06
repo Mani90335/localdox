@@ -12,6 +12,7 @@
  * `.xrule` governs which paper is decided by the folders (`paper-plan.ts`).
  */
 import { z } from "zod";
+import { practiceRulesSchema } from "./practice-rules.ts";
 import { ExamImportError, parseJson, rulesetSchema } from "./schema.ts";
 import {
   DEFAULT_SETUP,
@@ -29,6 +30,8 @@ export const xruleSchema = z
     /** Format version, so the file can evolve without guessing. */
     xrule: z.literal(1),
     name: z.string().trim().min(1, "Give the exam a name").max(160),
+    /** Optional controls used by .xp files; exams continue using their own rules. */
+    practice: practiceRulesSchema.optional(),
     /** What to study first; shown in Step 1 (Learn). Markdown. */
     summary: z.string().max(20000).optional(),
     /** Start from a built-in ruleset. */

@@ -249,18 +249,7 @@ export interface ExamFile {
   questions: Question[];
   solutions: Solution[];
 }
-/**
- * One exam paper. `:::question` blocks are the exam, in order; `:::solution`
- * blocks (key + explanation) may sit anywhere, including under a
- * `# Solutions` heading, and are matched by id. Headings are optional:
- * `# Exam` (or `# Questions`) and `# Solutions` only organise the file.
- * Practice belongs in an `.xp` file, which shows keys as soon as a question
- * is answered; a paper's keys stay sealed until it is submitted.
- */
-export function parseExamFile(raw: string, file = "exam.xam"): ExamFile {
-  const errors: Issue[] = [];
-  // The optional `---` header names the paper's ruleset (rules-tag.ts). It is
-  // checked here, then blanked so line numbers below still match the file.
+function validateRulesHeader(raw: string, file: string, errors: Issue[]) {
   for (const field of paperHeader(raw)?.fields ?? []) {
     if (field.key !== "rules")
       errors.push({
@@ -275,6 +264,22 @@ export function parseExamFile(raw: string, file = "exam.xam"): ExamFile {
         message: "rules must name an .xrule file, like rules: mock.xrule",
       });
   }
+}
+
+/**
+ * One exam paper. `:::question` blocks are the exam, in order; `:::solution`
+ * blocks (key + explanation) may sit anywhere, including under a
+ * `# Solutions` heading, and are matched by id. Headings are optional:
+ * `# Exam` (or `# Questions`) and `# Solutions` only organise the file.
+ * Practice belongs in an `.xp` file, which shows keys as soon as a question
+ * is answered; a paper's keys stay sealed until it is submitted.
+ */
+
+export function parseExamFile(raw: string, file = "exam.xam"): ExamFile {
+  const errors: Issue[] = [];
+  // The optional `---` header names the paper's ruleset (rules-tag.ts). It is
+  // checked here, then blanked so line numbers below still match the file.
+  validateRulesHeader(raw, file, errors);
   const source = blankHeader(raw),
     questionNodes: Node[] = [],
     solutionNodes: Node[] = [];
@@ -314,15 +319,17 @@ export interface PracticeFile {
   solutions: Solution[];
 }
 /**
- * Practice questions in the paper's grammar, with no rules file: every
+ * Practice questions in the paper's grammar, with an optional rules header: every
  * heading starts a group, `marks` is optional, and each question's solution
- * may sit anywhere. Practice has no sections, timer or penalty.
+ * may sit anywhere. Optional rules control pacing; practice has no exam sections or penalties.
  */
-export function parsePracticeFile(source: string, file = "practice.xp"): PracticeFile {
+export function parsePracticeFile(raw: string, file = "practice.xp"): PracticeFile {
+  const source = blankHeader(raw);
   const errors: Issue[] = [],
     questionNodes: Node[] = [],
     solutionNodes: Node[] = [],
     titles: (string | null)[] = [];
+  validateRulesHeader(raw, file, errors);
   let title: string | null = null;
   for (const block of questionFileBlocks(source, file, errors)) {
     if (block.heading !== undefined) title = block.heading.trim() || null;

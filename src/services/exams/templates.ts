@@ -22,6 +22,29 @@ export function xruleTemplate(name: string): string {
   )}\n`;
 }
 
+/** Rulesets Settings ▸ Exam rules can start from. */
+export function practiceXruleTemplate(name: string): string {
+  return `${JSON.stringify(
+    {
+      xrule: 1,
+      name: name.trim() || "Practice",
+      practice: {
+        questionTimeLimitSeconds: null,
+        showElapsedTime: true,
+        allowSkip: true,
+      },
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+export const RULES_TEMPLATES = {
+  default: xruleTemplate,
+  practice: practiceXruleTemplate,
+} as const;
+export type RulesTemplate = keyof typeof RULES_TEMPLATES;
+
 /** A starter `.xam`: one exam question of each type, with its key. */
 export const XAM_TEMPLATE = `:::question{#q1 type=mcq marks=2}
 What is $3 \\times 4$?

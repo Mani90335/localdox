@@ -97,3 +97,14 @@ export function rulesetTitle(file: { name: string; content: string }): string {
   }
   return file.name.replace(/\.xrule$/i, "");
 }
+
+/** Remove only the rules link, preserving any other header fields. */
+export function withoutRulesTag(source: string): string {
+  const header = paperHeader(source);
+  if (!header) return source;
+  const lines = source.split("\n");
+  const indexes = new Set(header.fields.filter((f) => f.key === "rules").map((f) => f.line - 1));
+  if (header.fields.every((f) => f.key === "rules"))
+    return source.slice(header.length).replace(/^\n/, "");
+  return lines.filter((_, i) => !indexes.has(i)).join("\n");
+}
