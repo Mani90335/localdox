@@ -20,7 +20,7 @@ import type { Session } from "../src/services/exams/session.ts";
 import { analyzeAttempt } from "../src/services/exams/diagnostics.ts";
 import { defaultRules } from "../src/services/exams/default-rules.ts";
 import { calculate } from "../src/services/exams/calculator.ts";
-const read = (path: string) => readFileSync(new URL("../" + path, import.meta.url), "utf8");
+const read = (path: string) => readFileSync(new URL("../documentation/" + path, import.meta.url), "utf8");
 const sample = () =>
   importExam(
     read("exams/gate-2027-da/gate2027da.exam.json"),

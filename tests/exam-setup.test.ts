@@ -260,7 +260,7 @@ test("deleted plans and attempts leave no recovery journal behind", () => {
 
 test("the bundled example .xrule and .xam are valid together", async () => {
   const { readFile } = await import("node:fs/promises");
-  const read = (name: string) => readFile(new URL(`../plans/${name}`, import.meta.url), "utf8");
+  const read = (name: string) => readFile(new URL(`../documentation/plans/${name}`, import.meta.url), "utf8");
   const setup = parseXrule(await read("example.xrule"), "example.xrule");
   assert.equal(setup.preset, "gate");
   assert.equal(setup.durationMinutes, 10);

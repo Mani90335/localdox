@@ -156,7 +156,7 @@ test("the starter and the bundled example read cleanly", async () => {
     ["Warm-up"],
   );
   const { readFile } = await import("node:fs/promises");
-  const example = await readFile(new URL("../plans/example.xp", import.meta.url), "utf8");
+  const example = await readFile(new URL("../documentation/plans/example.xp", import.meta.url), "utf8");
   assert.equal(readPracticeFile(example, "example.xp").questions.length, 3);
 });
 
