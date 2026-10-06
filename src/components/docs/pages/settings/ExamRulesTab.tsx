@@ -1,8 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { CircleAlert } from "lucide-react";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import { isRulesFile, rulesTag, rulesetTitle } from "@/services/exams/rules-tag";
+import { xruleTemplate, type RulesTemplate } from "@/services/exams/templates";
 import { Empty, Group, Row, Section } from "./primitives";
+
+const RulesetEditor = lazy(() =>
+  import("./RulesetEditor").then((m) => ({ default: m.RulesetEditor })),
+);
 
 type Check = { ok: true; facts: string[] } | { ok: false; problems: string[] };
 type Checker = (content: string, name: string) => Check;
@@ -17,23 +22,62 @@ const loadChecker = (): Promise<Checker> =>
     import("@/services/exams/xrule"),
     import("@/services/exams/ui/display"),
     import("@/services/exams/schema"),
-  ]).then(([{ parseXrule }, { describeIssue, setupFacts }, { ExamImportError }]) => {
-    return (content, name) => {
-      try {
-        return { ok: true, facts: setupFacts(parseXrule(content, name)) };
-      } catch (error) {
-        return {
-          ok: false,
-          problems:
-            error instanceof ExamImportError
-              ? error.issues.map(describeIssue)
-              : [error instanceof Error ? error.message : String(error)],
-        };
-      }
-    };
-  });
+    import("@/services/exams/practice-rules"),
+  ]).then(
+    ([
+      { parseXrule, xruleSchema },
+      { describeIssue, setupFacts },
+      { ExamImportError, parseJson },
+      { practiceFacts },
+    ]) => {
+      return (content, name) => {
+        try {
+          const raw = parseJson(content, xruleSchema, name);
+          return {
+            ok: true,
+            facts: raw.practice
+              ? practiceFacts(raw.practice)
+              : setupFacts(parseXrule(content, name)),
+          };
+        } catch (error) {
+          return {
+            ok: false,
+            problems:
+              error instanceof ExamImportError
+                ? error.issues.map(describeIssue)
+                : [error instanceof Error ? error.message : String(error)],
+          };
+        }
+      };
+    },
+  );
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** Read from the template so the hint can't drift from what is made. */
+const STARTER = JSON.parse(xruleTemplate("")) as {
+  durationMinutes: number;
+  passPercentage: number;
+  maxAttempts: number;
+};
+/** What each starting point gives, in the words a person choosing needs. */
+const TEMPLATES: Record<RulesTemplate, { label: string; name: string; hint: string }> = {
+  practice: {
+    label: "Practice",
+    name: "Practice",
+    hint: "One question at a time, optional time limit, and solve times kept only in this browser.",
+  },
+  default: {
+    label: "Default rules",
+    name: "",
+    hint: `${STARTER.durationMinutes} minutes, ${STARTER.passPercentage}% to pass, ${STARTER.maxAttempts} attempts, no negative marking.`,
+  },
+  gate: {
+    label: "GATE",
+    name: "GATE mock",
+    hint: "The GATE pattern: 65 questions in General Aptitude and Subject sections, 3 hours, −1/3 for a wrong MCQ, NAT keypad, scientific calculator, answers kept only with Save & next. Tag each question section=GA or section=subject. For a shorter mock, lower questionCount and durationMinutes.",
+  },
+};
 const quiet =
   "coarse:min-h-11 coarse:px-3 rounded-md px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50";
 
@@ -54,13 +98,14 @@ export function ExamRulesSettings({
   /** Open on this ruleset, editing — a paper's "edit its rules". */
   initialRulesId?: string;
   onSave: (fileId: string, content: string) => void;
-  onCreate: (name: string) => { id: string; name: string };
+  onCreate: (name: string, template: RulesTemplate) => { id: string; name: string };
   onBin: (fileIds: string[]) => void;
 }) {
   const [check, setCheck] = useState<Checker | null>(null);
   const [loadError, setLoadError] = useState("");
   const [openId, setOpenId] = useState(initialRulesId ?? null);
   const [naming, setNaming] = useState<string | null>(null);
+  const [template, setTemplate] = useState<RulesTemplate>("default");
 
   useEffect(() => {
     let alive = true;
@@ -81,11 +126,20 @@ export function ExamRulesSettings({
   );
   /** How many papers name each ruleset, by file name. */
   const uses = useMemo(() => {
-    const count = new Map<string, number>();
+    const count = new Map<string, { exams: number; practice: number }>();
     for (const f of files) {
-      if (f.deletedAt || !(f.kind === "exam" || /\.xam$/i.test(f.name))) continue;
+      if (
+        f.deletedAt ||
+        !(f.kind === "exam" || f.kind === "practice" || /\.(xam|xp)$/i.test(f.name))
+      )
+        continue;
       const tag = rulesTag(f.content);
-      if (tag) count.set(tag, (count.get(tag) ?? 0) + 1);
+      if (tag) {
+        const current = count.get(tag) ?? { exams: 0, practice: 0 };
+        if (f.kind === "practice" || /\.xp$/i.test(f.name)) current.practice++;
+        else current.exams++;
+        count.set(tag, current);
+      }
     }
     return count;
   }, [files]);
@@ -93,20 +147,29 @@ export function ExamRulesSettings({
   const create = () => {
     const name = naming?.trim();
     if (!name) return;
-    setOpenId(onCreate(name).id);
+    setOpenId(onCreate(name, template).id);
     setNaming(null);
+  };
+  const startNaming = (from: RulesTemplate) => {
+    setTemplate(from);
+    setNaming(TEMPLATES[from].name);
+  };
+  /** Switching template swaps a name the person hasn't changed. */
+  const chooseTemplate = (next: RulesTemplate) => {
+    if (naming === null || naming === TEMPLATES[template].name) setNaming(TEMPLATES[next].name);
+    setTemplate(next);
   };
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-5">
       <Section
         title="Rulesets"
-        description="How an exam runs: time, pass mark, attempts and marking. Each exam names its ruleset, so one ruleset can run many exams. Edits apply to an exam until its first attempt."
+        description="Shared rules for exams and practice. Edit with the form or JSON; save when ready."
         action={
           naming === null && (
             <button
               type="button"
-              onClick={() => setNaming("")}
+              onClick={() => startNaming("default")}
               className={`${quiet} shrink-0 border border-border bg-background text-foreground hover:bg-accent`}
             >
               New ruleset
@@ -117,48 +180,85 @@ export function ExamRulesSettings({
         <Group>
           {naming !== null && (
             <form
-              className="flex items-center gap-2 px-4 py-3"
+              className="space-y-2 px-4 py-3"
+              aria-label="New ruleset"
               onSubmit={(e) => {
                 e.preventDefault();
                 create();
               }}
             >
-              <input
-                autoFocus
-                data-settings-draft
-                value={naming}
-                onChange={(e) => setNaming(e.target.value)}
-                onKeyDown={(e) => e.key === "Escape" && setNaming(null)}
-                placeholder="Ruleset name"
-                aria-label="New ruleset name"
-                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:min-h-11"
-              />
-              <button
-                type="button"
-                onClick={() => setNaming(null)}
-                className={`${quiet} text-muted-foreground hover:bg-accent hover:text-foreground`}
+              <div
+                role="radiogroup"
+                aria-label="Start from"
+                className="inline-flex rounded-md border border-border p-0.5"
               >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={!naming.trim()}
-                className={`${quiet} bg-foreground text-background hover:opacity-90`}
-              >
-                Create
-              </button>
+                {(Object.keys(TEMPLATES) as RulesTemplate[]).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="radio"
+                    aria-checked={template === key}
+                    onClick={() => chooseTemplate(key)}
+                    className={`${quiet} ${
+                      template === key
+                        ? "bg-foreground text-background"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {TEMPLATES[key].label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  autoFocus
+                  data-settings-draft
+                  value={naming}
+                  onChange={(e) => setNaming(e.target.value)}
+                  onKeyDown={(e) => e.key === "Escape" && setNaming(null)}
+                  placeholder="Ruleset name"
+                  aria-label="New ruleset name"
+                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:min-h-11"
+                />
+                <button
+                  type="button"
+                  onClick={() => setNaming(null)}
+                  className={`${quiet} text-muted-foreground hover:bg-accent hover:text-foreground`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!naming.trim()}
+                  className={`${quiet} bg-foreground text-background hover:opacity-90`}
+                >
+                  Create
+                </button>
+              </div>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {TEMPLATES[template].hint}
+              </p>
             </form>
           )}
           {rulesets.length === 0 && naming === null ? (
             <Empty>
-              No rulesets yet. Create an exam from the sidebar’s + menu, or add one here.
+              No rulesets yet. Create an exam from the sidebar’s + menu, add one here, or{" "}
+              <button
+                type="button"
+                onClick={() => startNaming("gate")}
+                className="font-medium text-foreground underline underline-offset-2"
+              >
+                start from GATE
+              </button>
+              .
             </Empty>
           ) : (
             rulesets.map((file) => (
               <RulesetRow
                 key={file.id}
                 file={file}
-                used={uses.get(file.name) ?? 0}
+                used={uses.get(file.name)?.exams ?? 0}
+                practiceUsed={uses.get(file.name)?.practice ?? 0}
                 check={check}
                 startOpen={file.id === openId}
                 onSave={onSave}
@@ -180,6 +280,7 @@ export function ExamRulesSettings({
 function RulesetRow({
   file,
   used,
+  practiceUsed,
   check,
   startOpen,
   onSave,
@@ -187,6 +288,7 @@ function RulesetRow({
 }: {
   file: MdFile;
   used: number;
+  practiceUsed: number;
   check: Checker | null;
   startOpen: boolean;
   onSave: (fileId: string, content: string) => void;
@@ -208,12 +310,18 @@ function RulesetRow({
   }, []);
 
   const title = rulesetTitle(file);
-  const usedText = used ? `Used by ${plural(used, "exam")}` : "Not used yet";
+  const usage = [
+    used ? plural(used, "exam") : "",
+    practiceUsed ? plural(practiceUsed, "practice file") : "",
+  ]
+    .filter(Boolean)
+    .join(" and ");
+  const usedText = usage ? `Used by ${usage}` : "Not used yet";
   const bin = () => {
     if (
-      used &&
+      (used || practiceUsed) &&
       !window.confirm(
-        `${plural(used, "exam")} use${used === 1 ? "s" : ""} “${title}”. They will ask for other rules until it is restored from the Bin. Move it to the Bin?`,
+        `“${title}” is used by ${usage}. Those files will need other rules until it is restored. Move it to the Bin?`,
       )
     )
       return;
@@ -266,24 +374,19 @@ function RulesetRow({
       />
       {draft !== null && (
         <div className="space-y-2 px-4 pb-4">
-          <textarea
-            autoFocus
-            data-settings-draft
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setDraft(null);
-              if (e.key === "s" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
+          <Suspense fallback={<p className="text-xs text-muted-foreground">Loading editor…</p>}>
+            <RulesetEditor
+              draft={draft}
+              onChange={setDraft}
+              name={file.name}
+              onCancel={() => setDraft(null)}
+              onSave={() => {
+                if (!drafted?.ok) return;
                 if (draft !== file.content) onSave(file.id, draft);
                 setDraft(null);
-              }
-            }}
-            spellCheck={false}
-            rows={Math.min(18, Math.max(8, draft.split("\n").length + 1))}
-            aria-label={`Edit ${file.name}`}
-            className="w-full resize-y rounded-lg border border-border bg-surface-sunken p-3 font-mono text-xs leading-5 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
+              }}
+            />
+          </Suspense>
           {drafted && !drafted.ok ? (
             <div role="alert" className="text-xs text-destructive">
               <p className="flex items-center gap-1.5 font-medium">
@@ -303,8 +406,6 @@ function RulesetRow({
               {drafted?.ok ? drafted.facts.join(" · ") : "Checking…"}
             </p>
           )}
-          {/* A draft with problems still saves: it is the author's text, and the
-              exam says what to fix until it is. Same as a paper's editor. */}
           <div className="flex justify-end gap-1.5">
             <button
               type="button"
@@ -315,6 +416,7 @@ function RulesetRow({
             </button>
             <button
               type="button"
+              disabled={!drafted?.ok}
               onClick={() => {
                 if (draft !== file.content) onSave(file.id, draft);
                 setDraft(null);

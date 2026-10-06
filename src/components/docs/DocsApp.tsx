@@ -151,7 +151,13 @@ import {
   estimateStoredBytes,
   SUPPORTED_ACCEPT,
 } from "@/lib/markdown/document-utils";
-import { XAM_TEMPLATE, XP_TEMPLATE, xruleTemplate } from "@/services/exams/templates";
+import {
+  RULES_TEMPLATES,
+  XAM_TEMPLATE,
+  XP_TEMPLATE,
+  xruleTemplate,
+  type RulesTemplate,
+} from "@/services/exams/templates";
 import { isRulesFile, rulesetTitle, withRulesTag } from "@/services/exams/rules-tag";
 import { ExamWorkspaceContext, type ExamWorkspace } from "./viewer/ExamWorkspaceContext";
 import { clearArtifactResolutionCache } from "@/lib/workspace/workspace-artifacts";
@@ -4353,12 +4359,16 @@ flowchart LR
     />
   );
 
-  /** A new ruleset from Settings ▸ Exam rules: the default rules, named. */
+  /** A new ruleset from Settings ▸ Exam rules: a template's rules, named. */
   const createRules = useCallback(
-    (requested: string) => {
+    (requested: string, template: RulesTemplate) => {
       const stem = requested.replace(/\.xrule$/i, "").trim() || "Rules";
       ensureWorkspace(1);
-      return addTextFile(`${stem}.xrule`, xruleTemplate(stem), null);
+      const made = addTextFile(`${stem}.xrule`, RULES_TEMPLATES[template](stem), null);
+      // The first file replaces the empty-workspace view and remounts Settings.
+      pendingSettingsTab = "exams";
+      pendingSettingsRules = made.id;
+      return made;
     },
     [ensureWorkspace, addTextFile],
   );

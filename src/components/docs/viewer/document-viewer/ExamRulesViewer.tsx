@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import { CircleAlert, CircleCheck } from "lucide-react";
-import { ExamImportError } from "@/services/exams/schema";
+import { ExamImportError, parseJson } from "@/services/exams/schema";
 import { describeIssue, setupFacts } from "@/services/exams/ui/display";
-import { parseXrule } from "@/services/exams/xrule";
+import { parseXrule, xruleSchema } from "@/services/exams/xrule";
+import { practiceFacts } from "@/services/exams/practice-rules";
 import { JsonViewer } from "./JsonViewer";
 import type { Props } from "./shared";
 
@@ -16,6 +17,9 @@ export function ExamRulesViewer(props: Props) {
   const { content, name } = props.file;
   const check = useMemo(() => {
     try {
+      const raw = parseJson(content, xruleSchema, name);
+      if (raw.practice)
+        return { ok: true as const, title: raw.name, facts: practiceFacts(raw.practice) };
       const setup = parseXrule(content, name);
       return { ok: true as const, title: setup.name, facts: setupFacts(setup) };
     } catch (error) {
@@ -59,5 +63,5 @@ export function ExamRulesViewer(props: Props) {
       </ul>
     </div>
   );
-  return <JsonViewer {...props} kindLabel="Exam rules" summary={summary} />;
+  return <JsonViewer {...props} kindLabel="Ruleset" summary={summary} />;
 }

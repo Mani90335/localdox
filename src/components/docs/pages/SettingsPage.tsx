@@ -23,6 +23,7 @@ import { WorkspaceSettings } from "./settings/WorkspaceTab";
 import { BinSettings } from "./settings/SavedTab";
 import { StorageSettings } from "./settings/StorageTab";
 import { ExamRulesSettings } from "./settings/ExamRulesTab";
+import type { RulesTemplate } from "@/services/exams/templates";
 import "./settings/settings.css";
 import type { MdFile } from "@/lib/markdown/markdown-utils";
 import type { ThemePref, ReadingMode, ReadingFont } from "@/lib/workspace/persistence";
@@ -83,7 +84,7 @@ export interface SettingsPageProps {
   /** Save a ruleset edited in Exam rules. */
   onSaveFile: (fileId: string, content: string) => void;
   /** A new ruleset with the default rules; returns its id and file name. */
-  onCreateRules: (name: string) => { id: string; name: string };
+  onCreateRules: (name: string, template: RulesTemplate) => { id: string; name: string };
   /** Move files to the Bin (a ruleset, from Exam rules). */
   onBinFile: (fileIds: string[]) => void;
   /** Section to open on. Defaults to appearance. */
@@ -143,7 +144,7 @@ const SECTIONS = [
   {
     id: "exams",
     label: "Exam rules",
-    description: "Set how your exams run, once, for every paper that uses them.",
+    description: "Reusable rules for exams and practice.",
     icon: FileCog,
     group: "Your library",
   },
@@ -199,7 +200,7 @@ export function SettingsPage(props: SettingsPageProps) {
             // A workspace draft handles Escape locally before the modal closes.
             if (
               event.target instanceof HTMLElement &&
-              event.target.matches("[data-settings-draft]")
+              event.target.closest("[data-settings-draft]")
             ) {
               event.preventDefault();
             }
@@ -340,9 +341,13 @@ export function SettingsPage(props: SettingsPageProps) {
                   </div>
                 </Tabs.Content>
               ))}
-              <footer className="shrink-0 border-t border-hairline bg-background/80 px-5 py-3 sm:px-9">
-                <div className="mx-auto flex max-w-[580px] items-center justify-between gap-3">
-                  <p className="text-xs text-muted-foreground">Changes apply immediately</p>
+              <footer className="shrink-0 border-t border-hairline bg-background/80 px-5 py-3 sm:px-6">
+                <div className="mx-auto flex max-w-[640px] items-center justify-between gap-3">
+                  <p className="text-xs text-muted-foreground">
+                    {selectedTab === "exams"
+                      ? "Save ruleset edits before closing"
+                      : "Changes apply immediately"}
+                  </p>
                   <Dialog.Close className="min-h-9 rounded-lg bg-foreground px-5 text-xs font-medium text-background transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 coarse:min-h-11">
                     Done
                   </Dialog.Close>

@@ -198,7 +198,12 @@ export function validateExam(rules: Ruleset, taxonomy: Taxonomy, paper: Question
   }
   for (const q of paper) {
     if (!rules.sections.some((s) => s.id === q.section))
-      add(q.location, `Unknown section ${q.section}`);
+      add(
+        q.location,
+        `Section "${q.section}" isn't in these rules. Tag the question ${rules.sections
+          .map((s) => `section=${s.id}`)
+          .join(" or ")}`,
+      );
     const config = rules.questionTypes[q.type];
     if (!config) add(q.location, `Question type ${q.type} is not allowed`);
     if (

@@ -15,6 +15,7 @@ import {
 import { ExamImportError } from "../src/services/exams/schema.ts";
 import { describeIssue } from "../src/services/exams/ui/display.ts";
 import { parseXrule } from "../src/services/exams/xrule.ts";
+import { gateXruleTemplate } from "../src/services/exams/templates.ts";
 
 const xrule = (fields: object) => JSON.stringify({ xrule: 1, name: "Mock 1", ...fields });
 function issuesOf(run: () => unknown) {
@@ -103,6 +104,42 @@ test("a rules block supplies time, pass mark, attempts and count unless fields o
   assert.equal(fromRules.questionCount, 12);
   assert.equal(fromRules.rootRules?.sections[0].id, "s1");
   assert.equal(parseXrule(xrule({ rules, maxAttempts: 1 })).maxAttempts, 1);
+});
+
+test("the GATE template runs a full GATE paper, and names the sections an untagged question needs", () => {
+  const setup = parseXrule(gateXruleTemplate("GATE CS mock 1"), "GATE CS mock 1.xrule");
+  assert.equal(setup.preset, "gate");
+  assert.equal(setup.questionCount, 65);
+  assert.equal(setup.durationMinutes, 180);
+  const block = (id: string, section: string, marks: number) =>
+    `:::question{#${id} type=mcq marks=${marks} section=${section}}\nPick A.\n\n- a\n- b\n- c\n- d\n:::\n\n:::solution{#${id} answer=A}\nA.\n:::`;
+  const make = (section: string, ones: number, twos: number) =>
+    Array.from({ length: ones + twos }, (_, i) =>
+      block(`${section}${i + 1}`, section, i < ones ? 1 : 2),
+    );
+  const paper = [...make("GA", 5, 5), ...make("subject", 25, 30)].join("\n\n");
+  const { exam } = readExamFile(setup, "gate-1", paper, "GATE CS mock 1.xam");
+  const rules = exam.exam.rules;
+  assert.deepEqual(
+    rules.sections.map((s) => [s.id, s.questionCount]),
+    [
+      ["GA", 10],
+      ["subject", 55],
+    ],
+  );
+  assert.equal(
+    exam.exam.paper.reduce((n, q) => n + q.marks, 0),
+    100,
+  );
+  assert.deepEqual(rules.questionTypes.mcq?.negativeMarking, { fractionOfMarks: [1, 3] });
+  assert.equal(rules.questionTypes.msq?.negativeMarking, null);
+  assert.equal(rules.navigation.requireSave, true);
+  assert.equal(rules.tools.calculator, "scientific");
+  assert.equal(rules.ui.profile, "gate");
+
+  const untagged = paper.replaceAll(" section=GA", "");
+  const issues = issuesOf(() => readExamFile(setup, "gate-2", untagged, "mock.xam"));
+  assert.ok(issues.some((i) => /Tag the question section=GA or section=subject/.test(i.message)));
 });
 
 test("contradictions are rejected with the field that causes them", () => {

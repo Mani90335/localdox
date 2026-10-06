@@ -104,17 +104,24 @@ test("an Exam Workspace is the reader: a paper is sat in place, with a ruleset i
   await page.getByRole("radio").first().check();
   await page.getByRole("button", { name: "Submit exam", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Submit exam" }).click();
+  // The result and its answers are one screen, in the reader: the timed part
+  // is over, so the workspace's sidebar is back beside it.
   await expect(page.getByRole("heading", { name: /^Passed/ })).toBeVisible();
-  await page.getByRole("button", { name: "Back to paper" }).click();
+  await expect(overlay).toHaveCount(0);
+  await expect(sidebar(page)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Answers & solutions" })).toBeVisible();
+  await expect(page.getByText("Explanation.")).toBeVisible();
+  await page.screenshot({ path: "test-results/exam-files-result.png", fullPage: true });
+  await page.getByRole("button", { name: "Back to paper" }).first().click();
 
   // After submission the key is released, from the paper and its attempt.
   await expect(page.getByRole("status").filter({ hasText: /Passed · \d+%/ })).toBeVisible();
   await expect(page.getByRole("region", { name: "Attempts" })).toContainText("Passed");
   await page.getByRole("button", { name: "Review answers", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Answers & solutions" })).toBeFocused();
   await expect(page.getByText("Explanation.")).toBeVisible();
   await page.screenshot({ path: "test-results/exam-files-review.png" });
-  await page.getByRole("button", { name: "Back to result" }).first().click();
-  await page.getByRole("button", { name: "Back to paper" }).click();
+  await page.getByRole("button", { name: "Back to paper" }).first().click();
   await page.reload();
   await expect(page.getByRole("status").filter({ hasText: /Passed · \d+%/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start exam", exact: true })).toHaveCount(0);
@@ -126,8 +133,9 @@ async function editRules(page: Page, title: string, text: string) {
   const settings = page.getByRole("dialog", { name: "Settings" });
   await expect(settings.getByRole("heading", { name: "Exam rules" })).toBeVisible();
   const editor = settings.getByRole("textbox", { name: /^Edit .*\.xrule$/ });
-  if (!(await editor.isVisible()))
+  if (!(await settings.getByRole("button", { name: "JSON", exact: true }).isVisible()))
     await settings.getByRole("button", { name: `Edit ${title}` }).click();
+  await settings.getByRole("button", { name: "JSON", exact: true }).click();
   await editor.fill(text);
   await settings.getByRole("button", { name: "Save", exact: true }).click();
   await settings.getByRole("button", { name: "Done", exact: true }).click();
@@ -166,7 +174,7 @@ test("rules from a folder above apply to a paper; edits apply until the first at
   // One attempt, failed: the paper is spent.
   await page.getByRole("button", { name: "Start exam", exact: true }).click();
   await sitExam(page, false);
-  await page.getByRole("button", { name: "Back to paper" }).click();
+  await page.getByRole("button", { name: "Back to paper" }).first().click();
   await expect(page.getByText(/No attempts left on this paper/)).toBeVisible();
   await expect(page.getByRole("region", { name: "Attempts" })).toContainText("Not passed");
   // The unchanged paper is refused: a retake must be a new, harder paper.
@@ -394,6 +402,7 @@ test("Create ▸ Exam makes a paper tagged with a chosen ruleset; rulesets are k
     "Used by 1 exam",
   );
   // A broken edit says what is wrong before it is saved.
+  await settings.getByRole("button", { name: "JSON", exact: true }).click();
   const editor = settings.getByRole("textbox", { name: "Edit Quick quiz.xrule" });
   await editor.fill(rules({ passMark: 50 }));
   await expect(settings.getByRole("alert")).toContainText("passMark");
@@ -408,4 +417,101 @@ test("Create ▸ Exam makes a paper tagged with a chosen ruleset; rulesets are k
   await page.getByLabel("Ruleset").selectOption("gate.xrule");
   await page.getByRole("button", { name: "Use these rules" }).click();
   await expect(page.getByText("60% to pass")).toBeVisible();
+});
+
+test("a GATE mock from the Settings template runs by TCS iON rules: an answer counts only once saved", async ({
+  page,
+}) => {
+  await examWorkspace(page);
+  const gateQuestion = (id: string, section: string, body: string) =>
+    `:::question{#${id} type=mcq marks=1 section=${section}}\n${body}\n\n- Right\n- Wrong\n- Other\n- None\n:::\n\n:::solution{#${id} answer=A}\nWhy ${id}.\n:::`;
+  await upload(page, [
+    file(
+      "mock.xam",
+      `---\nrules: GATE mock.xrule\n---\n\n${gateQuestion("ga1", "GA", "First?")}\n\n${gateQuestion("s1", "subject", "Second?")}\n\n${gateQuestion("s2", "subject", "Third?")}\n`,
+    ),
+  ]);
+
+  // Settings ▸ Exam rules makes the GATE ruleset in one step.
+  await page.getByRole("button", { name: "Settings" }).first().click();
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("tab", { name: "Exam rules" }).click();
+  await settings.getByRole("button", { name: "start from GATE" }).click();
+  await expect(settings.getByRole("radio", { name: "GATE" })).toBeChecked();
+  await expect(settings.getByLabel("New ruleset name")).toHaveValue("GATE mock");
+  await expect(settings.getByText(/Tag each question section=GA or section=subject/)).toBeVisible();
+  await page.screenshot({ path: "test-results/exam-gate-template.png" });
+  await settings.getByRole("button", { name: "Create", exact: true }).click();
+  // The full pattern reads cleanly; a three-question mock lowers the count and time.
+  await expect(settings.locator('[data-ruleset="GATE mock.xrule"]')).toContainText("3h");
+  await settings.getByRole("button", { name: "JSON", exact: true }).click();
+  const editor = settings.getByRole("textbox", { name: "Edit GATE mock.xrule" });
+  const text = await editor.inputValue();
+  await editor.fill(
+    text
+      .replace('"questionCount": 65', '"questionCount": 3')
+      .replace('"durationMinutes": 180', '"durationMinutes": 9'),
+  );
+  await settings.getByRole("button", { name: "Save", exact: true }).click();
+  await settings.getByRole("button", { name: "Done", exact: true }).click();
+
+  await open(page, "mock");
+  await expect(page.getByText("Marking from exam structure")).toBeVisible();
+  await page.getByRole("button", { name: "Start exam", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Answering a question" })).toBeVisible();
+  await expect(page.getByText(/Choosing an answer doesn't save it/)).toBeVisible();
+  await page.getByRole("checkbox", { name: "I have read and acknowledge" }).check();
+  await page.getByRole("button", { name: "Start exam", exact: true }).click();
+
+  // Choosing isn't saving: leaving from the palette drops the choice.
+  await page.getByRole("radio", { name: /Right/ }).check();
+  await expect(page.locator(".xr-notice-slot")).toContainText(
+    "Not saved. Save & next keeps this answer",
+  );
+  const sections = page.getByRole("navigation", { name: "Sections" });
+  await sections.getByRole("button", { name: "Subject" }).click();
+  await sections.getByRole("button", { name: "General Aptitude" }).click();
+  await expect(page.getByRole("radio", { name: /Right/ })).not.toBeChecked();
+  await expect(page.getByRole("button", { name: "Question 1: not answered" })).toBeVisible();
+
+  // Save & next keeps it. Clicking a chosen option again deselects it.
+  await page.getByRole("radio", { name: /Right/ }).check();
+  await page.getByRole("button", { name: "Save & next" }).click();
+  await expect(page.getByRole("button", { name: "Question 2: not answered" })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  await page.getByRole("radio", { name: /Wrong/ }).check();
+  await page.getByRole("radio", { name: /Wrong/ }).click();
+  await expect(page.getByRole("radio", { name: /Wrong/ })).not.toBeChecked();
+  await page.getByRole("radio", { name: /Wrong/ }).check();
+  await page.getByRole("button", { name: "Mark for review & next" }).click();
+
+  // The question paper lists every question, read-only.
+  await page.getByRole("button", { name: "Question paper" }).first().click();
+  const paperDialog = page.getByRole("dialog", { name: "Question paper" });
+  await expect(paperDialog.getByText("Third?")).toBeVisible();
+  await paperDialog.getByRole("button", { name: "Back to the exam" }).click();
+
+  // The last question still needs Save & next; an unsaved choice is called out at submit.
+  await page.getByRole("radio", { name: /Right/ }).check();
+  await page.getByRole("button", { name: "Submit exam", exact: true }).first().click();
+  const submit = page.getByRole("dialog", { name: "Submit exam?" });
+  await expect(submit.getByText(/isn't saved, so it won't be counted/)).toBeVisible();
+  await expect(
+    submit.getByRole("columnheader", { name: "Answered & marked (counted)" }),
+  ).toBeVisible();
+  await page.screenshot({ path: "test-results/exam-gate-submit.png" });
+  await submit.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Save & next" }).click();
+  await page.getByRole("button", { name: "Submit exam", exact: true }).first().click();
+  await expect(submit.getByText(/isn't saved/)).toHaveCount(0);
+  await submit.getByRole("button", { name: "Submit exam" }).click();
+
+  // Q1 right (+1), Q2 wrong and marked but counted (−1/3), Q3 right (+1).
+  await expect(page.getByText("1.67 / 3 marks")).toBeVisible();
+  await expect(sidebar(page)).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Questions by outcome" })).toBeVisible();
+  await expect(page.getByText("Why s1.")).toBeVisible();
+  await page.screenshot({ path: "test-results/exam-gate-result.png", fullPage: true });
 });

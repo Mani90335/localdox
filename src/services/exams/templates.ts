@@ -22,6 +22,35 @@ export function xruleTemplate(name: string): string {
   )}\n`;
 }
 
+/**
+ * A GATE ruleset: the built-in GATE preset (sections, marking, keypad,
+ * calculator, Save & Next), with its paper-level facts spelled out so they
+ * are visible and easy to change for a shorter mock.
+ */
+export function gateXruleTemplate(name: string): string {
+  return `${JSON.stringify(
+    {
+      xrule: 1,
+      name: name.trim() || "GATE mock",
+      summary: [
+        "GATE pattern: 65 questions, 100 marks, 3 hours.",
+        "",
+        "- **General Aptitude**: 10 questions (5 of 1 mark, 5 of 2 marks).",
+        "- **Subject**: 55 questions (25 of 1 mark, 30 of 2 marks).",
+        "- A wrong MCQ costs a third of its marks. MSQ and NAT answers are never penalised, and an MSQ scores only when every correct option is chosen.",
+        "- An answer counts only once it is saved with **Save & next** or **Mark for review & next**.",
+      ].join("\n"),
+      preset: "gate",
+      durationMinutes: 180,
+      questionCount: 65,
+      passPercentage: 25,
+      maxAttempts: 3,
+    },
+    null,
+    2,
+  )}\n`;
+}
+
 /** Rulesets Settings ▸ Exam rules can start from. */
 export function practiceXruleTemplate(name: string): string {
   return `${JSON.stringify(
@@ -41,6 +70,7 @@ export function practiceXruleTemplate(name: string): string {
 
 export const RULES_TEMPLATES = {
   default: xruleTemplate,
+  gate: gateXruleTemplate,
   practice: practiceXruleTemplate,
 } as const;
 export type RulesTemplate = keyof typeof RULES_TEMPLATES;

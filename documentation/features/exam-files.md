@@ -103,6 +103,8 @@ Outside Exam Workspaces a `.xam` previews its questions and options without keys
 
 Rulesets aren't listed in the sidebar; Settings ▸ Exam rules lists and edits them, and a paper's rules link opens them there. Files in the Bin don't count.
 
+**A GATE ruleset in one step.** Settings ▸ Exam rules ▸ **New ruleset** offers two starting points: the default rules, or **GATE** (`gateXruleTemplate`): `preset: "gate"` with the paper-level facts written out (65 questions, 180 minutes, 25% to pass, 3 attempts) so they are visible and easy to change. The preset brings the rest: General Aptitude and Subject sections with their 1- and 2-mark composition, −1/3 for a wrong MCQ, no penalty or partial credit for MSQ, the NAT keypad, the scientific calculator, the GATE palette and Save & next (`navigation.requireSave`). A full paper tags each question `section=GA` or `section=subject`; an untagged one is reported with the tags to use. For a shorter mock, lower `questionCount` and `durationMinutes`: sections then come from the questions present, and the GATE marking still applies.
+
 **Progress belongs to the paper file.** Each `.xam` has one record (a study plan, keyed by the file's id via `paperPlanId`), so renaming or moving it keeps its attempts. The record fingerprints the paper and rules text it was built from, and `syncPaperPlan` compares that with the files every time the paper opens:
 
 - **Unchanged:** nothing happens.
@@ -149,4 +151,5 @@ open bayes.xp (any workspace)
 - _"Edited since your first attempt"_: expected; see pinning.
 - _An `.xp` answer disappeared after an edit_: its question or key changed, so the old verdict no longer applies.
 - _"Opening exam storage…" never finishes_: another tab or pane has a paper from this workspace open.
+- _A GATE paper says "Expected 65 exam questions"_: the GATE template is the full pattern; lower `questionCount` (and `durationMinutes`) for a shorter mock.
 - Tests: `tests/exam-files.test.ts`, `tests/exam-setup.test.ts` (formats), `tests/practice-files.test.ts` (`.xp`), `tests/exam-paper-plan.test.ts` (rules lookup, sync, pinning), `tests/e2e/exam-files.spec.ts` and `tests/e2e/practice-files.spec.ts` (both flows end to end, phone included).

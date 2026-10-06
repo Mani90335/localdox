@@ -154,6 +154,7 @@ for (const width of [320, 390, 768, 1440]) {
       "Equations",
       "Ask AI",
       "Workspace",
+      "Exam rules",
       "Storage",
     ]) {
       await dialog.getByRole("tab", { name, exact: true }).click();
@@ -163,6 +164,10 @@ for (const width of [320, 390, 768, 1440]) {
         await panel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
       ).toBe(true);
       await expect(dialog.getByRole("button", { name: "Done", exact: true })).toBeInViewport();
+      if (width === 1440)
+        await page.screenshot({
+          path: `test-results/settings-section-${name.toLowerCase().replaceAll(" ", "-")}.png`,
+        });
     }
     expect(
       await dialog.evaluate((element) => {
@@ -183,3 +188,53 @@ for (const width of [320, 390, 768, 1440]) {
     await expect(dialog).toBeHidden();
   });
 }
+
+test("rulesets expose primary and nested advanced controls and reject invalid values", async ({
+  page,
+}) => {
+  await page.goto("/settings");
+  const dialog = settings(page);
+  await dialog.getByRole("tab", { name: "Exam rules", exact: true }).click();
+  await dialog.getByRole("button", { name: "New ruleset", exact: true }).click();
+  await dialog.getByLabel("New ruleset name").fill("Custom quiz");
+  await dialog.getByRole("button", { name: "Create", exact: true }).click();
+  await dialog.getByRole("spinbutton", { name: "Duration (minutes)", exact: true }).fill("45");
+  await dialog.getByRole("spinbutton", { name: "Pass mark (%)", exact: true }).fill("101");
+  await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await dialog.getByRole("spinbutton", { name: "Pass mark (%)", exact: true }).fill("75");
+  await dialog.locator("summary").filter({ hasText: "Advanced" }).click();
+  await dialog.getByRole("button", { name: "Customize all exam rules", exact: true }).click();
+  await dialog
+    .getByRole("checkbox", { name: "Full exam rules · Navigation · Require save", exact: true })
+    .check();
+  await dialog
+    .getByRole("combobox", { name: "Full exam rules · Tools · Calculator", exact: true })
+    .selectOption("scientific");
+  await dialog.getByRole("button", { name: "JSON", exact: true }).click();
+  const json = JSON.parse(
+    await dialog.getByRole("textbox", { name: "Edit Custom quiz.xrule", exact: true }).inputValue(),
+  );
+  expect(json).toMatchObject({
+    durationMinutes: 45,
+    passPercentage: 75,
+    rules: { navigation: { requireSave: true }, tools: { calculator: "scientific" } },
+  });
+  expect(json.mcqPenalty).toBeUndefined();
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await dialog.getByRole("button", { name: "Edit Custom quiz", exact: true }).click();
+  await expect(
+    dialog.getByRole("spinbutton", { name: "Duration (minutes)", exact: true }),
+  ).toHaveValue("45");
+  await expect(dialog.locator("details")).not.toHaveAttribute("open");
+  await dialog.getByRole("spinbutton", { name: "Duration (minutes)", exact: true }).fill("20");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByRole("spinbutton", { name: "Duration (minutes)", exact: true }),
+  ).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Edit Custom quiz", exact: true }).click();
+  await expect(
+    dialog.getByRole("spinbutton", { name: "Duration (minutes)", exact: true }),
+  ).toHaveValue("45");
+  await page.screenshot({ path: "test-results/settings-ruleset-form.png" });
+});
