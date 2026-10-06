@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronRight,
+  SlidersHorizontal,
   Columns2,
   FileText,
   Folder,
@@ -20,6 +21,7 @@ import { isOutsideMenu, MenuFlyout, MenuItem, MenuPanel, MenuSeparator } from ".
 
 export function FileMenu({
   onEdit,
+  onConfigure,
   onConvert,
   conversionDisabled,
   hasMarkdownCopy,
@@ -41,6 +43,7 @@ export function FileMenu({
   alreadyInSplit?: boolean;
   /** Open this document in the editor. Absent for non-editable file types. */
   onEdit?: () => void;
+  onConfigure?: () => void;
   onConvert?: () => void;
   conversionDisabled?: boolean;
   hasMarkdownCopy?: boolean;
@@ -133,6 +136,7 @@ export function FileMenu({
       {open && (
         <MenuPanel>
           {/* Working on the document itself. */}
+          {onConfigure && <MenuItem icon={SlidersHorizontal} label="Configure" onClick={e => { e.stopPropagation(); setOpen(false); onConfigure(); }} />}
           {onEdit && (
             <MenuItem
               icon={SquarePen}

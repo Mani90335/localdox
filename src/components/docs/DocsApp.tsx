@@ -117,6 +117,8 @@ const SettingsPage = lazy(() =>
   import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
 
+const FileConfigurationDialog = lazy(() => import("./workspace/FileConfigurationDialog").then(m => ({ default: m.FileConfigurationDialog })));
+
 /** The settings section a caller asked for, handed over the route change that
  *  opens the dialog. DocsApp is the route component, so it remounts on the way
  *  to /settings and nothing held inside it survives to be read at mount. */
@@ -158,7 +160,7 @@ import {
   xruleTemplate,
   type RulesTemplate,
 } from "@/services/exams/templates";
-import { isRulesFile, rulesetTitle, withRulesTag } from "@/services/exams/rules-tag";
+import { isRulesFile, rulesTag, rulesetTitle, withRulesTag } from "@/services/exams/rules-tag";
 import { ExamWorkspaceContext, type ExamWorkspace } from "./viewer/ExamWorkspaceContext";
 import { clearArtifactResolutionCache } from "@/lib/workspace/workspace-artifacts";
 import { IMPORT_QUEUE, runBounded } from "@/lib/workspace/import-queue";
@@ -431,6 +433,7 @@ export function DocsApp({ initialExamWorkspace = false }: { initialExamWorkspace
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
   const [scrollTarget, setScrollTarget] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [configuringFileId, setConfiguringFileId] = useState<string | null>(null);
   const drawerOpenerRef = useRef<HTMLElement | null>(null);
   const drawerContentRef = useRef<HTMLDivElement | null>(null);
   const openDrawer = useCallback(() => {
@@ -4501,7 +4504,8 @@ flowchart LR
         ? {
             workspaceId,
             examEnabled: kind === "exam",
-            paused: showSettings,
+            paused: showSettings || configuringFileId !== null,
+            configureFile: setConfiguringFileId,
             files,
             folders,
             openFile: navToFile,
@@ -4509,8 +4513,21 @@ flowchart LR
             addTextFile,
           }
         : null,
-    [kind, workspaceId, showSettings, files, folders, navToFile, openRulesSettings, addTextFile],
+    [kind, workspaceId, showSettings, configuringFileId, files, folders, navToFile, openRulesSettings, addTextFile],
   );
+
+  const configuringFile = files.find(f => f.id === configuringFileId && !f.deletedAt);
+  const configurationDialog = configuringFile ? <LazyBoundary>
+    <FileConfigurationDialog key={configuringFile.id} file={configuringFile} files={files}
+      onClose={() => setConfiguringFileId(null)} onSave={(draft, sourceId) => {
+        const source = files.find(f => f.id === sourceId && !f.deletedAt);
+        const usedElsewhere = source && files.some(f => !f.deletedAt && f.id !== configuringFile.id && rulesTag(f.content) === source.name);
+        const target = source && !usedElsewhere ? source : addTextFile(`${configuringFile.name.replace(/\.[^.]+$/, "")}.xrule`, draft, null);
+        if (source && !usedElsewhere) handleContentChange(source.id, draft);
+        handleContentChange(configuringFile.id, withRulesTag(configuringFile.content, target.name));
+        setConfiguringFileId(null);
+      }} />
+  </LazyBoundary> : null;
 
   if (booting) {
     return <div className="min-h-dvh bg-background">{statusBanner}</div>;
@@ -5181,6 +5198,7 @@ flowchart LR
             )}
 
             {settingsDialog}
+            {configurationDialog}
             {moveDialog}
             {binDialog}
             {newExamDialog}

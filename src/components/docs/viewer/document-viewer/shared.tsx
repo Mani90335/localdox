@@ -114,6 +114,7 @@ export function ViewerFrame({
   action,
   navAction,
   editing = false,
+  minimal = false,
 }: {
   file?: MdFile;
   embedded?: boolean;
@@ -121,6 +122,7 @@ export function ViewerFrame({
   action?: React.ReactNode;
   /** The viewer is in its editor; the header's pencil has nothing to start. */
   editing?: boolean;
+  minimal?: boolean;
   navAction?: React.ReactNode;
   icon?: React.ReactNode;
 } & Pick<Props, "prevFile" | "nextFile" | "onNavFile" | "onOpenPalette">) {
@@ -128,7 +130,7 @@ export function ViewerFrame({
   if (embedded) return <>{children}</>;
   return (
     <section className="min-h-[calc(100dvh-var(--app-chrome-h))] bg-background">
-      <ViewerHeader
+      {(!minimal || editing) && <ViewerHeader
         navAction={navAction}
         actions={
           // Exporting lives in the sidebar row's ⋮ ▸ Export, with every
@@ -142,7 +144,7 @@ export function ViewerFrame({
             action
           )
         }
-      />
+      />}
       {children}
     </section>
   );

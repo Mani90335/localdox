@@ -1,5 +1,5 @@
 import { embedMediaFolderIds } from "@/lib/workspace/embed-media";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { isEditableTarget, hasModKey } from "@/lib/platform/keyboard";
 import {
   ChevronDown,
@@ -36,6 +36,7 @@ import { canConvertToMarkdown, latestMarkdownCopies } from "@/services/doc-conve
 import { kindIcon, kindMeta } from "./sidebar/file-glyphs";
 import { isOutsideMenu, MenuItem, MenuPanel } from "./sidebar/menu-primitives";
 import { GroupActionMenu } from "./sidebar/GroupActionMenu";
+import { ExamWorkspaceContext } from "../viewer/ExamWorkspaceContext";
 import { FileMenu } from "./sidebar/FileMenu";
 import { AddMenu } from "./sidebar/AddMenu";
 import { isRulesFile } from "@/services/exams/rules-tag";
@@ -262,6 +263,7 @@ function SidebarImpl({
   onToggleSidebar,
   search = null,
 }: Props) {
+  const studyWorkspace = useContext(ExamWorkspaceContext);
   const hiddenFolders = useMemo(
     () => (showEmbedMedia ? new Set<string>() : embedMediaFolderIds(allFolders)),
     [showEmbedMedia, allFolders],
@@ -973,6 +975,7 @@ function SidebarImpl({
           </button>
           {!selecting ? (
             <FileMenu
+              onConfigure={studyWorkspace && (kind === "practice" || kind === "exam") ? () => studyWorkspace.configureFile(file.id) : undefined}
               // The file types with an editor behind them. A PDF or a
               // spreadsheet has no edit mode to enter, so the item is absent
               // rather than present and inert.
